@@ -181,6 +181,7 @@ import {
   pullRequestCandidateUrlFromReferenceAutolink,
   useOpenChangeRequestLink,
 } from "~/lib/openPullRequestLink";
+import { useOpenIssueLink } from "~/lib/openIssueLink";
 import { useOpenLink } from "../browser/useOpenLink";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isPreviewSupportedInRuntime } from "../previewStateStore";
@@ -2391,6 +2392,7 @@ function useChatMarkdownState({
     );
   }, []);
   const openChangeRequestLink = useOpenChangeRequestLink(threadRef, pullRequestPanelRef);
+  const openIssueLink = useOpenIssueLink(threadRef, pullRequestPanelRef);
   const openDeferredMarkdownLink = useOpenLink(threadRef);
   // Subscribed rather than read at click time: the anchor has to decide
   // synchronously whether to intercept its `_blank`, and a subscription is what
@@ -2633,6 +2635,7 @@ function useChatMarkdownState({
       onTaskListChange,
       onUseArtifactTemplate,
       openChangeRequestLink,
+      openIssueLink,
       openDeferredMarkdownLink,
       openExternalLinkInPreview,
       openMarkdownMedia,
@@ -2662,6 +2665,7 @@ function useChatMarkdownState({
       onTaskListChange,
       onUseArtifactTemplate,
       openChangeRequestLink,
+      openIssueLink,
       openDeferredMarkdownLink,
       openExternalLinkInPreview,
       openMarkdownMedia,
@@ -2806,6 +2810,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       threadRef,
       openMarkdownMedia,
       openChangeRequestLink,
+      openIssueLink,
       openDeferredMarkdownLink,
       linkTargetPreference,
       openExternalLinkInPreview,
@@ -2915,10 +2920,10 @@ const CHAT_MARKDOWN_COMPONENTS = {
             // A link to a change request in a workspace project opens beside the
             // conversation instead of in a browser: it is the thing being talked about, and
             // the panel it opens offers the browser as one of its actions.
-            if (
-              !href ||
-              openChangeRequestLink(event, href, undefined, environmentId ?? undefined)
-            ) {
+            if (!href || openIssueLink(event, href, environmentId ?? undefined)) {
+              return;
+            }
+            if (openChangeRequestLink(event, href, undefined, environmentId ?? undefined)) {
               return;
             }
             // Anything else follows the "Open links in" setting. The system browser

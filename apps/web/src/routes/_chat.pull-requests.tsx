@@ -1944,10 +1944,10 @@ function PullRequestsRouteView() {
           <RightPanelTabs
             mode="inline"
             open={rightPanelState.isOpen}
-            widthStorageKey="t3code:pull-request-panel-width"
-            // Default to roughly half the viewport: the PR list needs more
+            widthStorageKey="t3code:work-item-panel-width"
+            // Default to roughly half the viewport: work-item lists need more
             // room than a chat, so the 540px chat-preview default squashes
-            // it. SSR has no window, so fall back to a reasonable width.
+            // them. SSR has no window, so fall back to a reasonable width.
             defaultWidth={typeof window === "undefined" ? 640 : Math.floor(window.innerWidth / 2)}
             surfaces={renderedRightPanelSurfaces}
             environmentId={panelEnvironmentId}

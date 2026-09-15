@@ -399,11 +399,12 @@ export function resolveLiveThreadBranchUpdate(input: {
     return null;
   }
 
+  const branchPrefix = input.threadBranch?.split("/", 1)[0];
   if (
     input.threadBranch !== null &&
     input.gitStatus.refName !== null &&
-    !isTemporaryWorktreeBranch(input.threadBranch) &&
-    isTemporaryWorktreeBranch(input.gitStatus.refName)
+    !isTemporaryWorktreeBranch(input.threadBranch, branchPrefix) &&
+    isTemporaryWorktreeBranch(input.gitStatus.refName, branchPrefix)
   ) {
     return null;
   }

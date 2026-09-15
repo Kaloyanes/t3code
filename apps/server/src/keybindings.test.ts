@@ -188,6 +188,47 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
+  it.effect("migrates the previous new-thread defaults without touching custom bindings", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
+        { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
+        { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
+        { key: "mod+g", command: "script.custom-action.run" },
+      ]);
+
+      const keybindings = yield* Keybindings.Keybindings;
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.isTrue(
+        persisted.some(
+          (entry) =>
+            entry.key === "mod+n" &&
+            entry.command === "chat.newLocal" &&
+            entry.when === "!terminalFocus",
+        ),
+      );
+      assert.isTrue(
+        persisted.some(
+          (entry) =>
+            entry.key === "mod+shift+n" &&
+            entry.command === "chat.new" &&
+            entry.when === "!terminalFocus",
+        ),
+      );
+      assert.isFalse(
+        persisted.some((entry) => entry.key === "mod+shift+o" && entry.command === "chat.new"),
+      );
+      assert.isTrue(
+        persisted.some(
+          (entry) => entry.key === "mod+g" && entry.command === "script.custom-action.run",
+        ),
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
   it.effect("uses defaults in runtime when config is malformed without overriding file", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

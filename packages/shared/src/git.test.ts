@@ -150,6 +150,28 @@ describe("isTemporaryWorktreeBranch", () => {
     expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/DEADBEEF`)).toBe(true);
   });
 
+  it("uses a configured prefix when generating a temporary worktree ref", () => {
+    expect(
+      buildTemporaryWorktreeBranchName((byteLength) => {
+        expect(byteLength).toBe(4);
+        return "A1B2C3D4";
+      }, "team.alpha"),
+    ).toBe("team.alpha/a1b2c3d4");
+  });
+
+  it("recognizes a configured prefix and legacy default refs together", () => {
+    expect(isTemporaryWorktreeBranch("team.alpha/a1b2c3d4", "team.alpha")).toBe(true);
+    expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/deadbeef`, "team.alpha")).toBe(
+      true,
+    );
+    expect(
+      isTemporaryWorktreeBranch(
+        `${WORKTREE_BRANCH_PREFIX}/f4ae4e0e-f971-4d48-b4f2-9cf0aa54ab12`,
+        "team.alpha",
+      ),
+    ).toBe(true);
+    expect(isTemporaryWorktreeBranch("team.alpha/a1b2c3d4")).toBe(false);
+  });
   it("normalizes a UUID-shaped random callback to the canonical 8-hex form", () => {
     expect(buildTemporaryWorktreeBranchName(() => "f4ae4e0e-f971-4d48-b4f2-9cf0aa54ab12")).toBe(
       `${WORKTREE_BRANCH_PREFIX}/f4ae4e0e`,

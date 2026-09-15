@@ -14,8 +14,7 @@ import {
   resolveBranchToolbarValue,
   resolveLockedWorkspaceLabel,
   resolveLocalCheckoutBranchMismatch,
-  resolvePreviousWorktreeLabel,
-  resolvePreviousWorktreeSeed,
+  resolveExistingWorktreeOptions,
   sanitizeNewRefName,
   shouldIncludeBranchPickerItem,
   shouldShowComposerContextStrip,
@@ -25,88 +24,54 @@ import {
 const localEnvironmentId = EnvironmentId.make("environment-local");
 const remoteEnvironmentId = EnvironmentId.make("environment-remote");
 
-describe("resolvePreviousWorktreeSeed", () => {
-  it("picks the most recently updated worktree thread", () => {
+describe("resolveExistingWorktreeOptions", () => {
+  it("uses live Git worktrees and preserves the project's repository-relative directory", () => {
     expect(
-      resolvePreviousWorktreeSeed({
-        threads: [
+      resolveExistingWorktreeOptions({
+        workspaceRoot: "/Users/kaloyanes/orca/workspaces/termisio/email-integration/apps/dashboard",
+        repositoryRoot: "/Users/kaloyanes/orca/workspaces/termisio/email-integration",
+        refs: [
           {
-            branch: "t3/older",
-            worktreePath: "/repo/.t3/worktrees/older",
-            updatedAt: "2026-07-20T00:00:00.000Z",
+            name: "email-integration",
+            worktreePath: "/Users/kaloyanes/orca/workspaces/termisio/email-integration",
           },
           {
-            branch: "t3/newer",
-            worktreePath: "/repo/.t3/worktrees/newer",
-            updatedAt: "2026-07-22T00:00:00.000Z",
+            name: "expense-calendar",
+            worktreePath: "/Users/kaloyanes/orca/workspaces/termisio/expense-calendar",
           },
-          { branch: "main", worktreePath: null, updatedAt: "2026-07-23T00:00:00.000Z" },
-        ],
-        currentWorktreePath: null,
-      }),
-    ).toEqual({ branch: "t3/newer", worktreePath: "/repo/.t3/worktrees/newer" });
-  });
-
-  it("skips the worktree the composer already points at", () => {
-    expect(
-      resolvePreviousWorktreeSeed({
-        threads: [
           {
-            branch: "t3/current",
-            worktreePath: "/repo/.t3/worktrees/current",
-            updatedAt: "2026-07-22T00:00:00.000Z",
+            name: "stale-thread-only",
+            worktreePath: null,
           },
         ],
-        currentWorktreePath: "/repo/.t3/worktrees/current",
       }),
-    ).toBeNull();
+    ).toEqual([
+      {
+        branch: "expense-calendar",
+        label: "expense-calendar",
+        worktreePath: "/Users/kaloyanes/orca/workspaces/termisio/expense-calendar/apps/dashboard",
+      },
+    ]);
   });
 
-  it("returns null when no thread has a worktree", () => {
+  it("deduplicates worktree paths and supports Windows project roots", () => {
     expect(
-      resolvePreviousWorktreeSeed({
-        threads: [{ branch: "main", worktreePath: null, updatedAt: "2026-07-22T00:00:00.000Z" }],
-        currentWorktreePath: null,
-      }),
-    ).toBeNull();
-  });
-
-  it("ignores archived threads and threads with unparseable timestamps", () => {
-    expect(
-      resolvePreviousWorktreeSeed({
-        threads: [
-          {
-            branch: "t3/archived",
-            worktreePath: "/repo/.t3/worktrees/archived",
-            updatedAt: "2026-07-23T00:00:00.000Z",
-            archivedAt: "2026-07-23T01:00:00.000Z",
-          },
-          {
-            branch: "t3/garbage-timestamp",
-            worktreePath: "/repo/.t3/worktrees/garbage",
-            updatedAt: "not-a-date",
-          },
-          {
-            branch: "t3/live",
-            worktreePath: "/repo/.t3/worktrees/live",
-            updatedAt: "2026-07-21T00:00:00.000Z",
-            archivedAt: null,
-          },
+      resolveExistingWorktreeOptions({
+        workspaceRoot: "C:\\workspaces\\email\\apps\\dashboard",
+        repositoryRoot: "C:\\workspaces\\email",
+        refs: [
+          { name: "email", worktreePath: "C:\\workspaces\\email" },
+          { name: "feature/email", worktreePath: "C:\\worktrees\\email-feature" },
+          { name: "duplicate", worktreePath: "C:\\worktrees\\email-feature" },
         ],
-        currentWorktreePath: null,
       }),
-    ).toEqual({ branch: "t3/live", worktreePath: "/repo/.t3/worktrees/live" });
-  });
-});
-
-describe("resolvePreviousWorktreeLabel", () => {
-  it("includes the branch when known", () => {
-    expect(resolvePreviousWorktreeLabel({ branch: "t3/fix-thing", worktreePath: "/wt" })).toBe(
-      "Previous worktree (t3/fix-thing)",
-    );
-    expect(resolvePreviousWorktreeLabel({ branch: null, worktreePath: "/wt" })).toBe(
-      "Previous worktree",
-    );
+    ).toEqual([
+      {
+        branch: "feature/email",
+        label: "feature/email",
+        worktreePath: "C:\\worktrees\\email-feature\\apps\\dashboard",
+      },
+    ]);
   });
 });
 
@@ -499,11 +464,14 @@ describe("resolveEnvModeLabel", () => {
 });
 
 describe("resolveCurrentWorkspaceLabel", () => {
-  it("describes the main repo checkout when no worktree path is active", () => {
-    expect(resolveCurrentWorkspaceLabel(null)).toBe("Current checkout");
+  it("identifies the branch checked out by an external workspace", () => {
+    expect(resolveCurrentWorkspaceLabel(null, "email-integration")).toBe(
+      "Current checkout (email-integration)",
+    );
   });
 
-  it("describes the active checkout as a worktree when one is attached", () => {
+  it("keeps the generic labels when branch metadata is unavailable", () => {
+    expect(resolveCurrentWorkspaceLabel(null)).toBe("Current checkout");
     expect(resolveCurrentWorkspaceLabel("/repo/.t3/worktrees/feature-a")).toBe("Current worktree");
   });
 });

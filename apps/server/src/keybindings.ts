@@ -104,6 +104,41 @@ function isSameKeybindingRule(left: KeybindingRule, right: KeybindingRule): bool
   );
 }
 
+const LEGACY_NEW_THREAD_DEFAULTS: ReadonlyArray<KeybindingRule> = [
+  { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
+  { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
+  { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
+];
+
+function migrateLegacyNewThreadDefaults(rules: readonly KeybindingRule[]): {
+  readonly rules: readonly KeybindingRule[];
+  readonly migrated: boolean;
+} {
+  if (
+    !LEGACY_NEW_THREAD_DEFAULTS.every((legacyRule) =>
+      rules.some((rule) => isSameKeybindingRule(rule, legacyRule)),
+    )
+  ) {
+    return { rules, migrated: false };
+  }
+
+  const firstLegacyIndex = rules.findIndex((rule) =>
+    LEGACY_NEW_THREAD_DEFAULTS.some((legacyRule) => isSameKeybindingRule(rule, legacyRule)),
+  );
+  const nextRules = rules.filter(
+    (rule) =>
+      !LEGACY_NEW_THREAD_DEFAULTS.some((legacyRule) => isSameKeybindingRule(rule, legacyRule)),
+  );
+  nextRules.splice(
+    firstLegacyIndex,
+    0,
+    ...DEFAULT_KEYBINDINGS.filter(
+      (rule) => rule.command === "chat.new" || rule.command === "chat.newLocal",
+    ),
+  );
+  return { rules: nextRules, migrated: true };
+}
+
 function keybindingShortcutContext(rule: KeybindingRule): string | null {
   const parsed = parseKeybindingShortcut(rule.key);
   if (!parsed) return null;
@@ -488,7 +523,8 @@ const make = Effect.gen(function* () {
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }
-      const customConfig = runtimeConfig.keybindings;
+      const migratedConfig = migrateLegacyNewThreadDefaults(runtimeConfig.keybindings);
+      const customConfig = migratedConfig.rules;
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{
@@ -526,6 +562,9 @@ const make = Effect.gen(function* () {
         });
       }
       if (missingDefaults.length === 0) {
+        if (migratedConfig.migrated) {
+          yield* writeConfigAtomically(customConfig);
+        }
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }
@@ -555,6 +594,9 @@ const make = Effect.gen(function* () {
         });
       }
       if (defaultsToAppend.length === 0) {
+        if (migratedConfig.migrated) {
+          yield* writeConfigAtomically(customConfig);
+        }
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }

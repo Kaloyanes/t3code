@@ -131,6 +131,50 @@ import {
   PullRequestUpdateInput,
 } from "./pullRequest.ts";
 import {
+  IssueAuthCancelInput,
+  IssueAuthCancelResult,
+  IssueAuthStartInput,
+  IssueAuthStartResult,
+  IssueAuthStatus,
+  IssueAuthStatusInput,
+  IssueCandidatesInput,
+  IssueCandidatesResult,
+  IssueCloseInput,
+  IssueCloseResult,
+  IssueCommentCreateInput,
+  IssueCommentCreateResult,
+  IssueCommentDeleteInput,
+  IssueCommentUpdateInput,
+  IssueCommentUpdateResult,
+  IssueCommentsInput,
+  IssueCommentsResult,
+  IssueCreateInput,
+  IssueCreateResult,
+  IssueDetail,
+  IssueInvalidateInput,
+  IssueLinkInput,
+  IssueLinkResult,
+  IssueListInput,
+  IssueListResult,
+  IssueRpcError,
+  IssueReactionUpdateInput,
+  IssueRef,
+  IssueReopenInput,
+  IssueReopenResult,
+  IssueTemplatesInput,
+  IssueTemplatesResult,
+  IssueUpdateInput,
+  IssueUpdateResult,
+  IssueWorktreeDeleteInput,
+  IssueWorktreeDeletePreflightInput,
+  IssueWorktreeDeletePreflightResult,
+  IssueWorktreeDeleteResult,
+  IssueWorktreePrepareInput,
+  IssueWorktreePrepareResult,
+  IssueWorktreeReplaceInput,
+  IssueWorktreeReplaceResult,
+} from "./issue.ts";
+import {
   RelayClientInstallFailedError,
   RelayClientInstallProgressEventSchema,
   RelayClientStatusSchema,
@@ -348,6 +392,29 @@ export const WS_METHODS = {
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverRemoveKeybinding: "server.removeKeybinding",
   serverGetSettings: "server.getSettings",
+  // Issue methods
+  issuesList: "issues.list",
+  issuesDetail: "issues.detail",
+  issuesComments: "issues.comments",
+  issuesCandidates: "issues.candidates",
+  issuesTemplates: "issues.templates",
+  issuesCreate: "issues.create",
+  issuesUpdate: "issues.update",
+  issuesCommentCreate: "issues.comment.create",
+  issuesCommentUpdate: "issues.comment.update",
+  issuesCommentDelete: "issues.comment.delete",
+  issuesReactionUpdate: "issues.reaction.update",
+  issuesClose: "issues.close",
+  issuesReopen: "issues.reopen",
+  issuesInvalidate: "issues.invalidate",
+  issuesLink: "issues.link",
+  issuesWorktreePrepare: "issues.worktree.prepare",
+  issuesWorktreeDeletePreflight: "issues.worktree.deletePreflight",
+  issuesWorktreeDelete: "issues.worktree.delete",
+  issuesWorktreeReplace: "issues.worktree.replace",
+  issuesAuthStatus: "issues.auth.status",
+  issuesAuthStart: "issues.auth.start",
+  issuesAuthCancel: "issues.auth.cancel",
   serverUpdateSettings: "server.updateSettings",
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverGetTraceDiagnostics: "server.getTraceDiagnostics",
@@ -803,6 +870,140 @@ const WsPullRequestsSetLabelsRpc = Rpc.make(WS_METHODS.pullRequestsSetLabels, {
   payload: PullRequestLabelChangeInput,
   success: Schema.Void,
   error: PullRequestRpcError,
+});
+
+const IssueRpcErrorWithAuthorization = Schema.Union([IssueRpcError, EnvironmentAuthorizationError]);
+
+const WsIssuesListRpc = Rpc.make(WS_METHODS.issuesList, {
+  payload: IssueListInput,
+  success: IssueListResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesDetailRpc = Rpc.make(WS_METHODS.issuesDetail, {
+  payload: IssueRef,
+  success: IssueDetail,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesCommentsRpc = Rpc.make(WS_METHODS.issuesComments, {
+  payload: IssueCommentsInput,
+  success: IssueCommentsResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesCandidatesRpc = Rpc.make(WS_METHODS.issuesCandidates, {
+  payload: IssueCandidatesInput,
+  success: IssueCandidatesResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesTemplatesRpc = Rpc.make(WS_METHODS.issuesTemplates, {
+  payload: IssueTemplatesInput,
+  success: IssueTemplatesResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesCreateRpc = Rpc.make(WS_METHODS.issuesCreate, {
+  payload: IssueCreateInput,
+  success: IssueCreateResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesUpdateRpc = Rpc.make(WS_METHODS.issuesUpdate, {
+  payload: IssueUpdateInput,
+  success: IssueUpdateResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesCommentCreateRpc = Rpc.make(WS_METHODS.issuesCommentCreate, {
+  payload: IssueCommentCreateInput,
+  success: IssueCommentCreateResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesCommentUpdateRpc = Rpc.make(WS_METHODS.issuesCommentUpdate, {
+  payload: IssueCommentUpdateInput,
+  success: IssueCommentUpdateResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesCommentDeleteRpc = Rpc.make(WS_METHODS.issuesCommentDelete, {
+  payload: IssueCommentDeleteInput,
+  success: Schema.Void,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesReactionUpdateRpc = Rpc.make(WS_METHODS.issuesReactionUpdate, {
+  payload: IssueReactionUpdateInput,
+  success: Schema.Void,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesCloseRpc = Rpc.make(WS_METHODS.issuesClose, {
+  payload: IssueCloseInput,
+  success: IssueCloseResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesReopenRpc = Rpc.make(WS_METHODS.issuesReopen, {
+  payload: IssueReopenInput,
+  success: IssueReopenResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesInvalidateRpc = Rpc.make(WS_METHODS.issuesInvalidate, {
+  payload: IssueInvalidateInput,
+  success: Schema.Void,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesLinkRpc = Rpc.make(WS_METHODS.issuesLink, {
+  payload: IssueLinkInput,
+  success: IssueLinkResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesWorktreePrepareRpc = Rpc.make(WS_METHODS.issuesWorktreePrepare, {
+  payload: IssueWorktreePrepareInput,
+  success: IssueWorktreePrepareResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesWorktreeDeletePreflightRpc = Rpc.make(WS_METHODS.issuesWorktreeDeletePreflight, {
+  payload: IssueWorktreeDeletePreflightInput,
+  success: IssueWorktreeDeletePreflightResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesWorktreeDeleteRpc = Rpc.make(WS_METHODS.issuesWorktreeDelete, {
+  payload: IssueWorktreeDeleteInput,
+  success: IssueWorktreeDeleteResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesWorktreeReplaceRpc = Rpc.make(WS_METHODS.issuesWorktreeReplace, {
+  payload: IssueWorktreeReplaceInput,
+  success: IssueWorktreeReplaceResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesAuthStatusRpc = Rpc.make(WS_METHODS.issuesAuthStatus, {
+  payload: IssueAuthStatusInput,
+  success: IssueAuthStatus,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesAuthStartRpc = Rpc.make(WS_METHODS.issuesAuthStart, {
+  payload: IssueAuthStartInput,
+  success: IssueAuthStartResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesAuthCancelRpc = Rpc.make(WS_METHODS.issuesAuthCancel, {
+  payload: IssueAuthCancelInput,
+  success: IssueAuthCancelResult,
+  error: IssueRpcErrorWithAuthorization,
 });
 
 const WsSourceControlLookupRepositoryRpc = Rpc.make(WS_METHODS.sourceControlLookupRepository, {
@@ -1336,6 +1537,28 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsRequestReviewersRpc,
   WsPullRequestsLabelCandidatesRpc,
   WsPullRequestsSetLabelsRpc,
+  WsIssuesListRpc,
+  WsIssuesDetailRpc,
+  WsIssuesCommentsRpc,
+  WsIssuesCandidatesRpc,
+  WsIssuesTemplatesRpc,
+  WsIssuesCreateRpc,
+  WsIssuesUpdateRpc,
+  WsIssuesCommentCreateRpc,
+  WsIssuesCommentUpdateRpc,
+  WsIssuesCommentDeleteRpc,
+  WsIssuesReactionUpdateRpc,
+  WsIssuesCloseRpc,
+  WsIssuesReopenRpc,
+  WsIssuesInvalidateRpc,
+  WsIssuesLinkRpc,
+  WsIssuesWorktreePrepareRpc,
+  WsIssuesWorktreeDeletePreflightRpc,
+  WsIssuesWorktreeDeleteRpc,
+  WsIssuesWorktreeReplaceRpc,
+  WsIssuesAuthStatusRpc,
+  WsIssuesAuthStartRpc,
+  WsIssuesAuthCancelRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,

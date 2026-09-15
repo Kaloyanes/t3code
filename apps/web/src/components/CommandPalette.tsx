@@ -42,6 +42,7 @@ import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
+  CircleDotIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderIcon,
@@ -1642,6 +1643,29 @@ function OpenCommandPaletteDialog(props: {
   ]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+  actionItems.push({
+    kind: "action",
+    value: "action:open-issues",
+    searchTerms: ["issues", "github issues", "bug", "ticket", "repository issue"],
+    title: "Open Issues",
+    icon: <CircleDotIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({
+        to: "/issues",
+        search: {
+          state: "open",
+          ...(currentProjectId
+            ? {
+                projectId: currentProjectId,
+                ...(currentProjectEnvironmentId
+                  ? { environmentId: currentProjectEnvironmentId }
+                  : {}),
+              }
+            : {}),
+        },
+      });
+    },
+  });
 
   if (projects.length > 0) {
     const activeProjectTitle =
@@ -1659,7 +1683,7 @@ function OpenCommandPaletteDialog(props: {
           </>
         ),
         icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
-        shortcutCommand: "chat.new",
+        shortcutCommand: "chat.newLocal",
         run: async () => {
           await startNewThreadFromContext({
             activeDraftThread,

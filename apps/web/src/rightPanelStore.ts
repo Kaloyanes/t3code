@@ -27,6 +27,7 @@ const RIGHT_PANEL_KINDS = [
   "device",
   "terminal",
   "pull-request",
+  "issue",
   "pull-requests",
   "agents",
 ] as const;
@@ -83,6 +84,17 @@ export type RightPanelSurface =
       number: number;
       url?: string;
     }
+  | {
+      /** A GitHub issue opened beside a thread or in the issues list's shared panel. */
+      id: `issue:${string}`;
+      kind: "issue";
+      environmentId?: string;
+      projectId: string;
+      host?: string;
+      repository: string;
+      number: number;
+      url?: string;
+    }
   /** The thread's linked pull requests, one singleton tab beside any number of `pull-request` tabs. */
   | { id: "pull-requests"; kind: "pull-requests" }
   | { id: "agents"; kind: "agents" };
@@ -92,7 +104,8 @@ const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 // v10 keys pull-request surfaces by reference instead of a singleton tab.
 // v11 stops persisting the pull-request list's shared panel, so a restart opens the page fresh.
 // v12 adds the device surface.
-const RIGHT_PANEL_STORAGE_VERSION = 13;
+// v13 adds issue surfaces.
+const RIGHT_PANEL_STORAGE_VERSION = 14;
 
 /** A fixed workspace-level ref: each PR surface carries its own real environment. */
 export const PULL_REQUESTS_PANEL_REF = scopeThreadRef(
@@ -100,9 +113,15 @@ export const PULL_REQUESTS_PANEL_REF = scopeThreadRef(
   ThreadId.make("pull-requests-panel"),
 );
 
+/** A fixed workspace-level ref for the issues list's shared detail panel. */
+export const ISSUES_PANEL_REF = scopeThreadRef(
+  EnvironmentId.make("issues-panel"),
+  ThreadId.make("issues-panel"),
+);
+
 /**
- * The pull-request list's shared panel is session
- * state: reopening the app should show the list, not last session's tabs and detail fetches.
+ * The pull-request list's shared panel is session state: reopening the app
+ * should show the list, not last session's tabs and detail fetches.
  */
 const isPullRequestsPanelKey = (threadKey: string) => threadKey.endsWith(":pull-requests-panel");
 
@@ -113,6 +132,11 @@ export interface ThreadRightPanelState {
   dismissedDeviceSurfaceIds?: string[];
 }
 
+const EMPTY_THREAD_STATE: ThreadRightPanelState = {
+  isOpen: false,
+  activeSurfaceId: null,
+  surfaces: [],
+};
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
   /** Session-only count of user panel choices per thread. Automatic updates do not advance it. */
@@ -129,7 +153,7 @@ interface RightPanelStoreState {
   ) => boolean;
   open: (
     ref: ScopedThreadRef,
-    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request">,
+    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "issue">,
   ) => void;
   openDevice: (ref: ScopedThreadRef, target: DeviceTabTarget, automatic?: boolean) => void;
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
@@ -137,6 +161,17 @@ interface RightPanelStoreState {
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
   openAttachment: (ref: ScopedThreadRef, attachment: ChatFileAttachment) => void;
   openPullRequest: (
+    ref: ScopedThreadRef,
+    target: {
+      environmentId?: string;
+      projectId: string;
+      host?: string;
+      repository: string;
+      number: number;
+      url?: string;
+    },
+  ) => void;
+  openIssue: (
     ref: ScopedThreadRef,
     target: {
       environmentId?: string;
@@ -168,19 +203,12 @@ interface RightPanelStoreState {
   toggleVisibility: (ref: ScopedThreadRef) => void;
   toggle: (
     ref: ScopedThreadRef,
-    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request">,
+    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "issue">,
   ) => void;
   removeThread: (ref: ScopedThreadRef) => void;
 }
-
-const EMPTY_THREAD_STATE: ThreadRightPanelState = {
-  isOpen: false,
-  activeSurfaceId: null,
-  surfaces: [],
-};
-
 const singletonSurface = (
-  kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "pull-request">,
+  kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "pull-request" | "issue">,
 ): RightPanelSurface => {
   switch (kind) {
     case "diff":
@@ -258,6 +286,40 @@ export function pullRequestSurface(target: {
   return {
     id: pullRequestSurfaceId(target),
     kind: "pull-request",
+    ...(target.environmentId === undefined ? {} : { environmentId: target.environmentId }),
+    projectId: target.projectId,
+    ...(typeof target.host === "string" ? { host: target.host.toLowerCase() } : {}),
+    repository: target.repository,
+    number: target.number,
+    ...(typeof target.url === "string" ? { url: target.url } : {}),
+  };
+}
+export type IssueSurface = Extract<RightPanelSurface, { kind: "issue" }>;
+
+export function issueSurfaceId(target: {
+  environmentId?: string;
+  projectId: string;
+  host?: string;
+  repository: string;
+  number: number;
+}): IssueSurface["id"] {
+  const scope =
+    target.environmentId === undefined ? "" : `${encodeURIComponent(target.environmentId)}:`;
+  const host = target.host === undefined ? "" : `${encodeURIComponent(target.host.toLowerCase())}:`;
+  return `issue:${scope}${encodeURIComponent(target.projectId)}:${host}${encodeURIComponent(target.repository)}:${target.number}`;
+}
+
+export function issueSurface(target: {
+  environmentId?: string;
+  projectId: string;
+  host?: string;
+  repository: string;
+  number: number;
+  url?: string;
+}): IssueSurface {
+  return {
+    id: issueSurfaceId(target),
+    kind: "issue",
     ...(target.environmentId === undefined ? {} : { environmentId: target.environmentId }),
     projectId: target.projectId,
     ...(typeof target.host === "string" ? { host: target.host.toLowerCase() } : {}),
@@ -563,6 +625,21 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => {
             const surface = pullRequestSurface(target);
+            const next = upsertSurface(current, surface);
+            return target.url
+              ? {
+                  ...next,
+                  surfaces: next.surfaces.map((entry) =>
+                    entry.id === surface.id ? surface : entry,
+                  ),
+                }
+              : next;
+          }),
+        ),
+      openIssue: (ref, target) =>
+        set((state) =>
+          userAction(state, scopedThreadKey(ref), (current) => {
+            const surface = issueSurface(target);
             const next = upsertSurface(current, surface);
             return target.url
               ? {

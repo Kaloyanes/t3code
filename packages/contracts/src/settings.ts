@@ -476,6 +476,19 @@ export const DEFAULT_CLIENT_SETTINGS: ClientSettings = Schema.decodeSync(ClientS
 
 // ── Server Settings (server-authoritative) ────────────────────
 
+/**
+ * One Git-safe path component used as the leading component of generated
+ * temporary worktree branches.
+ *
+ * The shape intentionally follows Git's refname component rules while keeping
+ * the setting narrow enough to safely interpolate into a branch path.
+ */
+export const WorktreeBranchPrefix = TrimmedString.check(
+  Schema.isPattern(/^(?!.*\.\.)(?!.*\.lock$)[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$/),
+);
+export type WorktreeBranchPrefix = typeof WorktreeBranchPrefix.Type;
+export const DEFAULT_WORKTREE_BRANCH_PREFIX: WorktreeBranchPrefix = "t3code";
+
 const UsageModelTokenPrice = Schema.Number.check(
   Schema.isFinite(),
   Schema.isGreaterThanOrEqualTo(0),
@@ -1116,6 +1129,9 @@ export const ServerSettings = Schema.Struct({
   newWorktreesStartFromOrigin: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
+  worktreeBranchPrefix: WorktreeBranchPrefix.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_WORKTREE_BRANCH_PREFIX)),
+  ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
@@ -1381,6 +1397,7 @@ export const ServerSettingsPatch = Schema.Struct({
   environmentIcon: Schema.optionalKey(Schema.NullOr(EnvironmentMachineKind)),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
+  worktreeBranchPrefix: Schema.optionalKey(WorktreeBranchPrefix),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   sourceControlWritingStyle: Schema.optionalKey(

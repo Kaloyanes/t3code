@@ -1,6 +1,7 @@
 import {
   ArrowLeftIcon,
   ChartNoAxesColumnIcon,
+  CircleDotIcon,
   GitPullRequestIcon,
   SettingsIcon,
 } from "lucide-react";
@@ -11,6 +12,7 @@ import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-ro
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
+import { useHandleNewThread } from "../../hooks/useHandleNewThread";
 import { T3Wordmark } from "../T3Wordmark";
 import {
   resolveEnvironmentIdentificationPillLabel,
@@ -145,11 +147,16 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             ? "usage"
             : location.pathname === "/pull-requests"
               ? "pull-requests"
-              : null,
+              : location.pathname === "/issues"
+                ? "issues"
+                : null,
   });
   const { environments } = useEnvironments();
-  // The page reads every connected server, so one of them offering pull requests is enough for
-  // the link to lead somewhere.
+  const { activeDraftThread, activeThread } = useHandleNewThread();
+  const activeIssueContext = activeThread ?? activeDraftThread;
+  const issuesSupported = environments.some(
+    (environment) => environment.serverConfig?.environment.capabilities.issues === true,
+  );
   const pullRequestsSupported = environments.some(
     (environment) => environment.serverConfig?.environment.capabilities.pullRequests === true,
   );
@@ -158,6 +165,21 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
       setOpenMobile(false);
     }
   }, [isMobile, setOpenMobile]);
+  const handleIssuesClick = useCallback(() => {
+    closeMobileSidebar();
+    void navigate({
+      to: "/issues",
+      search: {
+        state: "open",
+        ...(activeIssueContext?.projectId
+          ? {
+              projectId: activeIssueContext.projectId,
+              environmentId: activeIssueContext.environmentId,
+            }
+          : {}),
+      },
+    });
+  }, [activeIssueContext, closeMobileSidebar, navigate]);
   const handlePullRequestsClick = useCallback(() => {
     closeMobileSidebar();
     void navigate({
@@ -197,11 +219,13 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
         </SidebarMenuItem>
       ) : (
         <>
-          <SidebarUtilityItem
-            icon={<SettingsIcon />}
-            label="Settings"
-            onClick={handleSettingsClick}
-          />
+          {issuesSupported ? (
+            <SidebarUtilityItem
+              icon={<CircleDotIcon />}
+              label="Issues"
+              onClick={handleIssuesClick}
+            />
+          ) : null}
           {pullRequestsSupported ? (
             <SidebarUtilityItem
               icon={<GitPullRequestIcon />}
@@ -213,6 +237,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             icon={<ChartNoAxesColumnIcon />}
             label="Usage"
             onClick={handleUsageClick}
+          />
+          <SidebarUtilityItem
+            icon={<SettingsIcon />}
+            label="Settings"
+            onClick={handleSettingsClick}
           />
         </>
       )}

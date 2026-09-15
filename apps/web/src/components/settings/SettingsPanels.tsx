@@ -70,6 +70,7 @@ import {
   useTheme,
 } from "../../hooks/useTheme";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
+import { DEFAULT_SIDEBAR_LAYOUT, useSidebarLayoutPreference } from "../../sidebarLayoutPreference";
 import {
   useScopedSettings,
   useScopedSettingsMixed,
@@ -1068,6 +1069,7 @@ export function AppearanceSettingsPanel() {
   } = useTheme();
   const customThemes = useCustomThemes();
   const [isImportThemeOpen, setIsImportThemeOpen] = useState(false);
+  const [sidebarLayout, setSidebarLayout] = useSidebarLayoutPreference();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   const environmentStageLabel = useEnvironmentStageLabel();
@@ -1115,6 +1117,44 @@ export function AppearanceSettingsPanel() {
       </SettingsSection>
 
       <SettingsSection id="appearance-interface" title="Interface">
+        <SettingsRow
+          {...searchableSetting("sidebar-layout")}
+          description={
+            settings.legacySidebarEnabled
+              ? "Switch off the legacy sidebar to choose the modern thread layout."
+              : "Show threads as one list or group active work by repository and worktree."
+          }
+          resetAction={
+            sidebarLayout !== DEFAULT_SIDEBAR_LAYOUT ? (
+              <SettingResetButton
+                label="sidebar layout"
+                onClick={() => setSidebarLayout(DEFAULT_SIDEBAR_LAYOUT)}
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={sidebarLayout}
+              disabled={settings.legacySidebarEnabled}
+              onValueChange={(value) => {
+                if (value === "flat" || value === "grouped") setSidebarLayout(value);
+              }}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Sidebar layout">
+                <SelectValue>{sidebarLayout === "grouped" ? "Grouped" : "Flat"}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="flat">
+                  Flat
+                </SelectItem>
+                <SelectItem hideIndicator value="grouped">
+                  Grouped
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
         <SettingsRow
           {...searchableSetting("setting-appearance-contrast")}
           description="Adjust the contrast of colors and borders across the interface."

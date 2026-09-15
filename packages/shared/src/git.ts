@@ -1,23 +1,26 @@
-import type {
-  VcsRef,
-  SourceControlProviderInfo,
-  VcsStatusLocalResult,
-  VcsStatusRemoteResult,
-  VcsStatusResult,
-  VcsStatusStreamEvent,
+import {
+  DEFAULT_WORKTREE_BRANCH_PREFIX,
+  type VcsRef,
+  type SourceControlProviderInfo,
+  type VcsStatusLocalResult,
+  type VcsStatusRemoteResult,
+  type VcsStatusResult,
+  type VcsStatusStreamEvent,
+  type WorktreeBranchPrefix,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { detectSourceControlProviderFromRemoteUrl } from "./sourceControl.ts";
 
-export const WORKTREE_BRANCH_PREFIX = "t3code";
-// Canonical form is `t3code/<8 hex>`. Older mobile builds generated `t3code/<uuid>`
-// via Crypto.randomUUID() (always RFC 4122 v4), so the matcher also accepts exactly
-// that shape — version nibble `4`, variant nibble `[89ab]` — to keep those threads
-// eligible for branch regeneration without loosening beyond what was ever generated.
-const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(
-  `^${WORKTREE_BRANCH_PREFIX}\\/(?:[0-9a-f]{8}|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$`,
-);
+// Kept for existing server-side consumers; the canonical default lives in contracts.
+export const WORKTREE_BRANCH_PREFIX = DEFAULT_WORKTREE_BRANCH_PREFIX;
+
+// Canonical form is `<prefix>/<8 hex>`. Older mobile builds generated
+// `t3code/<uuid>` via Crypto.randomUUID() (always RFC 4122 v4), so the
+// default prefix matcher retains exactly that legacy shape.
+const TEMP_WORKTREE_TOKEN_PATTERN = /^[0-9a-f]{8}$/;
+const LEGACY_TEMP_WORKTREE_TOKEN_PATTERN =
+  /^(?:[0-9a-f]{8}|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/;
 
 /**
  * Sanitize an arbitrary string into a valid, lowercase git refName fragment.
@@ -94,6 +97,7 @@ export function deriveLocalBranchNameFromRemoteRef(branchName: string): string {
 
 export function buildTemporaryWorktreeBranchName(
   randomHex: (byteLength: number) => string,
+  prefix: WorktreeBranchPrefix = DEFAULT_WORKTREE_BRANCH_PREFIX,
 ): string {
   // Normalize to exactly 8 lowercase hex chars so a UUID-shaped callback
   // still produces the canonical temporary branch form.
@@ -101,11 +105,28 @@ export function buildTemporaryWorktreeBranchName(
     .toLowerCase()
     .replace(/[^0-9a-f]/g, "")
     .slice(0, 8);
-  return `${WORKTREE_BRANCH_PREFIX}/${token}`;
+  return `${prefix}/${token}`;
 }
 
-export function isTemporaryWorktreeBranch(refName: string): boolean {
-  return TEMP_WORKTREE_BRANCH_PATTERN.test(refName.trim().toLowerCase());
+export function isTemporaryWorktreeBranch(
+  refName: string,
+  prefix: string = DEFAULT_WORKTREE_BRANCH_PREFIX,
+): boolean {
+  const normalizedRefName = refName.trim().toLowerCase();
+  const separatorIndex = normalizedRefName.indexOf("/");
+  if (separatorIndex <= 0 || separatorIndex !== normalizedRefName.lastIndexOf("/")) {
+    return false;
+  }
+
+  const branchPrefix = normalizedRefName.slice(0, separatorIndex);
+  const token = normalizedRefName.slice(separatorIndex + 1);
+  const normalizedPrefix = prefix.trim().toLowerCase();
+  const isCurrentPrefix = branchPrefix === normalizedPrefix;
+
+  if (branchPrefix === DEFAULT_WORKTREE_BRANCH_PREFIX) {
+    return LEGACY_TEMP_WORKTREE_TOKEN_PATTERN.test(token);
+  }
+  return isCurrentPrefix && TEMP_WORKTREE_TOKEN_PATTERN.test(token);
 }
 
 /**

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_WORKTREE_BRANCH_PREFIX,
   type ChatAttachment,
   CommandId,
   EventId,
@@ -14,7 +15,7 @@ import {
 } from "@t3tools/contracts";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
-import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
+import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
@@ -29,6 +30,7 @@ import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
@@ -296,16 +298,22 @@ function stalePendingRequestDetail(
   return `Stale pending ${requestKind} request: ${requestId}. Provider callback state does not survive app restarts or recovered sessions. Restart the turn to continue.`;
 }
 
-function buildGeneratedWorktreeBranchName(raw: string): string {
+function buildGeneratedWorktreeBranchName(
+  raw: string,
+  prefix: string = DEFAULT_WORKTREE_BRANCH_PREFIX,
+): string {
   const normalized = raw
     .trim()
     .toLowerCase()
     .replace(/^refs\/heads\//, "")
     .replace(/['"`]/g, "");
-
-  const withoutPrefix = normalized.startsWith(`${WORKTREE_BRANCH_PREFIX}/`)
-    ? normalized.slice(`${WORKTREE_BRANCH_PREFIX}/`.length)
-    : normalized;
+  const normalizedPrefix = prefix.toLowerCase();
+  const defaultPrefix = DEFAULT_WORKTREE_BRANCH_PREFIX.toLowerCase();
+  const withoutPrefix = normalized.startsWith(`${normalizedPrefix}/`)
+    ? normalized.slice(normalizedPrefix.length + 1)
+    : normalized.startsWith(`${defaultPrefix}/`)
+      ? normalized.slice(defaultPrefix.length + 1)
+      : normalized;
 
   const branchFragment = withoutPrefix
     .replace(/[^a-z0-9/_-]+/g, "-")
@@ -316,7 +324,7 @@ function buildGeneratedWorktreeBranchName(raw: string): string {
     .replace(/[./_-]+$/g, "");
 
   const safeFragment = branchFragment.length > 0 ? branchFragment : "update";
-  return `${WORKTREE_BRANCH_PREFIX}/${safeFragment}`;
+  return `${prefix}/${safeFragment}`;
 }
 
 const make = Effect.gen(function* () {
@@ -327,6 +335,14 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const providerRegistry = yield* ProviderRegistry;
   const gitWorkflow = yield* GitWorkflowService;
+  const sql = yield* SqlClient.SqlClient;
+  const hasDetachedIssueWorkspace = (threadId: ThreadId) =>
+    sql<{ readonly threadId: string }>`
+      SELECT thread_id AS "threadId"
+      FROM projection_issue_detached_workspaces
+      WHERE thread_id = ${threadId}
+      LIMIT 1
+    `.pipe(Effect.map((rows) => rows.length > 0));
   const fileSystem = yield* FileSystem.FileSystem;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
@@ -684,6 +700,14 @@ const make = Effect.gen(function* () {
       providerService
         .listSessions()
         .pipe(Effect.map((sessions) => sessions.find((session) => session.threadId === threadId)));
+    if (yield* hasDetachedIssueWorkspace(thread.id)) {
+      return yield* new ProviderAdapterRequestError({
+        provider: "github-issues",
+        method: "thread.turn.start",
+        detail:
+          "This issue thread no longer has a workspace. Replace the issue worktree before starting another turn.",
+      });
+    }
 
     const activeSession = yield* resolveActiveSession(threadId);
     const activeThreadSession =
@@ -1000,7 +1024,8 @@ const make = Effect.gen(function* () {
     if (!input.branch || !input.worktreePath) {
       return;
     }
-    if (!isTemporaryWorktreeBranch(input.branch)) {
+    const settings = yield* serverSettingsService.getSettings;
+    if (!isTemporaryWorktreeBranch(input.branch, settings.worktreeBranchPrefix)) {
       return;
     }
 
@@ -1008,12 +1033,12 @@ const make = Effect.gen(function* () {
     const cwd = input.worktreePath;
     const attachments = input.attachments ?? [];
     yield* Effect.gen(function* () {
-      const settings = yield* projectSettingsForThread(input.threadId);
+      const projectSettings = yield* projectSettingsForThread(input.threadId);
       const modelSelection =
-        settings.sourceControlWriterModelSelection === null
-          ? settings.textGenerationModelSelection
+        projectSettings.sourceControlWriterModelSelection === null
+          ? projectSettings.textGenerationModelSelection
           : resolveSourceControlWriterModelSelection(
-              settings,
+              projectSettings,
               yield* providerRegistry.getProviders,
             );
 
@@ -1025,7 +1050,10 @@ const make = Effect.gen(function* () {
       });
       if (!generated) return;
 
-      const targetBranch = buildGeneratedWorktreeBranchName(generated.branch);
+      const targetBranch = buildGeneratedWorktreeBranchName(
+        generated.branch,
+        settings.worktreeBranchPrefix,
+      );
       if (targetBranch === oldBranch) return;
 
       const renamed = yield* gitWorkflow.renameBranch({ cwd, oldBranch, newBranch: targetBranch });
@@ -1287,6 +1315,19 @@ const make = Effect.gen(function* () {
 
     const thread = yield* resolveThreadShell(event.payload.threadId);
     if (!thread) {
+      return;
+    }
+    if (yield* hasDetachedIssueWorkspace(thread.id)) {
+      yield* appendProviderFailureActivity({
+        threadId: thread.id,
+        kind: "provider.turn.start.failed",
+        summary: "Provider turn start blocked",
+        detail:
+          "This issue thread no longer has a workspace. Replace the issue worktree before starting another turn.",
+        turnId: null,
+        createdAt: event.payload.createdAt,
+        requestId: event.payload.messageId,
+      });
       return;
     }
     const turnStart = yield* projectionSnapshotQuery.getTurnStartMessage({

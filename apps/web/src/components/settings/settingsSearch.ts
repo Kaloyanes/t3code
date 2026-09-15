@@ -135,6 +135,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "appearance",
   },
   {
+    id: "sidebar-layout",
+    title: "Sidebar layout",
+    to: "/settings/appearance",
+    searchTerms: ["flat grouped repository worktree threads navigation"],
+  },
+  {
     // Prefixed because the slider control already owns the `appearance-contrast` id.
     id: "setting-appearance-contrast",
     title: "Contrast",
@@ -560,6 +566,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/source-control",
     scope: "project-defaults",
     searchTerms: ["pull request merge squash rebase last selected"],
+  },
+  {
+    id: "worktree-branch-prefix",
+    title: "Worktree branch prefix",
+    to: "/settings/source-control",
+    environmentOnly: true,
+    scope: "environment-defaults",
+    searchTerms: ["git branch namespace generated new worktree custom name"],
   },
   {
     id: "source-control",
