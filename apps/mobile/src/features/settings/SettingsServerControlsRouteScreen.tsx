@@ -2,6 +2,7 @@ import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollVie
 import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
 import {
+  type ModelSelection,
   type ResponseStreamingMode,
   type ServerSettings,
   type ServerSettingsPatch,
@@ -9,11 +10,17 @@ import {
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   type ProjectScopedServerSettingKey,
 } from "@t3tools/contracts";
+import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
 import { useRef, useState, type ComponentProps } from "react";
 import { Alert, Platform, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { RUNTIME_MODE_CHOICES } from "../threads/thread-settings-options";
+import { selectableChoices } from "../threads/thread-settings-options";
+import {
+  applyProviderOptionSelection,
+  resolveProviderOptionDescriptors,
+} from "../../lib/providerOptions";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { SettingsScreen } from "./components/SettingsScreen";
@@ -43,7 +50,7 @@ const PAGE_TITLES: Record<SettingsPage, string> = {
 };
 
 const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettingKey[]> = {
-  "new-threads": ["defaultThreadEnvMode", "defaultRuntimeMode"],
+  "new-threads": ["defaultThreadEnvMode", "defaultRuntimeMode", "promptEnhancementModelSelection"],
   "source-control": ["defaultAutoPull", "newWorktreesStartFromOrigin"],
   "agent-behavior": ["responseStreamingMode", "enableAgentBrowserAccess"],
   maintenance: ["continueThreadsAfterServerUpdate"],
@@ -180,6 +187,25 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
       !PROJECT_SCOPED_SERVER_SETTING_KEYS.includes(
         key as (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number],
       ));
+  const promptSetting = uniform("promptEnhancementModelSelection");
+  const promptModelSelection: ModelSelection | null =
+    promptSetting ?? reference?.settings.textGenerationModelSelection ?? null;
+  const promptProviders =
+    reference?.environment.serverConfig?.providers.filter(
+      (provider) =>
+        provider.enabled && provider.installed && provider.supportsTextGeneration !== false,
+    ) ?? [];
+  const promptModel = promptProviders
+    .find((provider) => provider.instanceId === promptModelSelection?.instanceId)
+    ?.models.find((model) => model.slug === promptModelSelection?.model);
+  const promptDescriptors = resolveProviderOptionDescriptors({
+    capabilities: promptModel?.capabilities,
+    selections: promptModelSelection?.options,
+  }).filter((descriptor) => descriptor.type === "select");
+  const supportsPromptEnhancement = targets.every(
+    (target) =>
+      target.environment.serverConfig?.environment.capabilities.promptEnhancement === true,
+  );
 
   return (
     <>
@@ -256,6 +282,79 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                       />
                     ))}
                   </SettingsSection>
+                  <SettingsSection title="Prompt enhancement model">
+                    <ChoiceRow
+                      label="Use text generation model"
+                      description="Follow the model selected for generated text."
+                      selected={promptSetting === null}
+                      separated={false}
+                      disabled={
+                        disabledFor("promptEnhancementModelSelection") || !supportsPromptEnhancement
+                      }
+                      onPress={() => write({ promptEnhancementModelSelection: null })}
+                    />
+                    {promptProviders.flatMap((provider) =>
+                      provider.models
+                        .filter((model) => !model.isLegacy)
+                        .map((model) => (
+                          <ChoiceRow
+                            key={`${provider.instanceId}:${model.slug}`}
+                            label={model.name}
+                            description={provider.displayName ?? provider.driver}
+                            selected={
+                              promptSetting !== null &&
+                              promptSetting?.instanceId === provider.instanceId &&
+                              promptSetting.model === model.slug
+                            }
+                            separated
+                            disabled={
+                              disabledFor("promptEnhancementModelSelection") ||
+                              !supportsPromptEnhancement
+                            }
+                            onPress={() =>
+                              write({
+                                promptEnhancementModelSelection: {
+                                  instanceId: provider.instanceId,
+                                  model: model.slug,
+                                },
+                              })
+                            }
+                          />
+                        )),
+                    )}
+                  </SettingsSection>
+                  {promptSetting !== null && promptDescriptors.length > 0 ? (
+                    <SettingsSection title="Prompt enhancement effort">
+                      {promptDescriptors.flatMap((descriptor) =>
+                        descriptor.type === "select"
+                          ? selectableChoices(descriptor).map((choice, index) => (
+                              <ChoiceRow
+                                key={`${descriptor.id}:${choice.id}`}
+                                label={choice.label}
+                                description={descriptor.label}
+                                selected={choice.id === getProviderOptionCurrentValue(descriptor)}
+                                separated={index > 0}
+                                disabled={disabledFor("promptEnhancementModelSelection")}
+                                onPress={() => {
+                                  if (!promptModelSelection) return;
+                                  const options = applyProviderOptionSelection(promptDescriptors, {
+                                    id: descriptor.id,
+                                    value: choice.id,
+                                  });
+                                  if (!options) return;
+                                  write({
+                                    promptEnhancementModelSelection: {
+                                      ...promptModelSelection,
+                                      options,
+                                    },
+                                  });
+                                }}
+                              />
+                            ))
+                          : [],
+                      )}
+                    </SettingsSection>
+                  ) : null}
                 </>
               ) : null}
 

@@ -116,6 +116,32 @@ describe("splitSharedServerPatch", () => {
       defaultThreadEnvMode: "worktree",
     });
   });
+
+  it("shares prompt enhancement only with capable servers and enabled providers", () => {
+    const selection = {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5.6-sol",
+    };
+    const patch = { promptEnhancementModelSelection: selection };
+    expect(
+      filterSharedServerPatch(patch, { promptEnhancement: true }, DEFAULT_SERVER_SETTINGS),
+    ).toEqual(patch);
+    expect(filterSharedServerPatch(patch, {}, DEFAULT_SERVER_SETTINGS)).toEqual({});
+    expect(
+      filterSharedServerPatch(
+        { promptEnhancementModelSelection: null },
+        { promptEnhancement: true },
+        DEFAULT_SERVER_SETTINGS,
+        { ...DEFAULT_SERVER_SETTINGS, promptEnhancementModelSelection: selection },
+      ),
+    ).toEqual({ promptEnhancementModelSelection: null });
+    expect(
+      pickSharedServerSettings(
+        { ...DEFAULT_SERVER_SETTINGS, promptEnhancementModelSelection: selection },
+        { promptEnhancement: true },
+      ),
+    ).toMatchObject(patch);
+  });
 });
 
 describe("pickSharedServerSettings", () => {

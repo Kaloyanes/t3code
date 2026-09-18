@@ -314,6 +314,11 @@ import {
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
+import {
+  PromptEnhancementError,
+  PromptEnhancementInput,
+  PromptEnhancementResult,
+} from "./promptEnhancement.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -349,6 +354,7 @@ export const WS_METHODS = {
   providerInstallCancel: "provider.install.cancel",
   providerInstallSubscribe: "provider.install.subscribe",
   providerInstallRemove: "provider.install.remove",
+  promptEnhance: "prompt.enhance",
 
   // VCS methods
   vcsPull: "vcs.pull",
@@ -641,6 +647,12 @@ const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
   payload: Schema.Struct({}),
   success: ServerSettings,
   error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
+});
+
+const WsPromptEnhanceRpc = Rpc.make(WS_METHODS.promptEnhance, {
+  payload: PromptEnhancementInput,
+  success: PromptEnhancementResult,
+  error: Schema.Union([PromptEnhancementError, EnvironmentAuthorizationError]),
 });
 
 const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSettings, {
@@ -1595,6 +1607,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerUpsertKeybindingRpc,
   WsServerRemoveKeybindingRpc,
   WsServerGetSettingsRpc,
+  WsPromptEnhanceRpc,
   WsServerUpdateSettingsRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,

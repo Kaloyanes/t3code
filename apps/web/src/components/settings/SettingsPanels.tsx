@@ -2170,6 +2170,11 @@ export function GeneralSettingsPanel() {
     connectedEnvironments.every(
       (target) => target.serverConfig?.environment.capabilities.threadRestartContinuation === true,
     );
+  const supportsPromptEnhancement =
+    connectedEnvironments.length > 0 &&
+    connectedEnvironments.every(
+      (target) => target.serverConfig?.environment.capabilities.promptEnhancement === true,
+    );
 
   const textGenerationProviders = serverProviders.filter(
     (provider) => provider.supportsTextGeneration !== false,
@@ -2212,6 +2217,26 @@ export function GeneralSettingsPanel() {
   const mixedBackgroundActivity = useScopedSettingsMixed(["backgroundActivity"]);
   const mixedAddProjectBaseDirectory = useScopedSettingsMixed(["addProjectBaseDirectory"]);
   const mixedTextGenerationModel = useScopedSettingsMixed(["textGenerationModelSelection"]);
+  const mixedPromptEnhancementModel = useScopedSettingsMixed(["promptEnhancementModelSelection"]);
+  const promptEnhancementModelSelection = resolveAppModelSelectionState(
+    {
+      ...settings,
+      textGenerationModelSelection:
+        settings.promptEnhancementModelSelection ?? settings.textGenerationModelSelection,
+    },
+    textGenerationProviders,
+  );
+  const promptEnhancementInstanceEntry = textGenerationModelInstanceEntries.find(
+    (entry) => entry.instanceId === promptEnhancementModelSelection.instanceId,
+  );
+  const promptEnhancementProvider =
+    promptEnhancementInstanceEntry?.driverKind ?? DEFAULT_DRIVER_KIND;
+  const promptEnhancementModelOptionsByInstance = getCustomModelOptionsByInstance(
+    settings,
+    textGenerationProviders,
+    promptEnhancementModelSelection.instanceId,
+    promptEnhancementModelSelection.model,
+  );
   const backgroundActivityDescription =
     backgroundActivityProfileOption === "advanced"
       ? `${ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION} Shared policy: ${
@@ -3217,6 +3242,77 @@ export function GeneralSettingsPanel() {
                         ),
                       });
                     }}
+                  />
+                ) : null}
+              </div>
+            )
+          }
+        />
+        <SettingsRow
+          serverScoped
+          settingKeys={["promptEnhancementModelSelection"]}
+          {...searchableSetting("prompt-enhancement-model")}
+          description="Rewrites new-thread drafts. Use the inherited text generation model or choose a dedicated model."
+          resetAction={
+            settings.promptEnhancementModelSelection !== null ? (
+              <SettingResetButton
+                label="prompt enhancement model"
+                onClick={() => updateSettings({ promptEnhancementModelSelection: null })}
+              />
+            ) : null
+          }
+          control={
+            !hasServerTargets ? (
+              <span className="text-sm text-muted-foreground">Connect an environment first.</span>
+            ) : !supportsPromptEnhancement ? (
+              <span className="text-sm text-muted-foreground">Update the selected server.</span>
+            ) : !hasTextGenerationProvider ? (
+              <span className="text-sm text-muted-foreground">
+                No text generation providers available.
+              </span>
+            ) : (
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
+                <ProviderModelPicker
+                  activeInstanceId={promptEnhancementModelSelection.instanceId}
+                  model={promptEnhancementModelSelection.model}
+                  lockedProvider={null}
+                  instanceEntries={textGenerationModelInstanceEntries}
+                  modelOptionsByInstance={promptEnhancementModelOptionsByInstance}
+                  triggerVariant="outline"
+                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                  {...(mixedPromptEnhancementModel
+                    ? { triggerLabel: "Mixed" }
+                    : settings.promptEnhancementModelSelection === null
+                      ? { triggerLabel: "Use text generation model" }
+                      : {})}
+                  getModelDisabledReason={textGenerationModelDisabledReason}
+                  onInstanceModelChange={(instanceId, model) =>
+                    updateSettings({
+                      promptEnhancementModelSelection: createModelSelection(instanceId, model),
+                    })
+                  }
+                />
+                {promptEnhancementInstanceEntry ? (
+                  <TraitsPicker
+                    provider={promptEnhancementProvider}
+                    models={promptEnhancementInstanceEntry.models}
+                    model={promptEnhancementModelSelection.model}
+                    prompt=""
+                    onPromptChange={() => {}}
+                    modelOptions={promptEnhancementModelSelection.options}
+                    allowPromptInjectedEffort={false}
+                    planModeEnabled={settings.planModeEnabled}
+                    triggerVariant="outline"
+                    triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                    onModelOptionsChange={(options) =>
+                      updateSettings({
+                        promptEnhancementModelSelection: createModelSelection(
+                          promptEnhancementModelSelection.instanceId,
+                          promptEnhancementModelSelection.model,
+                          options,
+                        ),
+                      })
+                    }
                   />
                 ) : null}
               </div>

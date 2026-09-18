@@ -109,6 +109,36 @@ describe("ServerSettings default permissions", () => {
   });
 });
 
+describe("ServerSettings prompt enhancement model", () => {
+  const selection = {
+    instanceId: ProviderInstanceId.make("codex"),
+    model: "gpt-5.6-sol",
+    options: [{ id: "reasoningEffort", value: "high" }],
+  };
+
+  it("inherits text generation for legacy settings", () => {
+    expect(decodeServerSettings({}).promptEnhancementModelSelection).toBeNull();
+  });
+
+  it("round-trips nullable server and project-scoped selections", () => {
+    const patch = {
+      promptEnhancementModelSelection: selection,
+      projectSettingsOverrides: {
+        project: { promptEnhancementModelSelection: null },
+      },
+    };
+    expect(decodeServerSettingsPatch(patch)).toEqual(patch);
+    expect(
+      encodeServerSettings(
+        decodeServerSettings({
+          promptEnhancementModelSelection: selection,
+          projectSettingsOverrides: patch.projectSettingsOverrides,
+        }),
+      ),
+    ).toMatchObject(patch);
+  });
+});
+
 describe("ServerSettings usage price overrides", () => {
   const prices = { inputCostPerMillionTokens: 2, outputCostPerMillionTokens: 8 };
 

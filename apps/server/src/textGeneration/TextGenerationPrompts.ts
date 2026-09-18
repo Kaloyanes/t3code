@@ -327,3 +327,35 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
 
   return { prompt, outputSchema };
 }
+
+export function buildPromptEnhancementPrompt(input: {
+  prompt: string;
+  references: ReadonlyArray<{ readonly token: string; readonly label: string }>;
+  attachments: ReadonlyArray<{ readonly name: string; readonly mimeType: string }>;
+}) {
+  const referenceLines = input.references.map(
+    (reference) => `- ${reference.token}: ${reference.label}`,
+  );
+  const attachmentLines = input.attachments.map(
+    (attachment) => `- ${attachment.name} (${attachment.mimeType})`,
+  );
+  const prompt = [
+    "Rewrite this coding-agent prompt so it is clear, structured, and directly actionable.",
+    "Return a JSON object with key: prompt.",
+    "Rules:",
+    "- Preserve the user's intent, facts, scope, and tone.",
+    "- Do not invent requirements, technical decisions, file names, or acceptance criteria.",
+    "- Make the goal, known context, constraints, and requested outcome easier to scan.",
+    "- Add acceptance criteria only when they are already implied by the draft.",
+    "- Return only the rewritten prompt in the JSON value, with no commentary.",
+    "- Preserve every opaque reference token exactly once. Do not edit the tokens.",
+    "- Attachment metadata is context only. Do not claim to have read attachment contents.",
+    ...(referenceLines.length > 0 ? ["", "Opaque references:", ...referenceLines] : []),
+    ...(attachmentLines.length > 0 ? ["", "Attachment metadata:", ...attachmentLines] : []),
+    "",
+    "Draft prompt:",
+    limitSection(input.prompt, 20_000),
+  ].join("\n");
+
+  return { prompt, outputSchema: Schema.Struct({ prompt: Schema.String }) };
+}

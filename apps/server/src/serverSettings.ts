@@ -320,9 +320,13 @@ function restoreUsedProviders(
 }
 
 function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings {
-  return isModelSelectionProviderEnabled(settings, settings.textGenerationModelSelection)
+  const resolved = isModelSelectionProviderEnabled(settings, settings.textGenerationModelSelection)
     ? settings
     : fallbackTextGenerationProvider(settings);
+  return resolved.promptEnhancementModelSelection !== null &&
+    !isModelSelectionProviderEnabled(resolved, resolved.promptEnhancementModelSelection)
+    ? { ...resolved, promptEnhancementModelSelection: null }
+    : resolved;
 }
 
 function fallbackTextGenerationProvider(settings: ServerSettings): ServerSettings {
@@ -357,6 +361,7 @@ const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   "providerHealthRefreshInterval",
   "sourceControlWriterModelSelection",
   "textGenerationModelSelection",
+  "promptEnhancementModelSelection",
   "pullRequestMergeMethod",
 ]);
 

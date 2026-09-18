@@ -10123,6 +10123,10 @@ export default function ChatView(props: ChatViewProps) {
                             keybindings={keybindings}
                             terminalOpen={Boolean(terminalUiState.terminalOpen)}
                             gitCwd={gitCwd}
+                            projectId={activeProject?.id ?? null}
+                            supportsPromptEnhancement={
+                              serverConfig?.environment.capabilities.promptEnhancement === true
+                            }
                             pullRequestProjectId={
                               supportsPullRequests ? (activeProject?.id ?? null) : null
                             }

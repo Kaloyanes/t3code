@@ -77,6 +77,18 @@ export interface ThreadTitleGenerationResult {
   needsRefinement?: boolean | undefined;
 }
 
+export interface PromptEnhancementInput {
+  cwd: string;
+  prompt: string;
+  references: ReadonlyArray<{ readonly token: string; readonly label: string }>;
+  attachments: ReadonlyArray<{ readonly name: string; readonly mimeType: string }>;
+  modelSelection: ModelSelection;
+}
+
+export interface PromptEnhancementResult {
+  prompt: string;
+}
+
 /**
  * TextGeneration - Service tag for commit and change request text generation.
  */
@@ -108,6 +120,10 @@ export class TextGeneration extends Context.Service<
     readonly generateThreadTitle: (
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+    readonly enhancePrompt: (
+      input: PromptEnhancementInput,
+    ) => Effect.Effect<PromptEnhancementResult, TextGenerationError>;
   }
 >()("t3/textGeneration/TextGeneration") {}
 
@@ -115,7 +131,8 @@ type TextGenerationOp =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
-  | "generateThreadTitle";
+  | "generateThreadTitle"
+  | "enhancePrompt";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -167,6 +184,10 @@ export const make = Effect.gen(function* () {
             return yield* textGeneration.generateThreadTitle({ ...input, linkedContext });
           }),
         ),
+      ),
+    enhancePrompt: (input) =>
+      resolveInstance(registry, "enhancePrompt", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.enhancePrompt(input)),
       ),
   });
 });

@@ -13,7 +13,7 @@ import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstance
 import * as TextGeneration from "./TextGeneration.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as Layer from "effect/Layer";
-import { buildThreadTitlePrompt } from "./TextGenerationPrompts.ts";
+import { buildPromptEnhancementPrompt, buildThreadTitlePrompt } from "./TextGenerationPrompts.ts";
 
 const makeStubTextGeneration = (
   overrides: Partial<TextGeneration.TextGeneration["Service"]>,
@@ -24,6 +24,7 @@ const makeStubTextGeneration = (
     generatePrContent: () => Effect.die("generatePrContent stub not configured for this test"),
     generateBranchName: () => Effect.die("generateBranchName stub not configured for this test"),
     generateThreadTitle: () => Effect.die("generateThreadTitle stub not configured for this test"),
+    enhancePrompt: () => Effect.die("enhancePrompt stub not configured for this test"),
     ...overrides,
   });
 
@@ -63,6 +64,54 @@ const makeStubRegistry = (
 };
 
 describe("TextGeneration.make", () => {
+  it("builds an isolated rewrite prompt without inventing requirements", () => {
+    const built = buildPromptEnhancementPrompt({
+      prompt: "Fix [[T3_CONTEXT_0]]",
+      references: [{ token: "[[T3_CONTEXT_0]]", label: "src/app.ts" }],
+      attachments: [{ name: "trace.txt", mimeType: "text/plain" }],
+    });
+    expect(built.prompt).toContain("Do not invent requirements");
+    expect(built.prompt).toContain("[[T3_CONTEXT_0]]: src/app.ts");
+    expect(built.prompt).toContain("trace.txt (text/plain)");
+    expect(built.prompt).toContain("Do not claim to have read attachment contents");
+  });
+
+  it.effect("routes prompt enhancement to the selected provider instance", () =>
+    Effect.gen(function* () {
+      const instanceId = ProviderInstanceId.make("codex_personal");
+      const calls: string[] = [];
+      const instance = makeStubInstance(
+        instanceId,
+        makeStubTextGeneration({
+          enhancePrompt: (input) => {
+            calls.push(input.prompt);
+            return Effect.succeed({ prompt: `Enhanced: ${input.prompt}` });
+          },
+        }),
+      );
+      const generation = yield* TextGeneration.make.pipe(
+        Effect.provideService(
+          ProviderInstanceRegistry.ProviderInstanceRegistry,
+          makeStubRegistry([instance]),
+        ),
+        Effect.provide(
+          Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
+            resolveLink: () => Effect.die("Prompt enhancement must not access source control"),
+          }),
+        ),
+      );
+      const result = yield* generation.enhancePrompt({
+        cwd: "/isolated",
+        prompt: "Fix it",
+        references: [],
+        attachments: [],
+        modelSelection: createModelSelection(instanceId, "gpt-5"),
+      });
+      expect(result.prompt).toBe("Enhanced: Fix it");
+      expect(calls).toEqual(["Fix it"]);
+    }),
+  );
+
   it.effect("retains supplied subject context in the provider prompt", () =>
     Effect.gen(function* () {
       const instanceId = ProviderInstanceId.make("codex");

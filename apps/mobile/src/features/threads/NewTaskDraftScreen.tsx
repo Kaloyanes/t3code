@@ -3,6 +3,10 @@ import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { clampFileAttachmentUploadBytes } from "@t3tools/client-runtime/state/attachments";
 import {
+  preparePromptEnhancement,
+  restoreEnhancedPrompt,
+} from "@t3tools/client-runtime/prompt-enhancement";
+import {
   nextPastedTextFileName,
   pastedTextDisposition,
   replaceTextSelection,
@@ -23,15 +27,23 @@ import {
   KeyboardStickyView,
   useKeyboardState,
 } from "react-native-keyboard-controller";
-import Animated from "react-native-reanimated";
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { useFontFamily } from "../../lib/useFontFamily";
 import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+  DEFAULT_SERVER_SETTINGS,
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
 import {
   ComposerEditor,
@@ -46,6 +58,7 @@ import {
 import {
   ComposerActionButton,
   ComposerInlineControl,
+  ComposerToolbarButton,
   ComposerToolbarRow,
 } from "../../components/ComposerToolbar";
 import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
@@ -199,6 +212,33 @@ export function NewTaskDraftScreen(props: {
   const selectedEnvironmentServerConfig = useEnvironmentServerConfig(
     selectedProject?.environmentId ?? null,
   );
+  const effectiveProjectSettings = useMemo(
+    () =>
+      resolveProjectSettings(
+        selectedEnvironmentServerConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
+        selectedProject?.id ?? null,
+        selectedProject,
+      ).settings,
+    [selectedEnvironmentServerConfig?.settings, selectedProject],
+  );
+  const promptEnhancementModelSelection =
+    effectiveProjectSettings.promptEnhancementModelSelection ??
+    effectiveProjectSettings.textGenerationModelSelection;
+  const promptEnhancementModelAvailable =
+    selectedEnvironmentServerConfig?.providers.some(
+      (provider) =>
+        provider.instanceId === promptEnhancementModelSelection.instanceId &&
+        provider.enabled &&
+        provider.installed &&
+        provider.status === "ready" &&
+        provider.availability !== "unavailable" &&
+        provider.supportsTextGeneration !== false &&
+        provider.models.some(
+          (model) =>
+            model.slug === promptEnhancementModelSelection.model ||
+            model.aliases?.includes(promptEnhancementModelSelection.model),
+        ),
+    ) === true;
   const environmentConnected =
     selectedProject !== null &&
     connectedEnvironments.find(
@@ -292,8 +332,17 @@ export function NewTaskDraftScreen(props: {
     });
   const queuesInsteadOfStarting = !environmentConnected || attachmentsUploading;
   const promptInputRef = useRef<ComposerEditorHandle>(null);
+  const promptRevisionRef = useRef(flow.prompt);
+  promptRevisionRef.current = flow.prompt;
+  const promptDraftKeyRef = useRef(flow.draftKey);
+  promptDraftKeyRef.current = flow.draftKey;
   const loadedBranchesProjectKeyRef = useRef<string | null>(null);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
+  const [isEnhancingPrompt, setIsEnhancingPrompt] = useState(false);
+  const promptEnhancementRequestRef = useRef(false);
+  const [enhancementUndoPrompt, setEnhancementUndoPrompt] = useState<string | null>(null);
+  const enhancementUndoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const enhancePrompt = useAtomCommand(serverEnvironment.enhancePrompt, { reportFailure: false });
   const [previewVideo, setPreviewVideo] = useState<VideoPreviewSource | null>(null);
   const [previewFile, setPreviewFile] = useState<FilePreviewSource | null>(null);
   const wasFocusedBeforePreviewRef = useRef(false);
@@ -613,8 +662,82 @@ export function NewTaskDraftScreen(props: {
 
   const theme = useUniwindTheme();
   const foregroundColor = theme["--color-foreground"];
+  const promptEnhancementProgress = useSharedValue(1);
+  const reduceMotion = useReducedMotion();
+  const promptEnhancementHaloStyle = useAnimatedStyle(() => ({
+    opacity: 1 - promptEnhancementProgress.value,
+    transform: [
+      {
+        scale: reduceMotion ? 1 : 0.985 + promptEnhancementProgress.value * 0.025,
+      },
+    ],
+  }));
   const regularFontFamily = useFontFamily("regular");
   const bodyText = useScaledTextRole("body");
+
+  useEffect(
+    () => () => {
+      if (enhancementUndoTimerRef.current) clearTimeout(enhancementUndoTimerRef.current);
+    },
+    [],
+  );
+
+  const runPromptEnhancement = useCallback(async () => {
+    const previousPrompt = promptRevisionRef.current;
+    const previousDraftKey = promptDraftKeyRef.current;
+    if (
+      !selectedProject ||
+      promptEnhancementRequestRef.current ||
+      previousPrompt.trim().length === 0
+    )
+      return;
+
+    const prepared = preparePromptEnhancement(previousPrompt);
+    promptEnhancementRequestRef.current = true;
+    setIsEnhancingPrompt(true);
+    const result = await enhancePrompt({
+      environmentId: selectedProject.environmentId,
+      input: {
+        projectId: selectedProject.id,
+        prompt: prepared.prompt,
+        references: prepared.references,
+        attachments: flow.attachments.map(({ name, mimeType }) => ({ name, mimeType })),
+      },
+    });
+    promptEnhancementRequestRef.current = false;
+    setIsEnhancingPrompt(false);
+
+    if (result._tag === "Failure") {
+      const error = Cause.squash(result.cause);
+      Alert.alert(
+        "Couldn't enhance prompt",
+        error instanceof Error ? error.message : "Try again in a moment.",
+      );
+      return;
+    }
+    if (
+      promptRevisionRef.current !== previousPrompt ||
+      promptDraftKeyRef.current !== previousDraftKey
+    ) {
+      return;
+    }
+
+    const restored = restoreEnhancedPrompt(prepared, result.value.prompt);
+    if (restored === null || restored.trim().length === 0) {
+      Alert.alert("Couldn't enhance prompt", "The prompt references could not be preserved.");
+      return;
+    }
+    flow.setPrompt(restored);
+    promptInputRef.current?.focus();
+    promptEnhancementProgress.value = 0;
+    promptEnhancementProgress.value = withTiming(1, {
+      duration: 220,
+      easing: Easing.bezier(0.23, 1, 0.32, 1),
+    });
+    setEnhancementUndoPrompt(previousPrompt);
+    if (enhancementUndoTimerRef.current) clearTimeout(enhancementUndoTimerRef.current);
+    enhancementUndoTimerRef.current = setTimeout(() => setEnhancementUndoPrompt(null), 5_000);
+  }, [enhancePrompt, flow.attachments, flow.setPrompt, promptEnhancementProgress, selectedProject]);
 
   // A new navigation to this mounted screen delivers a fresh initialProjectRef
   // reference — treat it as a new request and let it apply again.
@@ -1600,158 +1723,204 @@ export function NewTaskDraftScreen(props: {
         </Pressable>
       ) : null}
 
-      <ComposerSurface
-        style={{
-          borderRadius: 26,
-          minHeight: 140,
-          overflow: "hidden",
-          paddingBottom: 6,
-          paddingTop: 14,
-        }}
-      >
-        {stripAttachments.length > 0 ? (
-          <View className="px-[14px] pb-2.5">
-            <ComposerAttachmentStrip
-              environmentId={selectedProject.environmentId}
-              attachments={stripAttachments}
-              imageBorderRadius={16}
-              imageSize={72}
-              onRemove={
-                isComposerInteractionLocked || voiceInput.isBusy
-                  ? () => undefined
-                  : flow.removeAttachment
-              }
-              onPressPreview={
-                isComposerInteractionLocked || voiceInput.isBusy ? undefined : openFilePreview
-              }
-              onPressVideo={
-                isComposerInteractionLocked || voiceInput.isBusy ? undefined : openVideoPreview
-              }
-              onPressDocument={
-                isComposerInteractionLocked || voiceInput.isBusy
-                  ? undefined
-                  : (attachment) =>
-                      openDraftDocument({
-                        attachmentId: attachment.id,
-                        name: attachment.name,
-                        mimeType: attachment.mimeType,
-                        sizeBytes: attachment.sizeBytes,
-                      })
-              }
-            />
-          </View>
-        ) : null}
-
-        <View className="px-[14px]">{promptEditor}</View>
-        <View className="h-1" />
-
-        <Animated.View layout={COMPOSER_LAYOUT_TRANSITION} collapsable={false}>
-          <ComposerDictationToolbar showsDictation={isVoiceInputPresented}>
-            <ComposerToolbarRow
-              paddingBottom={0}
-              paddingHorizontal={0}
-              paddingTop={0}
-              style={{ gap: 0 }}
-            >
-              <ComposerDictationCancelAction
-                presentation={voicePresentation}
-                onCancel={voiceInput.cancel}
+      <View className="relative">
+        <Animated.View
+          pointerEvents="none"
+          className="absolute -inset-1 rounded-[30px] border-2 border-primary/35"
+          style={promptEnhancementHaloStyle}
+        />
+        <ComposerSurface
+          style={{
+            borderRadius: 26,
+            minHeight: 140,
+            overflow: "hidden",
+            paddingBottom: 6,
+            paddingTop: 14,
+          }}
+        >
+          {stripAttachments.length > 0 ? (
+            <View className="px-[14px] pb-2.5">
+              <ComposerAttachmentStrip
+                environmentId={selectedProject.environmentId}
+                attachments={stripAttachments}
+                imageBorderRadius={16}
+                imageSize={72}
+                onRemove={
+                  isComposerInteractionLocked || voiceInput.isBusy
+                    ? () => undefined
+                    : flow.removeAttachment
+                }
+                onPressPreview={
+                  isComposerInteractionLocked || voiceInput.isBusy ? undefined : openFilePreview
+                }
+                onPressVideo={
+                  isComposerInteractionLocked || voiceInput.isBusy ? undefined : openVideoPreview
+                }
+                onPressDocument={
+                  isComposerInteractionLocked || voiceInput.isBusy
+                    ? undefined
+                    : (attachment) =>
+                        openDraftDocument({
+                          attachmentId: attachment.id,
+                          name: attachment.name,
+                          mimeType: attachment.mimeType,
+                          sizeBytes: attachment.sizeBytes,
+                        })
+                }
               />
-              {isVoiceInputPresented ? (
-                <ComposerDictationStatus
-                  audioLevels={voiceInput.audioLevels}
-                  elapsedSeconds={voiceInput.elapsedSeconds}
-                  phase={voiceInput.state.phase}
+            </View>
+          ) : null}
+
+          <View className="px-[14px]">{promptEditor}</View>
+          <View className="h-1" />
+
+          <Animated.View layout={COMPOSER_LAYOUT_TRANSITION} collapsable={false}>
+            <ComposerDictationToolbar showsDictation={isVoiceInputPresented}>
+              <ComposerToolbarRow
+                paddingBottom={0}
+                paddingHorizontal={0}
+                paddingTop={0}
+                style={{ gap: 0 }}
+              >
+                <ComposerDictationCancelAction
                   presentation={voicePresentation}
-                  onDismissError={voiceInput.cancel}
+                  onCancel={voiceInput.cancel}
                 />
-              ) : (
-                <>
-                  <ComposerAttachmentButton
-                    disabled={isComposerInteractionLocked}
-                    supportsFiles={Boolean(
-                      selectedEnvironmentServerConfig?.environment.capabilities.fileAttachments,
-                    )}
-                    onPickMedia={handlePickMedia}
-                    onPickFiles={handlePickFiles}
+                {isVoiceInputPresented ? (
+                  <ComposerDictationStatus
+                    audioLevels={voiceInput.audioLevels}
+                    elapsedSeconds={voiceInput.elapsedSeconds}
+                    phase={voiceInput.state.phase}
+                    presentation={voicePresentation}
+                    onDismissError={voiceInput.cancel}
                   />
-                  <View className="min-w-0 flex-1 flex-row items-center justify-end gap-2">
-                    <View className="min-w-0 shrink">
-                      <ComposerInlineControl
-                        accessibilityLabel="Model and reasoning settings"
-                        disabled={isComposerInteractionLocked}
-                        emphasized
-                        iconNode={
-                          <ProviderIcon
-                            provider={flow.selectedModelOption?.providerDriver}
-                            size={16}
-                          />
+                ) : (
+                  <>
+                    <ComposerAttachmentButton
+                      disabled={isComposerInteractionLocked}
+                      supportsFiles={Boolean(
+                        selectedEnvironmentServerConfig?.environment.capabilities.fileAttachments,
+                      )}
+                      onPickMedia={handlePickMedia}
+                      onPickFiles={handlePickFiles}
+                    />
+                    {selectedEnvironmentServerConfig?.environment.capabilities.promptEnhancement ===
+                    true ? (
+                      <ComposerToolbarButton
+                        accessibilityLabel={
+                          isEnhancingPrompt
+                            ? "Enhancing prompt"
+                            : promptEnhancementModelAvailable
+                              ? "Enhance prompt"
+                              : "Prompt enhancement model unavailable"
                         }
-                        label={flow.selectedModelOption?.label ?? "Choose model"}
-                        maxWidth="100%"
-                        onPress={settingsSheetPresentation.open}
-                      />
-                    </View>
-                    {flow.planModeEnabled ? (
-                      <ComposerInlineControl
-                        accessibilityHint={`Switches to ${flow.interactionMode === "plan" ? "Build" : "Plan"} mode`}
-                        accessibilityLabel={`Interaction mode: ${flow.interactionMode === "plan" ? "Plan" : "Build"}`}
-                        disabled={isComposerInteractionLocked}
-                        emphasized
-                        icon={
-                          flow.interactionMode === "plan"
-                            ? { ios: "list.bullet.clipboard", android: "auto_awesome" }
-                            : { ios: "hammer", android: "construction" }
+                        disabled={
+                          isComposerInteractionLocked ||
+                          isEnhancingPrompt ||
+                          !environmentConnected ||
+                          !promptEnhancementModelAvailable ||
+                          flow.prompt.trim().length === 0
                         }
-                        label={flow.interactionMode === "plan" ? "Plan" : "Build"}
-                        onPress={() =>
-                          flow.setInteractionMode(
-                            flow.interactionMode === "plan" ? "default" : "plan",
-                          )
-                        }
+                        icon={{ ios: "sparkles", android: "auto_awesome" }}
+                        onPress={() => void runPromptEnhancement()}
                         showChevron={false}
                       />
                     ) : null}
-                  </View>
-                </>
-              )}
-              <ComposerDictationPrimaryAction
-                state={voiceInput.state}
-                presentation={voicePresentation}
-                isAvailable={voiceInput.isAvailable}
-                disabled={isIncomingShareTransferPending || isImportingShare || flow.submitting}
-                onStart={voiceInput.start}
-                onConfirm={voiceInput.stop}
-                onCancel={voiceInput.cancel}
-              />
-              {voicePresentation.showsSend ? (
-                <ComposerActionButton
-                  accessibilityLabel={
-                    attachmentBlockReason ??
-                    (cloneBlocksStart
-                      ? projectClone === null || projectClone.phase === "running"
-                        ? "Cloning repository"
-                        : "Repository not cloned"
-                      : pendingPastedTextAttachmentCount > 0
-                        ? "Attaching pasted text"
-                        : flow.submitting
-                          ? "Starting task"
-                          : attachmentsUploading
-                            ? "Queue task, sends when uploads finish"
-                            : environmentConnected
-                              ? "Start task"
-                              : "Queue task")
-                  }
-                  disabled={!canStart}
-                  icon={queuesInsteadOfStarting ? "tray.and.arrow.up" : "arrow.up"}
-                  onPress={() => void handleStart()}
-                  variant="primary"
+                    <View className="min-w-0 flex-1 flex-row items-center justify-end gap-2">
+                      <View className="min-w-0 shrink">
+                        <ComposerInlineControl
+                          accessibilityLabel="Model and reasoning settings"
+                          disabled={isComposerInteractionLocked}
+                          emphasized
+                          iconNode={
+                            <ProviderIcon
+                              provider={flow.selectedModelOption?.providerDriver}
+                              size={16}
+                            />
+                          }
+                          label={flow.selectedModelOption?.label ?? "Choose model"}
+                          maxWidth="100%"
+                          onPress={settingsSheetPresentation.open}
+                        />
+                      </View>
+                      {flow.planModeEnabled ? (
+                        <ComposerInlineControl
+                          accessibilityHint={`Switches to ${flow.interactionMode === "plan" ? "Build" : "Plan"} mode`}
+                          accessibilityLabel={`Interaction mode: ${flow.interactionMode === "plan" ? "Plan" : "Build"}`}
+                          disabled={isComposerInteractionLocked}
+                          emphasized
+                          icon={
+                            flow.interactionMode === "plan"
+                              ? { ios: "list.bullet.clipboard", android: "auto_awesome" }
+                              : { ios: "hammer", android: "construction" }
+                          }
+                          label={flow.interactionMode === "plan" ? "Plan" : "Build"}
+                          onPress={() =>
+                            flow.setInteractionMode(
+                              flow.interactionMode === "plan" ? "default" : "plan",
+                            )
+                          }
+                          showChevron={false}
+                        />
+                      ) : null}
+                    </View>
+                  </>
+                )}
+                <ComposerDictationPrimaryAction
+                  state={voiceInput.state}
+                  presentation={voicePresentation}
+                  isAvailable={voiceInput.isAvailable}
+                  disabled={isIncomingShareTransferPending || isImportingShare || flow.submitting}
+                  onStart={voiceInput.start}
+                  onConfirm={voiceInput.stop}
+                  onCancel={voiceInput.cancel}
                 />
-              ) : null}
-            </ComposerToolbarRow>
-          </ComposerDictationToolbar>
-        </Animated.View>
-      </ComposerSurface>
+                {voicePresentation.showsSend ? (
+                  <ComposerActionButton
+                    accessibilityLabel={
+                      attachmentBlockReason ??
+                      (cloneBlocksStart
+                        ? projectClone === null || projectClone.phase === "running"
+                          ? "Cloning repository"
+                          : "Repository not cloned"
+                        : pendingPastedTextAttachmentCount > 0
+                          ? "Attaching pasted text"
+                          : flow.submitting
+                            ? "Starting task"
+                            : attachmentsUploading
+                              ? "Queue task, sends when uploads finish"
+                              : environmentConnected
+                                ? "Start task"
+                                : "Queue task")
+                    }
+                    disabled={!canStart}
+                    icon={queuesInsteadOfStarting ? "tray.and.arrow.up" : "arrow.up"}
+                    onPress={() => void handleStart()}
+                    variant="primary"
+                  />
+                ) : null}
+              </ComposerToolbarRow>
+            </ComposerDictationToolbar>
+          </Animated.View>
+        </ComposerSurface>
+      </View>
+      {enhancementUndoPrompt !== null ? (
+        <View className="mt-2 min-h-11 flex-row items-center justify-between rounded-xl bg-subtle-strong px-3">
+          <Text className="text-sm text-foreground">Prompt enhanced</Text>
+          <Pressable
+            accessibilityLabel="Undo prompt enhancement"
+            accessibilityRole="button"
+            className="min-h-11 justify-center px-2 active:opacity-65"
+            onPress={() => {
+              flow.setPrompt(enhancementUndoPrompt);
+              setEnhancementUndoPrompt(null);
+              promptInputRef.current?.focus();
+            }}
+          >
+            <Text className="text-sm font-t3-medium text-primary">Undo</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <VideoPreviewModal source={previewVideo} onRequestClose={closeMediaPreview} />
       <FilePreviewModal source={previewFile} onRequestClose={closeMediaPreview} />
     </View>

@@ -238,6 +238,7 @@ export const make = Effect.gen(function* () {
       threadPinReorder: true,
       threadActiveReorder: true,
       threadTitleRegeneration: true,
+      promptEnhancement: true,
       threadPullRequests: true,
       pullRequestStackActions: true,
       threadPullRequestLinking: true,

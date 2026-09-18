@@ -151,6 +151,7 @@ import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
+import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -542,6 +543,7 @@ const buildAppUnderTest = (options?: {
       ProviderSessionDirectory.ProviderSessionDirectory["Service"]
     >;
     terminalManager?: Partial<TerminalManager.TerminalManager["Service"]>;
+    textGeneration?: Partial<TextGeneration.TextGeneration["Service"]>;
     orchestrationEngine?: Partial<OrchestrationEngine.OrchestrationEngineService["Service"]>;
     threadDeletionReactor?: Partial<ThreadDeletionReactor["Service"]>;
     analyticsService?: Partial<AnalyticsService.AnalyticsService["Service"]>;
@@ -940,6 +942,10 @@ const buildAppUnderTest = (options?: {
         Layer.mergeAll(
           Layer.mock(TerminalManager.TerminalManager)({
             ...options?.layers?.terminalManager,
+          }),
+          Layer.mock(TextGeneration.TextGeneration)({
+            enhancePrompt: () => Effect.die("Text generation is not stubbed in this test"),
+            ...options?.layers?.textGeneration,
           }),
           WorktreeSetupTracker.layer,
           ProjectCloneTracker.layer.pipe(
@@ -7554,6 +7560,82 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       assert.deepEqual(connectedProperties, [{}]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes prompt enhancement through inherited and dedicated models", () =>
+    Effect.gen(function* () {
+      const inheritedModel = { ...defaultModelSelection, model: "gpt-inherited" };
+      const dedicatedModel = { ...defaultModelSelection, model: "gpt-dedicated" };
+      let settings: typeof DEFAULT_SERVER_SETTINGS = {
+        ...DEFAULT_SERVER_SETTINGS,
+        textGenerationModelSelection: inheritedModel,
+        promptEnhancementModelSelection: null,
+      };
+      const requests: Array<TextGeneration.PromptEnhancementInput> = [];
+      const config = yield* buildAppUnderTest({
+        layers: {
+          serverSettings: { getSettings: Effect.sync(() => settings) },
+          textGeneration: {
+            enhancePrompt: (input) =>
+              Effect.sync(() => {
+                requests.push(input);
+                return { prompt: `Improved ${input.prompt}` };
+              }),
+          },
+        },
+      });
+      const input = {
+        projectId: defaultProjectId,
+        prompt: "Explain [[ref:0]]",
+        references: [{ token: "[[ref:0]]", label: "src/index.ts" }],
+        attachments: [{ name: "trace.txt", mimeType: "text/plain" }],
+      } as const;
+      const wsUrl = yield* getWsServerUrl("/ws");
+
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.promptEnhance](input)),
+      );
+      settings = { ...settings, promptEnhancementModelSelection: dedicatedModel };
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.promptEnhance](input)),
+      );
+
+      assert.deepEqual(
+        requests.map(({ modelSelection }) => modelSelection),
+        [inheritedModel, dedicatedModel],
+      );
+      assert.equal(requests[0]?.cwd, config.stateDir);
+      assert.deepEqual(requests[0]?.references, input.references);
+      assert.deepEqual(requests[0]?.attachments, input.attachments);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects prompt enhancement output that corrupts references", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          textGeneration: {
+            enhancePrompt: () => Effect.succeed({ prompt: "Reference removed" }),
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const error = yield* Effect.flip(
+        Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.promptEnhance]({
+              projectId: defaultProjectId,
+              prompt: "Explain [[ref:0]]",
+              references: [{ token: "[[ref:0]]", label: "src/index.ts" }],
+              attachments: [],
+            }),
+          ),
+        ),
+      );
+
+      assert.equal(error._tag, "PromptEnhancementError");
+      assert.equal(error.message, "The rewritten prompt did not preserve its references.");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

@@ -47,6 +47,7 @@ import {
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
   ProjectId,
+  PromptEnhancementError,
   type ProjectEntriesFailure,
   type ProjectFileFailure,
   type ProjectFileOperation,
@@ -81,6 +82,8 @@ import {
   type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { isModelSelectionProviderEnabled } from "@t3tools/shared/serverSettings";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
@@ -119,6 +122,7 @@ import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
+import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
@@ -571,6 +575,7 @@ const makeWsRpcLayer = (
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const textGeneration = yield* TextGeneration.TextGeneration;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -2533,6 +2538,65 @@ const makeWsRpcLayer = (
             {
               "rpc.aggregate": "server",
             },
+          ),
+        [WS_METHODS.promptEnhance]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.promptEnhance,
+            Effect.gen(function* () {
+              const tokens = input.references.map((reference) => reference.token);
+              if (new Set(tokens).size !== tokens.length) {
+                return yield* new PromptEnhancementError({
+                  message: "Prompt references must use unique tokens.",
+                });
+              }
+              if (tokens.some((token) => input.prompt.split(token).length !== 2)) {
+                return yield* new PromptEnhancementError({
+                  message: "The draft contains an invalid prompt reference.",
+                });
+              }
+              const settings = resolveProjectSettings(
+                yield* serverSettings.getSettings.pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new PromptEnhancementError({
+                        message: cause.message || "Prompt enhancement settings are unavailable.",
+                      }),
+                  ),
+                ),
+                input.projectId,
+              ).settings;
+              const configured = settings.promptEnhancementModelSelection;
+              const modelSelection =
+                configured && isModelSelectionProviderEnabled(settings, configured)
+                  ? configured
+                  : settings.textGenerationModelSelection;
+              const generated = yield* textGeneration
+                .enhancePrompt({
+                  cwd: config.stateDir,
+                  prompt: input.prompt,
+                  references: input.references,
+                  attachments: input.attachments,
+                  modelSelection,
+                })
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new PromptEnhancementError({
+                        message: cause.detail || "The prompt could not be rewritten.",
+                      }),
+                  ),
+                );
+              if (
+                generated.prompt.trim().length === 0 ||
+                tokens.some((token) => generated.prompt.split(token).length !== 2)
+              ) {
+                return yield* new PromptEnhancementError({
+                  message: "The rewritten prompt did not preserve its references.",
+                });
+              }
+              return generated;
+            }),
+            { "rpc.aggregate": "prompt" },
           ),
         [WS_METHODS.serverUpdateSettings]: ({ patch }) =>
           observeRpcEffect(
