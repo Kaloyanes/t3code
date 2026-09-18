@@ -32,6 +32,7 @@ import {
   projectScriptRuntimeEnv,
   resolveProjectScripts,
 } from "@t3tools/shared/projectScripts";
+import { threadProjectScripts } from "./projectScriptVisibility";
 import { Alert, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useWorkspaceState } from "../../state/workspace";
@@ -688,9 +689,11 @@ function ThreadRouteContent(
     canOpenTerminal: Boolean(selectedThreadProject?.workspaceRoot),
     canOpenFiles: Boolean(selectedThreadProject?.workspaceRoot),
     projectScripts: selectedThreadProject
-      ? resolveProjectScripts(
-          routeEnvironmentRuntime?.serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
-          selectedThreadProject,
+      ? threadProjectScripts(
+          resolveProjectScripts(
+            routeEnvironmentRuntime?.serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
+            selectedThreadProject,
+          ),
         )
       : [],
     terminalSessions: terminalMenuSessions,

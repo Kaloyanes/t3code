@@ -230,6 +230,7 @@ export const make = Effect.gen(function* () {
       projectWorktreeCleanup: true,
       threadRestartContinuation: true,
       projectSettingsOverrides: true,
+      worktreeRuns: true,
       threadSnooze: true,
       environmentThemes: true,
       usageLimitSources: true,

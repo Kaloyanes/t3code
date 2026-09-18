@@ -77,6 +77,28 @@ describe("projectScripts helpers", () => {
     ).not.toHaveProperty("async");
   });
 
+  it("builds worktree actions without thread-only options", () => {
+    expect(
+      buildProjectScript("dev", {
+        name: "Dev",
+        command: "pnpm dev",
+        icon: "debug",
+        scope: "worktree",
+        runOnWorktreeCreate: true,
+        waitForSetup: false,
+        previewUrl: null,
+        autoOpenPreview: false,
+      }),
+    ).toEqual({
+      id: "dev",
+      name: "Dev",
+      command: "pnpm dev",
+      icon: "debug",
+      scope: "worktree",
+      runOnWorktreeCreate: true,
+    });
+  });
+
   it("builds and parses script run commands", () => {
     const command = commandForProjectScript("lint");
     expect(command).toBe("script.lint.run");

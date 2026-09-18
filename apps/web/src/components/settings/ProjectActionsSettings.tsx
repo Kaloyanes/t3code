@@ -48,6 +48,12 @@ export function ProjectActionsSettings() {
     : undefined;
   const scripts = target?.settings.defaultProjectScripts ?? [];
   const keybindings = representativeConfig?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS;
+  const supportsWorktreeRuns = targets.every((candidate) => {
+    const environment = environments.find(
+      (entry) => entry.environmentId === candidate.environmentId,
+    );
+    return environment?.serverConfig?.environment.capabilities.worktreeRuns === true;
+  });
   const mixed = targets.some(
     (candidate) =>
       JSON.stringify(candidate.settings.defaultProjectScripts) !== JSON.stringify(scripts),
@@ -111,6 +117,7 @@ export function ProjectActionsSettings() {
         command: fileScript.command,
         icon: fileScript.icon ?? "play",
         runOnWorktreeCreate: fileScript.runOnWorktreeCreate ?? false,
+        scope: fileScript.scope ?? "thread",
         waitForSetup: fileScript.runOnWorktreeCreate === true && fileScript.async === false,
         keybinding: null,
         previewUrl: fileScript.previewUrl ?? null,
@@ -221,6 +228,7 @@ export function ProjectActionsSettings() {
           void persist((current) => current.filter((script) => script.id !== id), id, null)
         }
         onClose={() => setRequest(null)}
+        supportsWorktreeRuns={supportsWorktreeRuns}
       />
     </SettingsSection>
   );

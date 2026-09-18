@@ -24,6 +24,8 @@ import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { primaryServerKeybindingsAtom } from "~/state/server";
+import { WorktreeRunConsole } from "../components/WorktreeRunConsole";
+import { projectScriptIdFromCommand } from "../projectScripts";
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
@@ -161,6 +163,16 @@ function ChatRouteGlobalShortcuts() {
                   ? "zoom-out"
                   : "reset-zoom";
         dispatchPreviewAction(action);
+        return;
+      }
+
+      if (command && projectScriptIdFromCommand(command) !== null && !routeThreadRef) {
+        event.preventDefault();
+        event.stopPropagation();
+        toastManager.add({
+          type: "info",
+          title: "Open a thread to choose a worktree",
+        });
       }
     };
 
@@ -193,6 +205,7 @@ function ChatRouteLayout() {
     <>
       <ChatRouteGlobalShortcuts />
       {threadTarget ? <ThreadRouteView target={threadTarget} /> : <Outlet />}
+      <WorktreeRunConsole />
     </>
   );
 }

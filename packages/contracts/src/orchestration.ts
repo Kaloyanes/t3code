@@ -398,12 +398,17 @@ export const ProjectScriptIcon = Schema.Literals([
 ]);
 export type ProjectScriptIcon = typeof ProjectScriptIcon.Type;
 
+export const ProjectScriptScope = Schema.Literals(["thread", "worktree"]);
+export type ProjectScriptScope = typeof ProjectScriptScope.Type;
+
 export const ProjectScript = Schema.Struct({
   id: TrimmedNonEmptyString,
   name: TrimmedNonEmptyString,
   command: TrimmedNonEmptyString,
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
+  /** Missing preserves the original thread-owned behavior. */
+  scope: Schema.optional(ProjectScriptScope),
   /**
    * For `runOnWorktreeCreate` scripts: when false, the agent's first turn waits
    * for the script to exit. Absent or true starts the agent right away and
@@ -421,7 +426,16 @@ export const ProjectScript = Schema.Struct({
    * the moment this script starts. Ignored without `previewUrl` or on web.
    */
   autoOpenPreview: Schema.optional(Schema.Boolean),
-});
+}).check(
+  Schema.makeFilter(
+    (script) =>
+      script.scope !== "worktree" ||
+      (script.async !== false &&
+        script.previewUrl === undefined &&
+        script.autoOpenPreview === undefined) ||
+      "Worktree-scoped scripts must be asynchronous and cannot configure a preview.",
+  ),
+);
 export type ProjectScript = typeof ProjectScript.Type;
 
 export const ProjectFaviconPath = TrimmedNonEmptyString.check(

@@ -37,6 +37,16 @@ describe("ExecutionEnvironmentDescriptor", () => {
     ).toBe(true);
   });
 
+  it("treats worktree runs as an optional versioned capability", () => {
+    expect(decodeDescriptor(descriptor).capabilities.worktreeRuns).toBeUndefined();
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, worktreeRuns: true },
+      }).capabilities.worktreeRuns,
+    ).toBe(true);
+  });
+
   it("treats prompt enhancement as an optional versioned capability", () => {
     expect(decodeDescriptor(descriptor).capabilities.promptEnhancement).toBeUndefined();
     expect(
