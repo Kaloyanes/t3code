@@ -8,6 +8,7 @@ import {
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   resolveThreadActionProjectRef,
+  resolveScopedThreadActionProjectRef,
   hasExplicitComposerModelSelection,
   resolveNewDraftStartFromOrigin,
   resolveNewThreadModelSelectionOverride,
@@ -136,6 +137,36 @@ describe("chatThreadActions", () => {
     );
 
     expect(projectRef).toEqual(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID));
+  });
+
+  it("uses the selected sidebar project instead of an active thread from another project", () => {
+    const selectedProjectRef = scopeProjectRef(ENVIRONMENT_ID, FALLBACK_PROJECT_ID);
+    const projectRef = resolveScopedThreadActionProjectRef(
+      createContext({
+        activeThread: {
+          environmentId: ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+        },
+      }),
+      [selectedProjectRef],
+    );
+
+    expect(projectRef).toEqual(selectedProjectRef);
+  });
+
+  it("keeps the active member when the selected project groups multiple worktrees", () => {
+    const activeProjectRef = scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID);
+    const projectRef = resolveScopedThreadActionProjectRef(
+      createContext({
+        activeThread: {
+          environmentId: ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+        },
+      }),
+      [scopeProjectRef(ENVIRONMENT_ID, FALLBACK_PROJECT_ID), activeProjectRef],
+    );
+
+    expect(projectRef).toEqual(activeProjectRef);
   });
 
   it("inherits only the project from context, never branch or worktree state", async () => {

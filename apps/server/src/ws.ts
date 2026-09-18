@@ -156,6 +156,7 @@ import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
+import * as IssueService from "./issue/IssueService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
 import { pullRequestSyncKey } from "./pullRequest/pullRequestSyncKey.ts";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -656,6 +657,7 @@ const makeWsRpcLayer = (
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
       const pullRequests = yield* PullRequestService.PullRequestService;
       const withPullRequestViewer = pullRequests.withRoutingCredential;
+      const issues = yield* IssueService.IssueService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
       const sessions = yield* SessionStore.SessionStore;
@@ -2879,6 +2881,96 @@ const makeWsRpcLayer = (
               "rpc.aggregate": "pull-requests",
             },
           ),
+        [WS_METHODS.issuesList]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesList, issues.list(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesDetail]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesDetail, issues.detail(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesComments]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesComments, issues.comments(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesCandidates]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesCandidates, issues.candidates(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesTemplates]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesTemplates, issues.templates(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesCreate]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesCreate, issues.create(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesUpdate]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesUpdate, issues.update(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesCommentCreate]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesCommentCreate, issues.commentCreate(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesCommentUpdate]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesCommentUpdate, issues.commentUpdate(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesCommentDelete]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesCommentDelete, issues.commentDelete(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesReactionUpdate]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesReactionUpdate, issues.reactionUpdate(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesClose]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesClose, issues.close(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesReopen]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesReopen, issues.reopen(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesInvalidate]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesInvalidate, issues.invalidate(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesLink]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesLink, issues.link(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesWorktreePrepare]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesWorktreePrepare, issues.worktreePrepare(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesWorktreeDeletePreflight]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.issuesWorktreeDeletePreflight,
+            issues.worktreeDeletePreflight(input),
+            { "rpc.aggregate": "issues" },
+          ),
+        [WS_METHODS.issuesWorktreeDelete]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesWorktreeDelete, issues.worktreeDelete(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesWorktreeReplace]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesWorktreeReplace, issues.worktreeReplace(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesAuthStatus]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesAuthStatus, issues.authStatus(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesAuthStart]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesAuthStart, issues.authStart(input), {
+            "rpc.aggregate": "issues",
+          }),
+        [WS_METHODS.issuesAuthCancel]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesAuthCancel, issues.authCancel(input), {
+            "rpc.aggregate": "issues",
+          }),
         [WS_METHODS.sourceControlLookupRepository]: (input) =>
           observeRpcEffect(
             WS_METHODS.sourceControlLookupRepository,
@@ -3718,6 +3810,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         ),
     });
     const pullRequests = yield* PullRequestService.PullRequestService;
+    const issues = yield* IssueService.IssueService;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -3766,6 +3859,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               // One server-lifetime service means clients share the same PR caches, and a WS
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
+              Layer.provide(Layer.succeed(IssueService.IssueService, issues)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

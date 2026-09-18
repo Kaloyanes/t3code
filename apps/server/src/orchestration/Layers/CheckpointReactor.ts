@@ -40,6 +40,7 @@ import type { OrchestrationDispatchError } from "../Errors.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
 import * as PullRequestService from "../../pullRequest/PullRequestService.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -93,6 +94,7 @@ const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const pullRequests = yield* PullRequestService.PullRequestService;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
   const queuedEntryRefreshes = new Set<string>();
   const entryRefreshWorker = yield* makeDrainableWorker((cwd: string) =>
     Effect.sync(() => queuedEntryRefreshes.delete(cwd)).pipe(
@@ -111,7 +113,6 @@ const make = Effect.gen(function* () {
     queuedEntryRefreshes.add(cwd);
     yield* entryRefreshWorker.enqueue(cwd);
   });
-
   const startedTurns = new Map<ThreadId, TurnId>();
   const pending = new Set<ThreadId>();
 
@@ -583,7 +584,11 @@ const make = Effect.gen(function* () {
     // Detached HEAD has no branch to adopt; a temporary placeholder checkout
     // means the first-turn auto-rename is still in flight — don't race it.
     const checkedOutBranch = input.local.refName;
-    if (checkedOutBranch === null || isTemporaryWorktreeBranch(checkedOutBranch)) {
+    const settings = yield* serverSettings.getSettings;
+    if (
+      checkedOutBranch === null ||
+      isTemporaryWorktreeBranch(checkedOutBranch, settings.worktreeBranchPrefix)
+    ) {
       return;
     }
 

@@ -1102,6 +1102,15 @@ describe("resolveLiveThreadBranchUpdate", () => {
     assert.equal(update, null);
   });
 
+  it("does not regress a custom-prefix semantic ref back to its temporary ref", () => {
+    const update = resolveLiveThreadBranchUpdate({
+      threadBranch: "Kaloyanes/github-query-rate-limit",
+      gitStatus: status({ refName: "Kaloyanes/bda76797" }),
+    });
+
+    assert.equal(update, null);
+  });
+
   it("allows a temporary worktree ref to reconcile to a semantic branch", () => {
     const update = resolveLiveThreadBranchUpdate({
       threadBranch: "t3code/a9628676",

@@ -5,15 +5,16 @@ import { useEffect, useMemo } from "react";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { ThreadRouteView } from "../components/ThreadRouteView";
 import { resolveThreadRouteTarget } from "../threadRoutes";
-import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { openCommandPalette } from "../commandPaletteBus";
+import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
+import { selectProjectGroupingSettings } from "../logicalProject";
+import { resolveScopedThreadActionProjectRef } from "../lib/chatThreadActions";
+import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { useProjects } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
-import { selectProjectGroupingSettings } from "../logicalProject";
-import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
+import { useUiStateStore } from "../uiStateStore";
 import { dispatchPreviewAction } from "../components/preview/previewActionBus";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
-import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { resolveShortcutCommand } from "../keybindings";
@@ -34,16 +35,38 @@ function ChatRouteGlobalShortcuts() {
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const projectGroupCount = useMemo(
-    () =>
-      buildSidebarProjectSnapshots({
-        projects,
-        settings: projectGroupingSettings,
-        primaryEnvironmentId,
-        resolveEnvironmentLabel: () => null,
-      }).length,
-    [primaryEnvironmentId, projectGroupingSettings, projects],
-  );
+  const sidebarProjectScopeKey = useUiStateStore((state) => state.sidebarProjectScopeKey);
+  const shortcutProjectRef = useMemo(() => {
+    const selectedGroup =
+      !legacySidebarEnabled && sidebarProjectScopeKey !== null
+        ? buildSidebarProjectSnapshots({
+            projects,
+            settings: projectGroupingSettings,
+            primaryEnvironmentId,
+            resolveEnvironmentLabel: () => null,
+          }).find((group) => group.projectKey === sidebarProjectScopeKey)
+        : null;
+    return resolveScopedThreadActionProjectRef(
+      {
+        activeDraftThread,
+        activeThread: activeThread ?? undefined,
+        defaultProjectRef,
+        handleNewThread,
+      },
+      selectedGroup?.memberProjectRefs ?? null,
+    );
+  }, [
+    activeDraftThread,
+    activeThread,
+    defaultProjectRef,
+    handleNewThread,
+    legacySidebarEnabled,
+    primaryEnvironmentId,
+    projectGroupingSettings,
+    projects,
+    sidebarProjectScopeKey,
+  ]);
+
   const terminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
@@ -82,31 +105,18 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.newLocal") {
         event.preventDefault();
         event.stopPropagation();
-        void startNewThreadFromContext({
-          activeDraftThread,
-          activeThread: activeThread ?? undefined,
-          defaultProjectRef,
-          handleNewThread,
-        });
+        if (shortcutProjectRef) {
+          void handleNewThread(shortcutProjectRef);
+        } else {
+          openCommandPalette({ open: "new-thread-in" });
+        }
         return;
       }
 
       if (command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
-        // The default sidebar routes creation through the command palette
-        // whenever there is a real choice to make; the legacy sidebar (and
-        // single-project setups) keep the immediate contextual create.
-        if (!legacySidebarEnabled && projectGroupCount > 1) {
-          openCommandPalette({ open: "new-thread-in" });
-          return;
-        }
-        void startNewThreadFromContext({
-          activeDraftThread,
-          activeThread: activeThread ?? undefined,
-          defaultProjectRef,
-          handleNewThread,
-        });
+        openCommandPalette({ open: "new-thread-in" });
         return;
       }
 
@@ -159,17 +169,13 @@ function ChatRouteGlobalShortcuts() {
       window.removeEventListener("keydown", onWindowKeyDown);
     };
   }, [
-    activeDraftThread,
-    activeThread,
     clearSelection,
     handleNewThread,
     keybindings,
-    defaultProjectRef,
     previewOpen,
-    projectGroupCount,
     routeThreadRef,
     selectedThreadKeysSize,
-    legacySidebarEnabled,
+    shortcutProjectRef,
     terminalOpen,
   ]);
 

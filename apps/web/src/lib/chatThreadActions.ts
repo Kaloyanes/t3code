@@ -83,6 +83,25 @@ export function resolveThreadActionProjectRef(
   return context.defaultProjectRef;
 }
 
+export function resolveScopedThreadActionProjectRef(
+  context: ChatThreadActionContext,
+  scopedProjectRefs: readonly ScopedProjectRef[] | null,
+): ScopedProjectRef | null {
+  const contextualProjectRef = resolveThreadActionProjectRef(context);
+  if (scopedProjectRefs === null) return contextualProjectRef;
+  if (
+    contextualProjectRef &&
+    scopedProjectRefs.some(
+      (projectRef) =>
+        projectRef.environmentId === contextualProjectRef.environmentId &&
+        projectRef.projectId === contextualProjectRef.projectId,
+    )
+  ) {
+    return contextualProjectRef;
+  }
+  return scopedProjectRefs[0] ?? contextualProjectRef;
+}
+
 // New threads inherit only the *project* from the current context. Branch,
 // worktree, and env mode always come from the user's configured defaults —
 // carrying them over from the viewed thread meant "new thread" silently

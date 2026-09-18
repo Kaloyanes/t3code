@@ -1,24 +1,31 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
-import { ChevronDownIcon } from "lucide-react";
+import {
+  DEFAULT_WORKTREE_BRANCH_PREFIX,
+  WorktreeBranchPrefix,
+  type BackgroundActivitySettings,
+  type SourceControlProviderKind,
+  type SourceControlDiscoveryResult,
+  type SourceControlProviderAuth,
+  type SourceControlProviderDiscoveryItem,
+  type VcsDriverKind,
+  type VcsDiscoveryItem,
+} from "@t3tools/contracts";
+import { ChevronDownIcon, GitPullRequestIcon } from "lucide-react";
 import * as Duration from "effect/Duration";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { useEffect, useState, type ReactNode } from "react";
-import type {
-  BackgroundActivitySettings,
-  SourceControlProviderKind,
-  SourceControlDiscoveryResult,
-  SourceControlProviderAuth,
-  SourceControlProviderDiscoveryItem,
-  VcsDriverKind,
-  VcsDiscoveryItem,
-} from "@t3tools/contracts";
 import {
   getBackgroundActivityBaseProfile,
   getBackgroundActivityPresetSettings,
   resolveServerBackgroundActivitySettings,
 } from "@t3tools/shared/backgroundActivitySettings";
 
-import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
+import {
+  useScopedSettings,
+  useScopedSettingsMixed,
+  useUpdateScopedSettings,
+} from "./useScopedSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { cn } from "../../lib/utils";
@@ -44,6 +51,7 @@ import {
   NumberFieldInput,
 } from "../ui/number-field";
 import { Switch } from "../ui/switch";
+import { Input } from "../ui/input";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 import {
@@ -62,6 +70,7 @@ import {
   PolicyTooltip,
   SettingResetButton,
   SettingsPageContainer,
+  SettingsRow,
   SettingsSearchTarget,
   SettingsSection,
   useSettingsSearchTargetId,
@@ -424,6 +433,83 @@ function GitFetchIntervalSettings() {
     </SettingsSearchTarget>
   );
 }
+function WorktreeBranchPrefixSettings() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const mixed = useScopedSettingsMixed(["worktreeBranchPrefix"]);
+  const [draft, setDraft] = useState(mixed ? "" : settings.worktreeBranchPrefix);
+  const [invalid, setInvalid] = useState(false);
+  const setting = searchableSetting("worktree-branch-prefix");
+
+  useEffect(() => {
+    setDraft(mixed ? "" : settings.worktreeBranchPrefix);
+    setInvalid(false);
+  }, [mixed, settings.worktreeBranchPrefix]);
+
+  const commit = () => {
+    const next = draft.trim();
+    if (!Schema.is(WorktreeBranchPrefix)(next)) {
+      setInvalid(true);
+      return;
+    }
+    setDraft(next);
+    setInvalid(false);
+    updateSettings({ worktreeBranchPrefix: next });
+  };
+
+  return (
+    <SettingsSection title="Worktrees">
+      <SettingsRow
+        serverScoped
+        settingKeys={["worktreeBranchPrefix"]}
+        {...setting}
+        description={`Prefix for branches created by T3 Code, such as ${mixed ? "custom" : settings.worktreeBranchPrefix}/a1b2c3d4. Existing branches are unchanged.`}
+        resetAction={
+          !mixed && settings.worktreeBranchPrefix !== DEFAULT_WORKTREE_BRANCH_PREFIX ? (
+            <SettingResetButton
+              label="worktree branch prefix"
+              onClick={() =>
+                updateSettings({ worktreeBranchPrefix: DEFAULT_WORKTREE_BRANCH_PREFIX })
+              }
+            />
+          ) : null
+        }
+        control={
+          <div className="w-full sm:w-52">
+            <Input
+              size="sm"
+              value={draft}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                if (invalid) setInvalid(false);
+              }}
+              onBlur={commit}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") event.currentTarget.blur();
+              }}
+              maxLength={64}
+              placeholder={mixed ? "Mixed" : DEFAULT_WORKTREE_BRANCH_PREFIX}
+              spellCheck={false}
+              autoCapitalize="none"
+              aria-label="Worktree branch prefix"
+              aria-invalid={invalid}
+              aria-describedby={invalid ? "worktree-branch-prefix-error" : undefined}
+            />
+            {invalid ? (
+              <p
+                id="worktree-branch-prefix-error"
+                className="mt-1.5 text-xs leading-relaxed text-destructive"
+              >
+                Use 1–64 letters, numbers, periods, underscores, or hyphens; start and end with a
+                letter or number.
+              </p>
+            ) : null}
+          </div>
+        }
+      />
+    </SettingsSection>
+  );
+}
 
 function SourceControlSectionSkeleton({
   title,
@@ -546,6 +632,7 @@ export function SourceControlSettingsPanel() {
   return (
     <SettingsPageContainer>
       <ProjectDefaultsSettings category="source-control" />
+      <WorktreeBranchPrefixSettings />
       {environmentId === null ? (
         <SettingsSection id={searchableSetting("source-control").id} title="Server environment">
           <p className="px-4 py-3 text-sm text-muted-foreground">

@@ -7,9 +7,11 @@ import {
   ClientSettingsPatch,
   ClaudeSettings,
   DEFAULT_SERVER_SETTINGS,
+  DEFAULT_WORKTREE_BRANCH_PREFIX,
   resolveProviderInstanceEnabled,
   ServerSettings,
   ServerSettingsPatch,
+  WorktreeBranchPrefix,
 } from "./settings.ts";
 
 const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
@@ -18,6 +20,7 @@ const encodeClientSettings = Schema.encodeSync(ClientSettingsSchema);
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
+const decodeWorktreeBranchPrefix = Schema.decodeUnknownSync(WorktreeBranchPrefix);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
 describe("storage cleanup settings", () => {
@@ -796,6 +799,34 @@ describe("ServerSettings worktree defaults", () => {
     expect(
       decodeServerSettingsPatch({ newWorktreesStartFromOrigin: false }).newWorktreesStartFromOrigin,
     ).toBe(false);
+  });
+});
+describe("ServerSettings.worktreeBranchPrefix", () => {
+  it("defaults legacy settings to the canonical prefix", () => {
+    expect(decodeServerSettings({}).worktreeBranchPrefix).toBe(DEFAULT_WORKTREE_BRANCH_PREFIX);
+    expect(DEFAULT_SERVER_SETTINGS.worktreeBranchPrefix).toBe(DEFAULT_WORKTREE_BRANCH_PREFIX);
+  });
+
+  it("accepts a bounded Git-safe component and trims the value", () => {
+    const prefix = " Team.alpha_1-2 ";
+    expect(decodeWorktreeBranchPrefix(prefix)).toBe("Team.alpha_1-2");
+    expect(decodeServerSettingsPatch({ worktreeBranchPrefix: prefix }).worktreeBranchPrefix).toBe(
+      "Team.alpha_1-2",
+    );
+  });
+
+  it.each([
+    ".leading",
+    "trailing.",
+    "contains/slash",
+    "contains space",
+    "contains..dots",
+    "ends.lock",
+    "équipe",
+    "a".repeat(65),
+  ])("rejects invalid prefix %j", (prefix) => {
+    expect(() => decodeWorktreeBranchPrefix(prefix)).toThrow();
+    expect(() => decodeServerSettingsPatch({ worktreeBranchPrefix: prefix })).toThrow();
   });
 });
 

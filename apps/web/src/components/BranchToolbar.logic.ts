@@ -1,6 +1,5 @@
 import type { EnvironmentId, EnvironmentMachineKind, VcsRef, ProjectId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { toSortableTimestamp } from "../lib/threadSort";
 export {
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
@@ -86,59 +85,58 @@ export function resolveEnvModeLabel(mode: EnvMode): string {
   return mode === "worktree" ? "New worktree" : "Current checkout";
 }
 
-export function resolveCurrentWorkspaceLabel(activeWorktreePath: string | null): string {
-  return activeWorktreePath ? "Current worktree" : resolveEnvModeLabel("local");
+export function resolveCurrentWorkspaceLabel(
+  activeWorktreePath: string | null,
+  currentBranch?: string | null,
+): string {
+  const label = activeWorktreePath ? "Current worktree" : resolveEnvModeLabel("local");
+  return currentBranch ? `${label} (${currentBranch})` : label;
 }
 
 export function resolveLockedWorkspaceLabel(activeWorktreePath: string | null): string {
   return activeWorktreePath ? "Worktree" : "Local checkout";
 }
 
-export interface PreviousWorktreeSeed {
-  branch: string | null;
-  worktreePath: string;
+export interface ExistingWorktreeOption {
+  readonly branch: string;
+  readonly worktreePath: string;
+  readonly label: string;
 }
 
-// The most recently touched worktree in the project that the composer isn't
-// already pointing at. Backs the "Previous worktree" entry in the workspace
-// selector so a follow-up thread can hop back into the worktree you just
-// worked in without hunting for its branch. Archived threads don't compete —
-// the rest of the UI hides them, so their worktrees shouldn't resurface here.
-export function resolvePreviousWorktreeSeed(input: {
-  threads: ReadonlyArray<{
-    branch: string | null;
-    worktreePath: string | null;
-    updatedAt: string;
-    archivedAt?: string | null;
-  }>;
-  currentWorktreePath: string | null;
-}): PreviousWorktreeSeed | null {
-  let latest: { branch: string | null; worktreePath: string; updatedAt: number } | null = null;
-  for (const thread of input.threads) {
-    if (
-      !thread.worktreePath ||
-      thread.worktreePath === input.currentWorktreePath ||
-      (thread.archivedAt ?? null) !== null
-    ) {
-      continue;
-    }
-    const updatedAt = toSortableTimestamp(thread.updatedAt);
-    if (updatedAt === null) {
-      continue;
-    }
-    if (latest === null || updatedAt > latest.updatedAt) {
-      latest = {
-        branch: thread.branch,
-        worktreePath: thread.worktreePath,
-        updatedAt,
-      };
-    }
+export function resolveExistingWorktreeOptions(input: {
+  readonly refs: ReadonlyArray<Pick<VcsRef, "name" | "worktreePath">>;
+  readonly workspaceRoot: string;
+  readonly repositoryRoot?: string | null;
+}): ReadonlyArray<ExistingWorktreeOption> {
+  const separator = input.workspaceRoot.includes("\\") ? "\\" : "/";
+  const workspaceRoot = input.workspaceRoot.replace(/[\\/]+$/, "");
+  const repositoryRoot = (input.repositoryRoot ?? input.workspaceRoot).replace(/[\\/]+$/, "");
+  const caseInsensitive = separator === "\\";
+  const normalizedWorkspaceRoot = caseInsensitive ? workspaceRoot.toLowerCase() : workspaceRoot;
+  const normalizedRepositoryRoot = caseInsensitive ? repositoryRoot.toLowerCase() : repositoryRoot;
+  const relativeProjectPath =
+    normalizedWorkspaceRoot === normalizedRepositoryRoot
+      ? ""
+      : normalizedWorkspaceRoot.startsWith(`${normalizedRepositoryRoot}${separator}`)
+        ? workspaceRoot.slice(repositoryRoot.length)
+        : "";
+  const byPath = new Map<string, ExistingWorktreeOption>();
+  for (const ref of input.refs) {
+    if (!ref.worktreePath) continue;
+    const worktreeRoot = ref.worktreePath.replace(/[\\/]+$/, "");
+    const worktreePath = `${worktreeRoot}${relativeProjectPath}`;
+    const pathKey = caseInsensitive ? worktreePath.toLowerCase() : worktreePath;
+    if (pathKey === normalizedWorkspaceRoot || byPath.has(pathKey)) continue;
+    byPath.set(pathKey, {
+      branch: ref.name,
+      worktreePath,
+      label: ref.name,
+    });
   }
-  return latest === null ? null : { branch: latest.branch, worktreePath: latest.worktreePath };
-}
-
-export function resolvePreviousWorktreeLabel(seed: PreviousWorktreeSeed): string {
-  return seed.branch ? `Previous worktree (${seed.branch})` : "Previous worktree";
+  return [...byPath.values()].sort(
+    (left, right) =>
+      left.label.localeCompare(right.label) || left.worktreePath.localeCompare(right.worktreePath),
+  );
 }
 
 export function resolveEffectiveEnvMode(input: {

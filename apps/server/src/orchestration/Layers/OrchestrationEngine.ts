@@ -171,6 +171,25 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           });
         }
 
+        if (envelope.command.type === "thread.turn.start") {
+          const detachedRows = (yield* sql`
+            SELECT detached_at AS "detachedAt"
+            FROM projection_issue_detached_workspaces
+            WHERE thread_id = ${envelope.command.threadId}
+            LIMIT 1
+          `.pipe(
+            Effect.mapError(
+              toPersistenceSqlError("OrchestrationEngine.dispatch:readDetachedIssueWorkspace"),
+            ),
+          )) as ReadonlyArray<{ readonly detachedAt: string }>;
+          if (detachedRows.length > 0) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: envelope.command.type,
+              detail: `thread ${envelope.command.threadId} has no attached workspace`,
+            });
+          }
+        }
+
         if (
           envelope.command.type === "thread.auto-settle" &&
           (yield* eventStore.hasEventAfter({

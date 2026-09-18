@@ -1,11 +1,16 @@
-import { bootstrapRemoteBearerSession } from "@t3tools/client-runtime/authorization";
+import {
+  bootstrapRemoteBearerSession,
+  type RemoteEnvironmentAuthError,
+} from "@t3tools/client-runtime/authorization";
 import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Schedule from "effect/Schedule";
 import * as Semaphore from "effect/Semaphore";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 
@@ -42,6 +47,15 @@ export class DesktopLocalEnvironmentAuth extends Context.Service<
   }
 >()("@t3tools/desktop/backend/DesktopLocalEnvironmentAuth") {}
 
+const isTransientBootstrapError = (error: RemoteEnvironmentAuthError): boolean =>
+  error._tag === "RemoteEnvironmentAuthFetchError" ||
+  (error._tag === "RemoteEnvironmentAuthUndeclaredStatusError" &&
+    (error.status === 502 || error.status === 503 || error.status === 504));
+
+const transientBootstrapRetrySchedule = Schedule.recurs(49).pipe(
+  Schedule.addDelay(() => Effect.succeed(Duration.millis(100))),
+);
+
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
@@ -76,6 +90,10 @@ export const make = Effect.gen(function* () {
             deviceType: "desktop",
           },
         }).pipe(
+          Effect.retry({
+            while: isTransientBootstrapError,
+            schedule: transientBootstrapRetrySchedule,
+          }),
           Effect.provideService(HttpClient.HttpClient, httpClient),
           Effect.mapError(
             (cause) =>
