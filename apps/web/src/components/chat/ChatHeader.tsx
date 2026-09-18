@@ -47,6 +47,7 @@ import {
   WorkspaceBreadcrumbSeparator,
 } from "../WorkspaceBreadcrumb";
 import { cn } from "~/lib/utils";
+import { HeaderUsageLimitsPopover } from "./HeaderUsageLimitsPopover";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -409,6 +410,7 @@ export const ChatHeader = memo(function ChatHeader({
           "[[data-panel-animations=true]_&]:motion-safe:transition-[padding-right] [[data-panel-animations=true]_&]:motion-safe:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:motion-safe:ease-out",
         )}
       >
+        <HeaderUsageLimitsPopover />
         {activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}
