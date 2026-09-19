@@ -173,6 +173,7 @@ describe("searchSettings", () => {
       "auto-settle-inactive-threads",
       "auto-settle-merged-threads",
       "days-before-auto-settle",
+      "complete-linked-issue-on-merge",
     ]);
     expect(available.map((item) => item.id).filter((id) => gatedIds.has(id))).toEqual([]);
   });
@@ -214,6 +215,22 @@ describe("searchSettings", () => {
       "auto-settle-merged-threads",
       "days-before-auto-settle",
     ]);
+  });
+
+  it("shows linked issue completion when the server supports it", () => {
+    const available = filterAvailableSettingsSearchItems({
+      hasCloudPublicConfig: false,
+      hasEnvironment: false,
+      hasProviderSettingsEnvironment: false,
+      canManageLocalBackend: false,
+      isWslSettingsRowVisible: false,
+      hasThreadAutoSettlement: false,
+      hasIssueCompletionOnMerge: true,
+    });
+
+    expect(searchSettings("complete linked issue", available)[0]?.id).toBe(
+      "complete-linked-issue-on-merge",
+    );
   });
 
   it("finds keybinding commands by label, command id, and default key", () => {
@@ -319,6 +336,7 @@ describe("searchSettings", () => {
     ["new threads", "new-threads", "/settings/general"],
     ["agent browser access", "agent-browser-access", "/settings/integrations"],
     ["automatically pull", "automatic-pull", "/settings/source-control"],
+    ["complete linked issue", "complete-linked-issue-on-merge", "/settings/source-control"],
     ["actions", "project-actions", "/settings/projects"],
     ["project overview", "project-overview", "/settings/projects"],
   ])("routes %s to its owning category", (query, id, to) => {
@@ -348,6 +366,13 @@ describe("settings search targets", () => {
     expect(getSettingsSearchTargetScope(targetId)).toMatchObject({
       scope: "project-defaults",
       requiresThreadAutoSettlement: true,
+    });
+  });
+
+  it("retains the issue completion capability requirement", () => {
+    expect(getSettingsSearchTargetScope("complete-linked-issue-on-merge")).toMatchObject({
+      scope: "project-defaults",
+      requiresIssueCompletionOnMerge: true,
     });
   });
 

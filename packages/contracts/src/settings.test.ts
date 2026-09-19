@@ -686,6 +686,28 @@ describe("ServerSettings thread settlement", () => {
   });
 });
 
+describe("ServerSettings linked issue completion", () => {
+  it("defaults off and accepts project overrides", () => {
+    expect(decodeServerSettings({}).completeLinkedIssueOnMerge).toBe(false);
+    expect(
+      decodeServerSettings({
+        completeLinkedIssueOnMerge: true,
+        projectSettingsOverrides: {
+          project: { completeLinkedIssueOnMerge: false },
+        },
+      }),
+    ).toMatchObject({
+      completeLinkedIssueOnMerge: true,
+      projectSettingsOverrides: {
+        project: { completeLinkedIssueOnMerge: false },
+      },
+    });
+    expect(
+      decodeServerSettingsPatch({ completeLinkedIssueOnMerge: true }).completeLinkedIssueOnMerge,
+    ).toBe(true);
+  });
+});
+
 describe("ClientSettings pull request merge methods", () => {
   it("defaults to no project overrides and accepts supported methods", () => {
     expect(decodeClientSettings({}).pullRequestMergeMethodOverrides).toEqual({});

@@ -86,6 +86,7 @@ import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderComma
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor.ts";
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor.ts";
 import * as ThreadSettlementReactor from "./orchestration/ThreadSettlementReactor.ts";
+import * as IssueCompletionReactor from "./issue/IssueCompletionReactor.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as PullRequestSyncReactor from "./orchestration/PullRequestSyncReactor.ts";
 import * as ThreadPullRequestReactor from "./orchestration/ThreadPullRequestReactor.ts";
@@ -372,6 +373,13 @@ const IssueServiceLive = IssueService.layer.pipe(
   Layer.provide(WorktreeRunLayerLive),
 );
 
+const IssueCompletionLive = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const reactor = yield* IssueCompletionReactor.IssueCompletionReactor;
+    yield* reactor.start();
+  }),
+).pipe(Layer.provide(IssueCompletionReactor.layer), Layer.provide(IssueServiceLive));
+
 const SourceControlRepositoryServiceLayerLive = SourceControlRepositoryService.layer.pipe(
   Layer.provideMerge(GitVcsDriver.layer),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
@@ -499,6 +507,7 @@ const AntigravityInstallationRefreshLive = Layer.effectDiscard(
 );
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+  Layer.provideMerge(IssueCompletionLive),
   Layer.provideMerge(AntigravityInstallationRefreshLive),
   Layer.provideMerge(ProviderAuthServiceLive),
   // Core Services

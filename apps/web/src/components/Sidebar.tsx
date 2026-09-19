@@ -41,6 +41,7 @@ import {
   resolveEnvironmentMachineKind,
   type EnvironmentMachineKind,
   type EnvironmentId,
+  type IssueLinkedWork,
   type ProjectId,
   type ProjectIconOverride,
   type ProjectScript,
@@ -57,6 +58,7 @@ import {
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
+  CircleDotIcon,
   ClockIcon,
   EyeIcon,
   FolderIcon,
@@ -110,6 +112,7 @@ import { isModelPickerOpen } from "../modelPickerVisibility";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { isMacPlatform } from "~/lib/utils";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
+import { issueLinkExternalUrl, useOpenIssueLink } from "../lib/openIssueLink";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { readLocalApi } from "../localApi";
 import {
@@ -280,6 +283,7 @@ interface SidebarWorktreeGroup {
   readonly primary: boolean;
   readonly threads: readonly EnvironmentThreadShell[];
   readonly pullRequests: readonly WorktreePullRequestLink[];
+  readonly issues: readonly IssueLinkedWork[];
 }
 
 interface SidebarRepositoryGroup {
@@ -335,6 +339,13 @@ export function buildSidebarRepositoryGroups(input: {
                 normalizedPath,
             ),
           );
+          const issues = members.flatMap((project) =>
+            (project.worktreeIssues ?? []).filter(
+              (link) =>
+                normalizeProjectPathForComparison(link.worktreePath ?? project.workspaceRoot) ===
+                normalizedPath,
+            ),
+          );
           const primary = newestThread.worktreePath === null;
           const branches = new Set(
             threads.flatMap((thread) => (thread.branch ? [thread.branch] : [])),
@@ -355,6 +366,7 @@ export function buildSidebarRepositoryGroups(input: {
             primary,
             threads,
             pullRequests,
+            issues,
           };
         })
         .toSorted((left, right) => {
@@ -1097,6 +1109,7 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
   readonly primary: boolean;
   readonly threadCount: number;
   readonly pullRequests: readonly WorktreePullRequestLink[];
+  readonly issues: readonly IssueLinkedWork[];
   readonly threadRef: ScopedThreadRef;
   readonly isActive: boolean;
   readonly onThreadActivate: (threadRef: ScopedThreadRef) => void;
@@ -1107,6 +1120,7 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
   readonly onToggle: () => void;
 }) {
   const openPrLink = useOpenPrLink();
+  const openIssueLink = useOpenIssueLink(props.threadRef);
   const links = useMemo(
     () =>
       props.pullRequests.map(
@@ -1127,6 +1141,17 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
       if (openedInRightPanel && !props.isActive) props.onThreadActivate(props.threadRef);
     },
     [current, openPrLink, props.isActive, props.onThreadActivate, props.threadRef],
+  );
+  const handleIssueOpen = useCallback(
+    (event: ReactMouseEvent<HTMLAnchorElement>, issue: IssueLinkedWork) => {
+      const openedInRightPanel = openIssueLink(
+        event,
+        issueLinkExternalUrl(issue.issue),
+        props.environmentId,
+      );
+      if (openedInRightPanel && !props.isActive) props.onThreadActivate(props.threadRef);
+    },
+    [openIssueLink, props.environmentId, props.isActive, props.onThreadActivate, props.threadRef],
   );
   const metadata = useEnvironmentQuery(
     props.worktreeRunsSupported
@@ -1201,6 +1226,30 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
           openAggregate={links.length > 1}
         />
       ) : null}
+      {props.issues.map((issue) => {
+        const url = issueLinkExternalUrl(issue.issue);
+        const label = `GitHub issue #${issue.issue.number} · ${issue.issue.repository}`;
+        return (
+          <Tooltip key={`${issue.issue.host}/${issue.issue.repository}#${issue.issue.number}`}>
+            <TooltipTrigger
+              render={
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={label}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => handleIssueOpen(event, issue)}
+                  className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 whitespace-nowrap border-b border-transparent text-xs tabular-nums text-emerald-600 hover:border-current hover:text-emerald-700 focus-visible:outline-2 focus-visible:outline-ring dark:text-emerald-400 dark:hover:text-emerald-300"
+                />
+              }
+            >
+              <CircleDotIcon aria-hidden className="size-3 shrink-0" />#{issue.issue.number}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{label}</TooltipPopup>
+          </Tooltip>
+        );
+      })}
       {props.scripts.length > 0 ? (
         <Menu>
           <MenuTrigger
@@ -5288,6 +5337,7 @@ export default function Sidebar() {
                                 primary={worktree.primary}
                                 threadCount={worktree.threads.length}
                                 pullRequests={worktree.pullRequests}
+                                issues={worktree.issues}
                                 threadRef={scopeThreadRef(
                                   contextThread.environmentId,
                                   contextThread.id,

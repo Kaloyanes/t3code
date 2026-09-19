@@ -27,6 +27,7 @@ import {
   validateSettingsRouteSearch,
 } from "../components/settings/settingsScopeNavigation";
 import {
+  getIssueCompletionSearchAvailability,
   getSettingsSearchTargetScope,
   getThreadAutoSettlementSearchAvailability,
   isSettingsSearchScopeAvailable,
@@ -62,19 +63,23 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
   const autoSettlementAvailability = searchTarget?.requiresThreadAutoSettlement
     ? getThreadAutoSettlementSearchAvailability(environments, scope)
     : null;
+  const issueCompletionAvailability = searchTarget?.requiresIssueCompletionOnMerge
+    ? getIssueCompletionSearchAvailability(environments, scope)
+    : null;
   if (
     scope.kind !== "unavailable" &&
     searchTarget &&
-    autoSettlementAvailability &&
-    !autoSettlementAvailability.isTargetAvailable
+    ((autoSettlementAvailability && !autoSettlementAvailability.isTargetAvailable) ||
+      (issueCompletionAvailability && !issueCompletionAvailability.isTargetAvailable))
   ) {
+    const availability = autoSettlementAvailability ?? issueCompletionAvailability!;
     return (
       <SettingsScopeNotice
         target="environment"
         targetId={hash}
-        eligibleEnvironmentIds={autoSettlementAvailability.eligibleEnvironmentIds}
+        eligibleEnvironmentIds={availability.eligibleEnvironmentIds}
       >
-        {autoSettlementAvailability.eligibleEnvironmentIds.length > 0
+        {availability.eligibleEnvironmentIds.length > 0
           ? `${searchTarget.title} requires a supporting environment. Choose one to continue.`
           : `${searchTarget.title} requires a supporting environment. Connect or update an environment to continue.`}
       </SettingsScopeNotice>

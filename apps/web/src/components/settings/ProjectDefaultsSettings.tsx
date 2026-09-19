@@ -74,10 +74,17 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const mixedBrowser = useScopedSettingsMixed(["enableAgentBrowserAccess"]);
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
+  const mixedIssueCompletion = useScopedSettingsMixed(["completeLinkedIssueOnMerge"]);
   const modelSource = useScopedSettingSource(["defaultModelSelection"]);
   const workspaceSource = useScopedSettingSource(["defaultThreadEnvMode"]);
   const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
   const unavailable = connectedEnvironments.length === 0;
+  const supportsIssueCompletion =
+    connectedEnvironments.length > 0 &&
+    connectedEnvironments.every(
+      (environment) =>
+        environment.serverConfig?.environment.capabilities.issueCompletionOnMerge === true,
+    );
 
   // A checkout's t3.json wins over the environment default when the project
   // has no override of its own; show which one "inherit" resolves to.
@@ -416,6 +423,38 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
               </Select>
             }
           />
+          {supportsIssueCompletion ? (
+            <SettingsRow
+              serverScoped
+              settingKeys={["completeLinkedIssueOnMerge"]}
+              mixed={mixedIssueCompletion}
+              {...searchableSetting("complete-linked-issue-on-merge")}
+              description={
+                isProjectScope
+                  ? "Mark this project's linked issue completed once every pull request for its worktree has merged."
+                  : "Mark linked issues completed once every pull request for their worktree has merged. Projects can override it."
+              }
+              resetAction={
+                settings.completeLinkedIssueOnMerge ? (
+                  <SettingResetButton
+                    label="linked issue completion"
+                    tooltip="Reset linked issue completion to off"
+                    onClick={() => updateSettings({ completeLinkedIssueOnMerge: false })}
+                  />
+                ) : null
+              }
+              control={
+                <Switch
+                  aria-label="Complete linked issue on merge"
+                  mixed={mixedIssueCompletion}
+                  checked={mixedIssueCompletion ? false : settings.completeLinkedIssueOnMerge}
+                  onCheckedChange={(enabled) =>
+                    updateSettings({ completeLinkedIssueOnMerge: enabled })
+                  }
+                />
+              }
+            />
+          ) : null}
         </>
       ) : (
         <>

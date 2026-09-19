@@ -19,6 +19,21 @@ const worktreeLink = {
   stack: null,
 };
 
+const worktreeIssue = {
+  issue: {
+    provider: "github" as const,
+    host: "github.com",
+    repository: "acme/repo",
+    number: 17,
+  },
+  threadId: ThreadId.make("first"),
+  projectId,
+  branch: "feature",
+  worktreePath: "/worktrees/feature",
+  linkedAt: "2026-09-01T00:00:00.000Z",
+  source: "created" as const,
+};
+
 const project = {
   id: projectId,
   environmentId,
@@ -27,6 +42,7 @@ const project = {
   defaultModelSelection: null,
   scripts: [],
   worktreePullRequests: [worktreeLink],
+  worktreeIssues: [worktreeIssue],
   createdAt: "2026-09-01T00:00:00.000Z",
   updatedAt: "2026-09-01T00:00:00.000Z",
   physicalProjectKey: `${environmentId}:${projectId}`,
@@ -84,5 +100,6 @@ describe("sidebar worktree grouping", () => {
     expect(groups[0]?.worktrees).toHaveLength(1);
     expect(groups[0]?.worktrees[0]?.threads).toHaveLength(2);
     expect(groups[0]?.worktrees[0]?.pullRequests).toEqual([worktreeLink]);
+    expect(groups[0]?.worktrees[0]?.issues).toEqual([worktreeIssue]);
   });
 });

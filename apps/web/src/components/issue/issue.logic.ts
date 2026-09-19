@@ -1,10 +1,12 @@
 import type {
   IssueListEntry,
+  IssueLinkedWork,
   IssueRepositorySelection,
   IssueWorktreeDeletePreflightItem,
   ProjectId,
 } from "@t3tools/contracts";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
+import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
 export interface IssueRepositoryDescriptor {
   readonly projectId: ProjectId;
   readonly host: string;
@@ -200,4 +202,18 @@ export function selectIssueWorktreeAction(input: {
   if (input.linkedWork?.threadId) return "open-linked";
   if (input.detachedWorkspacePath) return "replace";
   return "create";
+}
+
+export function issueWorktreeIsLinked(
+  thread: { readonly id: string; readonly worktreePath: string | null },
+  linkedWork: IssueLinkedWork | null,
+): boolean {
+  if (linkedWork === null) return false;
+  if (thread.id === linkedWork.threadId) return true;
+  return (
+    thread.worktreePath !== null &&
+    linkedWork.worktreePath !== null &&
+    normalizeProjectPathForComparison(thread.worktreePath) ===
+      normalizeProjectPathForComparison(linkedWork.worktreePath)
+  );
 }
