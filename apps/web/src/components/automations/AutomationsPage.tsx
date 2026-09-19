@@ -388,12 +388,14 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
   const projects = useProjects().filter((project) => project.environmentId === environmentId);
   const snapshot = Option.getOrNull(AsyncResult.value(result));
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<AutomationFormState>(() => defaultForm(projects[0]?.id));
   const [saving, setSaving] = useState(false);
   const automations = snapshot?.automations ?? [];
-  const selected =
-    automations.find((automation) => automation.id === selectedId) ?? automations[0] ?? null;
+  const selected = creating
+    ? null
+    : (automations.find((automation) => automation.id === selectedId) ?? automations[0] ?? null);
   const runs = useMemo(
     () =>
       selected ? (snapshot?.runs.filter((run) => run.automationId === selected.id) ?? []) : [],
@@ -416,19 +418,24 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
     setForm((current) => ({ ...current, ...patch }));
 
   useEffect(() => {
+    if (creating) return;
     if (selected === null) {
       setSelectedId(null);
       return;
     }
     setSelectedId((current) => current ?? selected.id);
-  }, [selected]);
+  }, [creating, selected]);
 
   useEffect(() => {
-    if (editing && selected) setForm(formFromAutomation(selected));
-    if (!editing) setForm(defaultForm(projects[0]?.id));
-  }, [editing, selected?.id, environmentId, projects[0]?.id]);
+    if (creating || !editing) {
+      setForm(defaultForm(projects[0]?.id));
+    } else if (selected) {
+      setForm(formFromAutomation(selected));
+    }
+  }, [creating, editing, selected?.id, environmentId, projects[0]?.id]);
 
   const startNew = () => {
+    setCreating(true);
     setEditing(false);
     setForm(defaultForm(projects[0]?.id));
   };
@@ -454,6 +461,7 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
           });
     setSaving(false);
     if (AsyncResult.isSuccess(result)) {
+      setCreating(false);
       setEditing(false);
       await refresh();
     }
@@ -495,6 +503,7 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
                 key={automation.id}
                 type="button"
                 onClick={() => {
+                  setCreating(false);
                   setSelectedId(automation.id);
                   setEditing(true);
                 }}
@@ -702,8 +711,7 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
             Create an automation to schedule a useful agent task.
           </div>
         )}
-        {(!editing && selected !== null) || selected === null ? null : null}
-        {editing || selected === null ? (
+        {editing || creating || selected === null ? (
           <AutomationEditor
             form={form}
             projects={projects}
