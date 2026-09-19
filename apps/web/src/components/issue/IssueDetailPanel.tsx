@@ -1,12 +1,14 @@
 import type {
   EnvironmentId,
   IssueComment,
-  IssueDetail,
+  IssueLinkedWork,
   IssueRef,
   IssueReactionContent,
   IssueWorktreeDeletePreflightResult,
   IssueWorktreeDeleteResult,
+  IssueWorktreePrepareResult,
 } from "@t3tools/contracts";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import * as Cause from "effect/Cause";
 import {
   CheckIcon,
@@ -20,14 +22,15 @@ import {
   PencilIcon,
   RefreshCwIcon,
   RotateCcwIcon,
+  SearchIcon,
   SendIcon,
+  SquarePenIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import ChatMarkdown from "../ChatMarkdown";
-import { useNavigate } from "@tanstack/react-router";
 import {
   issueEnvironment,
   useIssueCandidates,
@@ -56,7 +59,8 @@ import { Spinner } from "../ui/spinner";
 import { Textarea } from "../ui/textarea";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
-import { buildThreadRouteParams } from "~/threadRoutes";
+import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
+import { issueWorktreeIsLinked } from "./issue.logic";
 
 const REACTION_CONTENT: readonly IssueReactionContent[] = [
   "thumbs-up",
@@ -981,7 +985,7 @@ export interface IssueWorktreeDialogProps {
   readonly onOpenChange: (open: boolean) => void;
   readonly environmentId: EnvironmentId;
   readonly reference: IssueRef;
-  readonly linkedWork: IssueDetail["linkedWork"] | null;
+  readonly linkedWork: IssueLinkedWork | null;
   readonly canLink?: boolean;
   readonly onActed?: () => void;
 }
@@ -1002,8 +1006,7 @@ export function IssueWorktreeDialog({
   });
   const remove = useAtomCommand(issueEnvironment.worktreeDelete, { reportFailure: false });
   const replace = useAtomCommand(issueEnvironment.worktreeReplace, { reportFailure: false });
-  const link = useAtomCommand(issueEnvironment.link, { reportFailure: false });
-  const navigate = useNavigate();
+  const newThread = useNewThreadHandler();
   const actions = useScopedActions();
   const [name, setName] = useState(`issue-${reference.number}`);
   const [baseBranch, setBaseBranch] = useState("");
@@ -1014,6 +1017,7 @@ export function IssueWorktreeDialog({
   const [deleteResult, setDeleteResult] = useState<IssueWorktreeDeleteResult | null>(null);
   const [forceAcknowledged, setForceAcknowledged] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [worktreeQuery, setWorktreeQuery] = useState("");
   const worktrees = useMemo(
     () =>
       threads.filter(
@@ -1025,6 +1029,16 @@ export function IssueWorktreeDialog({
     [environmentId, reference.projectId, threads],
   );
   const selectedItems = worktrees.filter((thread) => selected.has(thread.id));
+  const visibleWorktrees = useMemo(() => {
+    const query = worktreeQuery.trim().toLowerCase();
+    if (query.length === 0) return worktrees;
+    return worktrees.filter((thread) =>
+      [thread.title, thread.branch ?? "", thread.worktreePath ?? ""]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [worktreeQuery, worktrees]);
   const selectedInputs = selectedItems.map((thread) => ({
     threadId: thread.id,
     projectId: thread.projectId,
@@ -1034,7 +1048,7 @@ export function IssueWorktreeDialog({
   const replacePending = actions.hasPending("replace");
   const preflightPending = actions.hasPending("preflight");
   const deletePending = actions.hasPending("delete");
-  const linkPending = actions.hasPending("link");
+  const openWorktreePending = actions.hasPending("open-worktree");
 
   const prepareWorktree = () => {
     const trimmedName = name.trim();
@@ -1043,17 +1057,31 @@ export function IssueWorktreeDialog({
     void actions.run(
       "create",
       "Unable to create worktree",
-      () =>
-        prepare({
+      async () => {
+        const projectRef = scopeProjectRef(environmentId, reference.projectId);
+        const opened = canLink ? await newThread(projectRef) : null;
+        if (canLink && opened === null) throw new Error("Unable to open a thread for the worktree");
+        const result = await prepare({
           environmentId,
           input: {
             ...reference,
             name: trimmedName,
             ...(baseBranch.trim() ? { baseBranch: baseBranch.trim() } : {}),
+            ...(opened ? { threadId: opened.threadId } : {}),
           },
-        }),
+        });
+        if (result._tag === "Failure" || !opened) return result;
+        const { worktree } = result.value as IssueWorktreePrepareResult;
+        const pointed = await newThread(projectRef, {
+          branch: worktree.branch,
+          worktreePath: worktree.worktreePath,
+          envMode: "worktree",
+        });
+        if (pointed === null) throw new Error("Worktree created, but the new thread did not open");
+        return result;
+      },
       () => {
-        setNotice("Worktree created.");
+        setNotice(canLink ? "Worktree created and linked." : "Worktree created.");
         onActed?.();
       },
     );
@@ -1120,31 +1148,29 @@ export function IssueWorktreeDialog({
           },
         }),
       () => {
-        setNotice("Detached worktree replaced.");
+        setNotice("Linked worktree replaced.");
         onActed?.();
       },
     );
   };
 
-  const linkWorktree = () => {
-    const target = selectedItems[0];
-    if (!target || selectedItems.length !== 1 || !canLink || linkPending) return;
+  const openWorktree = (target: (typeof worktrees)[number]) => {
+    if (openWorktreePending) return;
     setNotice(null);
     void actions.run(
-      "link",
-      "Unable to link issue to worktree",
-      () =>
-        link({
-          environmentId,
-          input: {
-            ...reference,
-            threadId: target.id,
-            source: "manual",
-          },
-        }),
+      "open-worktree",
+      "Unable to open a new thread in this worktree",
+      async () => {
+        const opened = await newThread(scopeProjectRef(environmentId, target.projectId), {
+          branch: target.branch,
+          worktreePath: target.worktreePath,
+          envMode: "worktree",
+        });
+        if (opened === null) throw new Error("The new thread did not open");
+        return { _tag: "Success" };
+      },
       () => {
-        setNotice("Issue linked to the selected worktree.");
-        onActed?.();
+        onOpenChange(false);
       },
     );
   };
@@ -1155,7 +1181,9 @@ export function IssueWorktreeDialog({
         <DialogHeader>
           <DialogTitle>Work on issue #{reference.number}</DialogTitle>
           <DialogDescription>
-            Create a named worktree or clean up existing issue work.
+            {canLink
+              ? "Create and link a worktree, or continue in an existing one."
+              : "Create a worktree, or continue in an existing one."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-5">
@@ -1191,7 +1219,7 @@ export function IssueWorktreeDialog({
                   </>
                 ) : (
                   <>
-                    <GitBranchIcon /> Create worktree
+                    <GitBranchIcon /> {canLink ? "Create and link" : "Create worktree"}
                   </>
                 )}
               </Button>
@@ -1208,7 +1236,7 @@ export function IssueWorktreeDialog({
                     </>
                   ) : (
                     <>
-                      <RefreshCwIcon /> Replace detached work
+                      <RefreshCwIcon /> Replace linked worktree
                     </>
                   )}
                 </Button>
@@ -1227,50 +1255,79 @@ export function IssueWorktreeDialog({
           </section>
           {worktrees.length > 0 ? (
             <section className="space-y-2">
-              <h3 className="text-sm font-semibold">Existing work</h3>
-              {worktrees.map((thread) => (
-                <label
-                  key={thread.id}
-                  className="flex items-start gap-2 rounded-lg border p-2 text-sm"
-                >
-                  <Checkbox
-                    checked={selected.has(thread.id)}
-                    onCheckedChange={(checked) =>
-                      setSelected((current) => {
-                        const next = new Set(current);
-                        if (checked === true) next.add(thread.id);
-                        else next.delete(thread.id);
-                        return next;
-                      })
-                    }
-                    aria-label={`Select ${thread.title}`}
-                    disabled={deletePending || preflightPending}
+              <div>
+                <h3 className="text-sm font-semibold">
+                  Existing worktrees{" "}
+                  <span className="text-muted-foreground">({worktrees.length})</span>
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Start a new thread in a worktree, or select worktrees to check before deleting.
+                </p>
+              </div>
+              {worktrees.length > 8 ? (
+                <label className="relative block">
+                  <SearchIcon className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    className="ps-8"
+                    value={worktreeQuery}
+                    onChange={(event) => setWorktreeQuery(event.target.value)}
+                    placeholder="Search worktrees"
+                    aria-label="Search worktrees"
                   />
-                  <span className="min-w-0">
-                    <span className="block truncate">{thread.title}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {thread.branch ?? thread.worktreePath}
-                    </span>
-                  </span>
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label="Open thread"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      void navigate({
-                        to: "/$environmentId/$threadId",
-                        params: buildThreadRouteParams({
-                          environmentId: thread.environmentId,
-                          threadId: thread.id,
-                        }),
-                      });
-                    }}
-                  >
-                    <LinkIcon />
-                  </Button>
                 </label>
-              ))}
+              ) : null}
+              <div className="max-h-64 space-y-1 overflow-y-auto pe-1">
+                {visibleWorktrees.map((thread) => {
+                  const linked = issueWorktreeIsLinked(thread, linkedWork);
+                  const checkboxId = `issue-worktree-${thread.id}`;
+                  return (
+                    <div
+                      key={thread.id}
+                      className="flex items-center gap-2 rounded-lg border p-2 text-sm"
+                    >
+                      <Checkbox
+                        id={checkboxId}
+                        checked={selected.has(thread.id)}
+                        onCheckedChange={(checked) =>
+                          setSelected((current) => {
+                            const next = new Set(current);
+                            if (checked === true) next.add(thread.id);
+                            else next.delete(thread.id);
+                            return next;
+                          })
+                        }
+                        aria-label={`Select ${thread.title}`}
+                        disabled={deletePending || preflightPending}
+                      />
+                      <label htmlFor={checkboxId} className="min-w-0 flex-1 cursor-pointer">
+                        <span className="block truncate">{thread.title}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {thread.branch ?? thread.worktreePath}
+                        </span>
+                      </label>
+                      {linked ? (
+                        <Badge size="sm" variant="success">
+                          <CheckIcon /> Linked
+                        </Badge>
+                      ) : null}
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        aria-label={`New thread in ${thread.branch ?? thread.title}`}
+                        onClick={() => openWorktree(thread)}
+                        disabled={openWorktreePending}
+                      >
+                        <SquarePenIcon /> New thread
+                      </Button>
+                    </div>
+                  );
+                })}
+                {visibleWorktrees.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">
+                    No worktrees match “{worktreeQuery.trim()}”.
+                  </p>
+                ) : null}
+              </div>
               <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
@@ -1285,29 +1342,13 @@ export function IssueWorktreeDialog({
                     </>
                   ) : (
                     <>
-                      <Trash2Icon /> Check before deleting
+                      <Trash2Icon />
+                      {selectedItems.length === 0
+                        ? "Select worktrees to delete"
+                        : `Check ${selectedItems.length} before deleting`}
                     </>
                   )}
                 </Button>
-                {canLink ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={selectedItems.length !== 1 || linkPending}
-                    onClick={linkWorktree}
-                    aria-busy={linkPending}
-                  >
-                    {linkPending ? (
-                      <>
-                        <Spinner className="size-3.5" aria-label="Linking worktree" /> Linking…
-                      </>
-                    ) : (
-                      <>
-                        <LinkIcon /> Link selected work
-                      </>
-                    )}
-                  </Button>
-                ) : null}
               </div>
               <ActionFeedback
                 pending={preflightPending}
@@ -1315,9 +1356,9 @@ export function IssueWorktreeDialog({
                 error={actions.errorFor("preflight")}
               />
               <ActionFeedback
-                pending={linkPending}
-                pendingLabel="Linking issue to worktree…"
-                error={actions.errorFor("link")}
+                pending={openWorktreePending}
+                pendingLabel="Opening a new thread in the selected worktree…"
+                error={actions.errorFor("open-worktree")}
               />
             </section>
           ) : (
