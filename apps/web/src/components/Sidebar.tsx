@@ -230,9 +230,6 @@ import {
   type ProviderInstanceEntry,
 } from "../providerInstances";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
-import { worktreeRunEnvironment } from "../state/worktreeRun";
-import { useWorktreeRunConsoleStore } from "../worktreeRunConsoleStore";
-import { resolveProjectScripts } from "@t3tools/shared/projectScripts";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Button } from "./ui/button";
 import {
@@ -249,7 +246,6 @@ import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import {
   composerDraftHasUserContent,
@@ -1075,27 +1071,9 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
   readonly path: string;
   readonly primary: boolean;
   readonly threadCount: number;
-  readonly worktreeRunsSupported: boolean;
-  readonly scripts: readonly ProjectScript[];
-  readonly onRunScript: (script: ProjectScript) => void;
   readonly onCreateThread: () => void;
   readonly onToggle: () => void;
 }) {
-  const metadata = useEnvironmentQuery(
-    props.worktreeRunsSupported
-      ? worktreeRunEnvironment.metadata({ environmentId: props.environmentId, input: null })
-      : null,
-  );
-  const runningScriptIds = new Set(
-    (metadata.data ?? [])
-      .filter(
-        (run) =>
-          run.target.projectId === props.projectId &&
-          run.target.workspacePath === props.path &&
-          (run.status === "running" || run.status === "starting"),
-      )
-      .map((run) => run.target.scriptId),
-  );
   return (
     <li className="group flex h-8 list-none items-center gap-0.5 ps-3">
       <Tooltip>
@@ -1142,34 +1120,6 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
         </TooltipTrigger>
         <TooltipPopup side="top">{props.path}</TooltipPopup>
       </Tooltip>
-      {props.scripts.length > 0 ? (
-        <Menu>
-          <MenuTrigger
-            render={
-              <button
-                type="button"
-                aria-label={`Run action in ${props.label}`}
-                className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
-              />
-            }
-          >
-            <TerminalIcon aria-hidden className="size-3.5" />
-            {runningScriptIds.size > 0 ? (
-              <span className="absolute size-1.5 translate-x-2 -translate-y-2 rounded-full bg-emerald-500" />
-            ) : null}
-          </MenuTrigger>
-          <MenuPopup align="end">
-            {props.scripts.map((script) => (
-              <MenuItem key={script.id} onClick={() => props.onRunScript(script)}>
-                <TerminalIcon
-                  className={cn("size-3.5", runningScriptIds.has(script.id) && "text-emerald-500")}
-                />
-                {script.name}
-              </MenuItem>
-            ))}
-          </MenuPopup>
-        </Menu>
-      ) : null}
       <Tooltip>
         <TooltipTrigger
           render={
@@ -2456,10 +2406,6 @@ export default function Sidebar() {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
-  const startWorktreeRun = useAtomCommand(worktreeRunEnvironment.start, {
-    reportFailure: false,
-  });
-  const openWorktreeRunConsole = useWorktreeRunConsoleStore((state) => state.open);
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) => {
       toastManager.add({
@@ -5161,20 +5107,6 @@ export default function Sidebar() {
                           );
                           for (const worktree of repository.worktrees) {
                             const contextThread = worktree.threads[0]!;
-                            const project = projects.find(
-                              (candidate) =>
-                                candidate.environmentId === contextThread.environmentId &&
-                                candidate.id === contextThread.projectId,
-                            );
-                            const config = serverConfigs.get(contextThread.environmentId);
-                            const worktreeRunsSupported =
-                              config?.environment.capabilities.worktreeRuns === true;
-                            const worktreeScripts =
-                              project && worktreeRunsSupported
-                                ? resolveProjectScripts(config.settings, project).filter(
-                                    (script) => script.scope === "worktree",
-                                  )
-                                : [];
                             const containsRoute = worktree.threads.some(
                               (thread) =>
                                 scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) ===
@@ -5202,42 +5134,6 @@ export default function Sidebar() {
                                 path={worktree.path}
                                 primary={worktree.primary}
                                 threadCount={worktree.threads.length}
-                                worktreeRunsSupported={worktreeRunsSupported}
-                                scripts={worktreeScripts}
-                                onRunScript={(script) => {
-                                  void startWorktreeRun({
-                                    environmentId: contextThread.environmentId,
-                                    input: {
-                                      projectId: contextThread.projectId,
-                                      workspacePath: worktree.path,
-                                      scriptId: script.id,
-                                    },
-                                  }).then((result) => {
-                                    if (
-                                      result._tag === "Failure" &&
-                                      !isAtomCommandInterrupted(result)
-                                    ) {
-                                      const error = squashAtomCommandFailure(result);
-                                      toastManager.add({
-                                        type: "error",
-                                        title: `Could not run ${script.name}`,
-                                        description:
-                                          error instanceof Error ? error.message : String(error),
-                                      });
-                                      return;
-                                    }
-                                    if (result._tag === "Success") {
-                                      openWorktreeRunConsole({
-                                        environmentId: contextThread.environmentId,
-                                        target: {
-                                          projectId: contextThread.projectId,
-                                          workspacePath: worktree.path,
-                                          scriptId: script.id,
-                                        },
-                                      });
-                                    }
-                                  });
-                                }}
                                 onCreateThread={() => {
                                   void handleNewThreadRef.current(
                                     scopeProjectRef(
