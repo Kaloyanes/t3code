@@ -942,12 +942,11 @@ import {
   FileIcon,
   BotIcon,
   CircleAlertIcon,
-  PenLineIcon,
   PaperclipIcon,
   PencilRulerIcon,
   PlayIcon,
   ShieldIcon,
-  SparklesIcon,
+  WandSparklesIcon,
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
@@ -7134,10 +7133,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         {isEnhancingPrompt ? (
                           <Spinner className="size-4" aria-hidden />
                         ) : (
-                          <span className="relative size-4" aria-hidden="true">
-                            <PenLineIcon className="absolute inset-0 size-4" />
-                            <SparklesIcon className="absolute -end-1 -top-1 size-2.5" />
-                          </span>
+                          <WandSparklesIcon className="size-4" aria-hidden="true" />
                         )}
                       </TooltipTrigger>
                       <TooltipPopup>
