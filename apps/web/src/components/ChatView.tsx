@@ -43,6 +43,8 @@ import {
   resolveEnvironmentMachineKind,
   RuntimeMode,
   TerminalOpenInput,
+  type WorktreeRunSummary,
+  type WorktreeRunTarget,
   type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
 import { type EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
@@ -231,9 +233,11 @@ import {
 import { BranchToolbar, type BranchToolbarHandle } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-import { WorktreeRunTerminal } from "./WorktreeRunTerminal";
 import { worktreeRunEnvironment } from "../state/worktreeRun";
-import { useWorktreeRunTerminalStore } from "../worktreeRunTerminalStore";
+import {
+  useWorktreeRunTerminalStore,
+  type WorktreeRunTerminalTarget,
+} from "../worktreeRunTerminalStore";
 import {
   AlarmClockIcon,
   CheckCircle2Icon,
@@ -912,7 +916,11 @@ interface PersistentThreadTerminalDrawerProps {
   closeShortcutLabel: string | undefined;
   keybindings: ResolvedKeybindingsConfig;
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
+  worktreeRuns?: ReadonlyArray<WorktreeRunSummary>;
+  activeWorktreeRun?: WorktreeRunTerminalTarget | null;
 }
+
+const EMPTY_WORKTREE_RUNS: ReadonlyArray<WorktreeRunSummary> = [];
 
 const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDrawer({
   threadRef,
@@ -926,10 +934,14 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
   closeShortcutLabel,
   keybindings,
   onAddTerminalContext,
+  worktreeRuns = EMPTY_WORKTREE_RUNS,
+  activeWorktreeRun = null,
 }: PersistentThreadTerminalDrawerProps) {
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
+  const openWorktreeRunTerminal = useWorktreeRunTerminalStore((state) => state.open);
+  const closeWorktreeRunTerminal = useWorktreeRunTerminalStore((state) => state.close);
   const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
   const serverThread = useThread(threadRef, { waitForShell: draftThread !== null });
   const projectRef = serverThread
@@ -1225,6 +1237,12 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
     },
     [onAddTerminalContext, visible],
   );
+  const handleActiveWorktreeRunChange = useCallback(
+    (target: WorktreeRunTarget) => {
+      openWorktreeRunTerminal({ environmentId: threadRef.environmentId, target });
+    },
+    [openWorktreeRunTerminal, threadRef.environmentId],
+  );
 
   if (!project || (!terminalUiState.terminalOpen && !active) || !cwd) {
     return null;
@@ -1269,6 +1287,10 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
           onAddTerminalContext={handleAddTerminalContext}
           terminalLabelsById={terminalLabelsById}
           terminalLaunchLocationsById={terminalLaunchLocationsById}
+          worktreeRuns={worktreeRuns}
+          activeWorktreeRun={activeWorktreeRun}
+          onActiveWorktreeRunChange={handleActiveWorktreeRunChange}
+          onCloseWorktreeRun={closeWorktreeRunTerminal}
         />
       </div>
     </div>
@@ -10539,24 +10561,12 @@ export default function ChatView(props: ChatViewProps) {
         </div>
         {/* end horizontal flex container */}
 
-        {activeWorktreeRunTerminal?.environmentId === environmentId &&
-        activeWorktreeRunTerminal.target.projectId === activeProject?.id &&
-        activeWorktreeRunTerminal.target.workspacePath === activeWorkspacePath ? (
-          <WorktreeRunTerminal height={terminalUiState.terminalHeight} />
-        ) : null}
         {mountedTerminalThreadRefs.map(({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
           <PersistentThreadTerminalDrawer
             key={mountedThreadKey}
             threadRef={mountedThreadRef}
             threadId={mountedThreadRef.threadId}
-            active={
-              mountedThreadKey === activeThreadKey &&
-              !(
-                activeWorktreeRunTerminal?.environmentId === environmentId &&
-                activeWorktreeRunTerminal.target.projectId === activeProject?.id &&
-                activeWorktreeRunTerminal.target.workspacePath === activeWorkspacePath
-              )
-            }
+            active={mountedThreadKey === activeThreadKey}
             launchContext={
               mountedThreadKey === activeThreadKey ? (activeTerminalLaunchContext ?? null) : null
             }
@@ -10567,6 +10577,15 @@ export default function ChatView(props: ChatViewProps) {
             closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
             keybindings={keybindings}
             onAddTerminalContext={addTerminalContextToDraft}
+            worktreeRuns={mountedThreadKey === activeThreadKey ? workspaceRuns : []}
+            activeWorktreeRun={
+              mountedThreadKey === activeThreadKey &&
+              activeWorktreeRunTerminal?.environmentId === environmentId &&
+              activeWorktreeRunTerminal.target.projectId === activeProject?.id &&
+              activeWorktreeRunTerminal.target.workspacePath === activeWorkspacePath
+                ? activeWorktreeRunTerminal
+                : null
+            }
           />
         ))}
       </div>

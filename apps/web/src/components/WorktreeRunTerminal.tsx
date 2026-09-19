@@ -1,65 +1,45 @@
-import { useEnvironmentQuery } from "../state/query";
 import { worktreeRunEnvironment } from "../state/worktreeRun";
-import { useWorktreeRunTerminalStore } from "../worktreeRunTerminalStore";
+import { useEnvironmentQuery } from "../state/query";
 import { GhosttyTerminalSurface } from "../terminal/ghostty/surface";
 import { terminalThemeFromApp } from "./ThreadTerminalDrawer";
 import { Button } from "./ui/button";
-import { cn } from "../lib/utils";
-import { ListTree, Square, Trash2 } from "lucide-react";
-import { useEffect, useEffectEvent, useMemo, useRef } from "react";
+import type { WorktreeRunSummary } from "@t3tools/contracts";
+import { Square, Trash2 } from "lucide-react";
+import { useEffect, useEffectEvent, useRef } from "react";
 import { useAtomCommand } from "../state/use-atom-command";
+import type { WorktreeRunTerminalTarget } from "../worktreeRunTerminalStore";
 
-export function WorktreeRunTerminal(props: { readonly height: number }) {
-  const active = useWorktreeRunTerminalStore((state) => state.active);
-  const close = useWorktreeRunTerminalStore((state) => state.close);
-  const select = useWorktreeRunTerminalStore((state) => state.select);
+export function WorktreeRunTerminal(props: {
+  readonly active: WorktreeRunTerminalTarget;
+  readonly runs: ReadonlyArray<WorktreeRunSummary>;
+}) {
+  const active = props.active;
   const write = useAtomCommand(worktreeRunEnvironment.write, { reportFailure: false });
   const resize = useAtomCommand(worktreeRunEnvironment.resize, { reportFailure: false });
   const clear = useAtomCommand(worktreeRunEnvironment.clear, { reportFailure: false });
   const stop = useAtomCommand(worktreeRunEnvironment.stop, { reportFailure: false });
-  const metadata = useEnvironmentQuery(
-    active
-      ? worktreeRunEnvironment.metadata({ environmentId: active.environmentId, input: null })
-      : null,
-  );
   const attach = useEnvironmentQuery(
-    active
-      ? worktreeRunEnvironment.attach({ environmentId: active.environmentId, input: active.target })
-      : null,
-  );
-  const runs = useMemo(
-    () =>
-      (metadata.data ?? []).filter(
-        (run) =>
-          active !== null &&
-          run.target.projectId === active.target.projectId &&
-          run.target.workspacePath === active.target.workspacePath,
-      ),
-    [active, metadata.data],
+    worktreeRunEnvironment.attach({ environmentId: active.environmentId, input: active.target }),
   );
   const mountRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<GhosttyTerminalSurface | null>(null);
   const historyRef = useRef("");
-  const activeKey = active
-    ? JSON.stringify([
-        active.environmentId,
-        active.target.projectId,
-        active.target.workspacePath,
-        active.target.scriptId,
-      ])
-    : null;
+  const activeKey = JSON.stringify([
+    active.environmentId,
+    active.target.projectId,
+    active.target.workspacePath,
+    active.target.scriptId,
+  ]);
   const writeInput = useEffectEvent((data: string) => {
-    if (active)
-      void write({ environmentId: active.environmentId, input: { ...active.target, data } });
+    void write({ environmentId: active.environmentId, input: { ...active.target, data } });
   });
   const resizeTerminal = useEffectEvent((cols: number, rows: number) => {
-    if (active)
-      void resize({ environmentId: active.environmentId, input: { ...active.target, cols, rows } });
+    void resize({ environmentId: active.environmentId, input: { ...active.target, cols, rows } });
   });
 
   useEffect(() => {
     const mount = mountRef.current;
-    if (!mount || activeKey === null) return;
+    if (!mount) return;
     let disposed = false;
     void GhosttyTerminalSurface.create(mount, {
       theme: terminalThemeFromApp(mount),
@@ -93,44 +73,16 @@ export function WorktreeRunTerminal(props: { readonly height: number }) {
     historyRef.current = next;
   }, [attach.data?.history]);
 
-  if (!active) return null;
-  const selected = runs.find((run) => run.target.scriptId === active.target.scriptId) ?? null;
+  const selected = props.runs.find((run) => run.target.scriptId === active.target.scriptId) ?? null;
   return (
-    <aside
-      className="thread-terminal-drawer flex shrink-0 flex-col overflow-hidden border-t border-border/80 bg-background"
-      style={{ height: `${props.height}px` }}
+    <div
+      className="flex h-full min-h-0 flex-col overflow-hidden bg-background"
       data-terminal-owner="worktree"
     >
       <div className="flex h-9 shrink-0 items-center border-b border-border/80 px-2">
-        <div className="flex min-w-0 flex-1 self-stretch overflow-x-auto">
-          {runs.map((run) => (
-            <button
-              key={run.target.scriptId}
-              type="button"
-              onClick={() => select(run.target.scriptId)}
-              className={cn(
-                "flex shrink-0 items-center gap-2 border-b-2 px-3 text-xs",
-                run.target.scriptId === active.target.scriptId
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <span
-                className={cn(
-                  "size-1.5 rounded-full",
-                  run.status === "running" || run.status === "starting"
-                    ? "bg-emerald-500"
-                    : "bg-muted-foreground/50",
-                )}
-              />
-              {run.name}
-            </button>
-          ))}
-        </div>
-        <Button variant="ghost" size="xs" onClick={close} aria-label="Show thread terminals">
-          <ListTree className="size-3.5" />
-          Thread terminals
-        </Button>
+        <span className="min-w-0 flex-1 truncate px-1 text-xs text-muted-foreground">
+          {selected?.name ?? "Terminal"}
+        </span>
         <Button
           variant="ghost"
           size="icon-sm"
@@ -155,6 +107,6 @@ export function WorktreeRunTerminal(props: { readonly height: number }) {
           {attach.error}
         </div>
       ) : null}
-    </aside>
+    </div>
   );
 }

@@ -15,6 +15,7 @@ import {
   Square,
   SquareSplitHorizontal,
   SquareSplitVertical,
+  TerminalIcon,
   TerminalSquare,
   Trash2,
 } from "lucide-react";
@@ -24,6 +25,8 @@ import {
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
   type ThreadId,
+  type WorktreeRunSummary,
+  type WorktreeRunTarget,
 } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import * as Schema from "effect/Schema";
@@ -91,6 +94,8 @@ import {
   resolveTerminalFontSizePreference,
   TYPOGRAPHY_ADVANCED_STORAGE_KEY,
 } from "../appearanceFonts";
+import { WorktreeRunTerminal } from "./WorktreeRunTerminal";
+import type { WorktreeRunTerminalTarget } from "../worktreeRunTerminalStore";
 
 export function terminalGroupLabel(
   terminalIds: ReadonlyArray<string>,
@@ -114,6 +119,30 @@ function clampDrawerHeight(height: number): number {
   const safeHeight = Number.isFinite(height) ? height : DEFAULT_THREAD_TERMINAL_HEIGHT;
   const maxHeight = maxDrawerHeight();
   return Math.min(Math.max(Math.round(safeHeight), MIN_DRAWER_HEIGHT), maxHeight);
+}
+
+function WorktreeRunTab(props: {
+  run: WorktreeRunSummary;
+  active: boolean;
+  onClick: (target: WorktreeRunTarget) => void;
+}) {
+  const running = props.run.status === "running" || props.run.status === "starting";
+  return (
+    <button
+      type="button"
+      className={cn(
+        "flex h-6 w-full min-w-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-left text-xs",
+        props.active
+          ? "bg-accent text-foreground"
+          : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+      )}
+      onClick={() => props.onClick(props.run.target)}
+      aria-label={`Open ${props.run.name} terminal`}
+    >
+      <TerminalIcon aria-hidden className={cn("size-3 shrink-0", running && "text-emerald-500")} />
+      <span className="min-w-0 flex-1 truncate">{props.run.name}</span>
+    </button>
+  );
 }
 
 function writeSystemMessage(terminal: GhosttyTerminalSurface, message: string): void {
@@ -1028,7 +1057,14 @@ interface ThreadTerminalDrawerProps {
   terminalLabelsById?: ReadonlyMap<string, string>;
   /** Prefer per-session launch locations when the server already knows a terminal. */
   terminalLaunchLocationsById?: ReadonlyMap<string, TerminalLaunchLocation>;
+  /** Workspace runs live alongside the thread's shared terminal group. */
+  worktreeRuns?: ReadonlyArray<WorktreeRunSummary>;
+  activeWorktreeRun?: WorktreeRunTerminalTarget | null;
+  onActiveWorktreeRunChange?: (target: WorktreeRunTarget) => void;
+  onCloseWorktreeRun?: () => void;
 }
+
+const EMPTY_WORKTREE_RUNS: ReadonlyArray<WorktreeRunSummary> = [];
 
 interface TerminalActionButtonProps {
   label: string;
@@ -1087,6 +1123,10 @@ export default function ThreadTerminalDrawer({
   keybindings,
   terminalLabelsById,
   terminalLaunchLocationsById,
+  worktreeRuns = EMPTY_WORKTREE_RUNS,
+  activeWorktreeRun = null,
+  onActiveWorktreeRunChange,
+  onCloseWorktreeRun,
 }: ThreadTerminalDrawerProps) {
   const isPanel = mode === "panel";
   const [advancedTypography] = useLocalStorage(
@@ -1237,11 +1277,15 @@ export default function ThreadTerminalDrawer({
     (normalizedTerminalIds.length > 0 ? [resolvedActiveTerminalId] : []);
   const splitDirection =
     resolvedTerminalGroups[resolvedActiveGroupIndex]?.splitDirection ?? "horizontal";
-  const hasTerminalSidebar = normalizedTerminalIds.length > 1;
+  const hasTerminalSidebar = normalizedTerminalIds.length > 1 || worktreeRuns.length > 0;
   const isSplitView = visibleTerminalIds.length > 1;
   const showGroupHeaders =
+    worktreeRuns.length > 0 ||
     resolvedTerminalGroups.length > 1 ||
     resolvedTerminalGroups.some((terminalGroup) => terminalGroup.terminalIds.length > 1);
+  const sharedTerminalGroup = resolvedTerminalGroups.find((terminalGroup) =>
+    terminalGroup.terminalIds.includes(DEFAULT_THREAD_TERMINAL_ID),
+  );
   const hasReachedSplitLimit = visibleTerminalIds.length >= MAX_TERMINALS_PER_GROUP;
   const terminalLabelById = useMemo(() => {
     const next = new Map<string, string>();
@@ -1280,15 +1324,18 @@ export default function ThreadTerminalDrawer({
     : "Close Terminal";
   const onSplitTerminalAction = useCallback(() => {
     if (hasReachedSplitLimit) return;
+    onCloseWorktreeRun?.();
     onSplitTerminal();
-  }, [hasReachedSplitLimit, onSplitTerminal]);
+  }, [hasReachedSplitLimit, onCloseWorktreeRun, onSplitTerminal]);
   const onSplitTerminalVerticalAction = useCallback(() => {
     if (hasReachedSplitLimit) return;
+    onCloseWorktreeRun?.();
     onSplitTerminalVertical();
-  }, [hasReachedSplitLimit, onSplitTerminalVertical]);
+  }, [hasReachedSplitLimit, onCloseWorktreeRun, onSplitTerminalVertical]);
   const onNewTerminalAction = useCallback(() => {
+    onCloseWorktreeRun?.();
     onNewTerminal();
-  }, [onNewTerminal]);
+  }, [onCloseWorktreeRun, onNewTerminal]);
   const confirmCloseTerminal = useCallback(
     (terminalId: string) => {
       const label = terminalLabelById.get(terminalId) ?? getTerminalLabel(terminalId);
@@ -1401,7 +1448,7 @@ export default function ThreadTerminalDrawer({
     };
   }, [syncHeight]);
 
-  if (normalizedTerminalIds.length === 0) {
+  if (normalizedTerminalIds.length === 0 && worktreeRuns.length === 0) {
     return (
       <aside
         data-terminal-owner={isPanel ? "right-panel" : "drawer"}
@@ -1505,7 +1552,9 @@ export default function ThreadTerminalDrawer({
           )}
         >
           <div className="min-w-0 flex-1">
-            {isSplitView ? (
+            {activeWorktreeRun ? (
+              <WorktreeRunTerminal active={activeWorktreeRun} runs={worktreeRuns} />
+            ) : isSplitView ? (
               <div
                 className="grid h-full w-full min-w-0 gap-0 overflow-hidden"
                 style={
@@ -1640,12 +1689,18 @@ export default function ThreadTerminalDrawer({
 
               <div className="min-h-0 flex-1 overflow-y-auto px-1 py-1">
                 {resolvedTerminalGroups.map((terminalGroup) => {
-                  const isGroupActive =
+                  const hasSharedRuns = terminalGroup.terminalIds.includes(
+                    DEFAULT_THREAD_TERMINAL_ID,
+                  );
+                  const containsActiveTerminal =
                     terminalGroup.terminalIds.includes(resolvedActiveTerminalId);
-                  const groupActiveTerminalId = isGroupActive
+                  const isGroupActive =
+                    containsActiveTerminal || (hasSharedRuns && activeWorktreeRun !== null);
+                  const groupActiveTerminalId = containsActiveTerminal
                     ? resolvedActiveTerminalId
                     : (terminalGroup.terminalIds[0] ?? resolvedActiveTerminalId);
                   const terminalCount = terminalGroup.terminalIds.length;
+                  const itemCount = terminalCount + (hasSharedRuns ? worktreeRuns.length : 0);
                   const isSplitGroup = terminalCount > 1;
                   const groupLabel = terminalGroupLabel(
                     terminalGroup.terminalIds,
@@ -1667,12 +1722,15 @@ export default function ThreadTerminalDrawer({
                               ? "bg-accent/50 text-foreground"
                               : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
                           }`}
-                          onClick={() => onActiveTerminalChange(groupActiveTerminalId)}
+                          onClick={() => {
+                            onCloseWorktreeRun?.();
+                            onActiveTerminalChange(groupActiveTerminalId);
+                          }}
                         >
                           <GroupIcon className="size-3 shrink-0" />
                           <span className="min-w-0 flex-1 truncate text-left">{groupLabel}</span>
                           <span className="text-muted-foreground/70 text-[10px] tabular-nums">
-                            {terminalCount}
+                            {itemCount}
                           </span>
                         </button>
                       )}
@@ -1704,7 +1762,10 @@ export default function ThreadTerminalDrawer({
                               <button
                                 type="button"
                                 className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 text-left"
-                                onClick={() => onActiveTerminalChange(terminalId)}
+                                onClick={() => {
+                                  onCloseWorktreeRun?.();
+                                  onActiveTerminalChange(terminalId);
+                                }}
                               >
                                 <span className="truncate">{terminalLabel}</span>
                               </button>
@@ -1712,9 +1773,56 @@ export default function ThreadTerminalDrawer({
                           );
                         })}
                       </div>
+                      {hasSharedRuns ? (
+                        <div className="flex flex-col gap-0.5 pt-0.5">
+                          {worktreeRuns.map((run) => (
+                            <WorktreeRunTab
+                              key={run.target.scriptId}
+                              run={run}
+                              active={activeWorktreeRun?.target.scriptId === run.target.scriptId}
+                              onClick={(target) => onActiveWorktreeRunChange?.(target)}
+                            />
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}
+                {worktreeRuns.length > 0 && sharedTerminalGroup === undefined ? (
+                  <div className="pb-0.5">
+                    {showGroupHeaders ? (
+                      <button
+                        type="button"
+                        className={cn(
+                          "flex h-[22px] w-full cursor-pointer items-center gap-1 rounded px-1.5 text-[11px]",
+                          activeWorktreeRun
+                            ? "bg-accent/50 text-foreground"
+                            : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+                        )}
+                        onClick={() => {
+                          const firstRun = worktreeRuns[0];
+                          if (firstRun) onActiveWorktreeRunChange?.(firstRun.target);
+                        }}
+                      >
+                        <Square className="size-3 shrink-0" />
+                        <span className="min-w-0 flex-1 truncate text-left">Shared</span>
+                        <span className="text-muted-foreground/70 text-[10px] tabular-nums">
+                          {worktreeRuns.length}
+                        </span>
+                      </button>
+                    ) : null}
+                    <div className="flex flex-col gap-0.5 pt-0.5">
+                      {worktreeRuns.map((run) => (
+                        <WorktreeRunTab
+                          key={run.target.scriptId}
+                          run={run}
+                          active={activeWorktreeRun?.target.scriptId === run.target.scriptId}
+                          onClick={(target) => onActiveWorktreeRunChange?.(target)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </aside>
           )}
