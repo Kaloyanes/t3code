@@ -108,3 +108,33 @@ export const AutomationRun = Schema.Struct({
   reason: Schema.NullOr(TrimmedNonEmptyString),
 });
 export type AutomationRun = typeof AutomationRun.Type;
+
+export const AutomationSnapshot = Schema.Struct({
+  automations: Schema.Array(Automation),
+  runs: Schema.Array(AutomationRun),
+});
+export type AutomationSnapshot = typeof AutomationSnapshot.Type;
+
+export const AutomationCreateInput = Schema.Struct({
+  projectId: ProjectId,
+  name: TrimmedNonEmptyString,
+  prompt: TrimmedNonEmptyString,
+  schedule: AutomationSchedule,
+  execution: AutomationExecution,
+});
+export type AutomationCreateInput = typeof AutomationCreateInput.Type;
+
+export const AutomationUpdateInput = Schema.Struct({
+  id: AutomationId,
+  name: TrimmedNonEmptyString,
+  prompt: TrimmedNonEmptyString,
+  schedule: AutomationSchedule,
+  execution: AutomationExecution,
+});
+export type AutomationUpdateInput = typeof AutomationUpdateInput.Type;
+
+export const AutomationIdInput = Schema.Struct({ id: AutomationId });
+export type AutomationIdInput = typeof AutomationIdInput.Type;
+
+export const AutomationRunIdInput = Schema.Struct({ id: AutomationRunId });
+export type AutomationRunIdInput = typeof AutomationRunIdInput.Type;
