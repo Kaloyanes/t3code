@@ -69,6 +69,9 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "project.create":
     case "project.meta.update":
     case "project.delete":
+    case "project.worktree-pull-request.link":
+    case "project.worktree-pull-request.unlink":
+    case "project.worktree-pull-request-link.sync":
       return {
         aggregateKind: "project",
         aggregateId: command.projectId,

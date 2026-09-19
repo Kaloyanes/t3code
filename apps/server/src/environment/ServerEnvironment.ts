@@ -242,6 +242,7 @@ export const make = Effect.gen(function* () {
       promptEnhancement: true,
       promptEnhancementSelection: true,
       threadPullRequests: true,
+      worktreePullRequests: true,
       pullRequestStackActions: true,
       threadPullRequestLinking: true,
       environmentIcon: true,

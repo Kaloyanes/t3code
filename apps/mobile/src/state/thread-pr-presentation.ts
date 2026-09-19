@@ -2,6 +2,7 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import type {
   ExecutionEnvironmentCapabilities,
   ThreadPullRequestLink,
+  WorktreePullRequestLink,
   VcsStatusResult,
 } from "@t3tools/contracts";
 import { resolveChangeRequestPresentation } from "@t3tools/shared/sourceControl";
@@ -9,6 +10,7 @@ import { resolveChangeRequestPresentation } from "@t3tools/shared/sourceControl"
 import {
   resolveThreadCurrentPullRequestLink,
   resolveThreadPullRequestBadge,
+  effectiveThreadPullRequests,
 } from "@t3tools/shared/threadPullRequests";
 
 export type ThreadPr = NonNullable<VcsStatusResult["pr"]>;
@@ -105,14 +107,25 @@ export function presentThreadLinkedPullRequests(
 
 /** Only the array capability replaces legacy references with persisted snapshots. */
 export function resolveThreadPrSource(
-  thread: Pick<EnvironmentThreadShell, "pullRequests" | "linkedPullRequest" | "branchPullRequest">,
+  thread: Pick<
+    EnvironmentThreadShell,
+    "pullRequests" | "linkedPullRequest" | "branchPullRequest"
+  > & {
+    readonly worktreePath?: string | null;
+    readonly worktreePullRequests?: ReadonlyArray<WorktreePullRequestLink>;
+  },
   capabilities:
     | Pick<ExecutionEnvironmentCapabilities, "threadPullRequests" | "threadPullRequestLinking">
     | undefined,
 ) {
   const supportsSnapshots = capabilities?.threadPullRequests === true;
+  const pullRequests = effectiveThreadPullRequests(
+    thread.pullRequests,
+    thread.worktreePullRequests,
+    thread.worktreePath ?? null,
+  );
   const linkedPresentation = supportsSnapshots
-    ? presentThreadLinkedPullRequests(thread.pullRequests)
+    ? presentThreadLinkedPullRequests(pullRequests)
     : null;
   const pullRequestRef =
     linkedPresentation !== null

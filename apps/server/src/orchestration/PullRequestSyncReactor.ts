@@ -1,12 +1,14 @@
 import { siblingPullRequestUrl } from "@t3tools/shared/changeRequestUrl";
 import {
   CommandId,
+  type OrchestrationProjectShell,
   type OrchestrationThreadShell,
   type PullRequestSummary,
   type ThreadPullRequestKey,
   type ThreadPullRequestLink,
   type ThreadPullRequestSnapshot,
   type ThreadPullRequestStack,
+  type WorktreePullRequestLink,
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import {
@@ -36,8 +38,9 @@ const SLOW_SYNC_INTERVAL_MS = 15 * 60 * 1_000;
 type SnapshotFields = Omit<ThreadPullRequestSnapshot, "syncedAt">;
 
 interface LinkEntry {
-  readonly thread: OrchestrationThreadShell;
-  readonly link: ThreadPullRequestLink;
+  readonly thread?: OrchestrationThreadShell;
+  readonly project?: OrchestrationProjectShell;
+  readonly link: ThreadPullRequestLink | WorktreePullRequestLink;
 }
 
 function snapshotFieldsOf(summary: PullRequestSummary): SnapshotFields {
@@ -108,6 +111,13 @@ function isUnsettled(thread: OrchestrationThreadShell): boolean {
   return thread.settledOverride !== "settled" && thread.settledAt === null;
 }
 
+function isWorktreeEntry(entry: LinkEntry): entry is LinkEntry & {
+  readonly project: OrchestrationProjectShell;
+  readonly link: WorktreePullRequestLink;
+} {
+  return entry.project !== undefined;
+}
+
 /**
  * Keeps every thread ↔ pull request link's host snapshot current. One sweep a minute reads
  * the shell snapshot, groups visible links by pull request so the host is asked once per PR
@@ -140,7 +150,13 @@ export const make = Effect.gen(function* () {
     if (requested.has(key) || retryStacks.has(key)) return true;
     if (entries.some((entry) => entry.link.snapshot === null)) return true;
     if (entries.every((entry) => entry.link.snapshot?.state === "merged")) return false;
-    if (entries.some((entry) => entry.link.snapshot?.state === "open" && isUnsettled(entry.thread)))
+    if (
+      entries.some(
+        (entry) =>
+          entry.link.snapshot?.state === "open" &&
+          (entry.thread === undefined || isUnsettled(entry.thread)),
+      )
+    )
       return true;
     // Closed requests can reopen on the host, including after the thread settles.
     const last = lastSyncedAt.get(key);
@@ -159,6 +175,14 @@ export const make = Effect.gen(function* () {
     const nowIso = DateTime.formatIso(now);
 
     const groups = new Map<string, Array<LinkEntry>>();
+    for (const project of snapshot.projects) {
+      for (const link of project.worktreePullRequests ?? []) {
+        const key = threadPullRequestKeyOf(link);
+        const entries = groups.get(key) ?? [];
+        entries.push({ project, link });
+        groups.set(key, entries);
+      }
+    }
     for (const thread of snapshot.threads) {
       if (thread.archivedAt !== null) continue;
       for (const link of visibleThreadPullRequests(thread.pullRequests)) {
@@ -182,8 +206,11 @@ export const make = Effect.gen(function* () {
       entry: LinkEntry,
       fields: SnapshotFields,
       fetchedStack: { readonly stack: ThreadPullRequestStack | null } | null,
+      compatibilityThread: OrchestrationThreadShell | undefined,
+      worktreeScopedThread: boolean,
     ) {
-      const { thread, link } = entry;
+      const { thread, project, link } = entry;
+      const worktreeEntry = isWorktreeEntry(entry) ? entry : null;
       const nextStack = fetchedStack === null ? link.stack : fetchedStack.stack;
       const changed =
         link.snapshot === null ||
@@ -196,39 +223,96 @@ export const make = Effect.gen(function* () {
           repository: link.repository,
           number: layer.number,
         };
-        const dedupeKey = `${thread.id}:${threadPullRequestKeyOf(layerKey)}`;
+        const dedupeKey = worktreeEntry
+          ? `${worktreeEntry.project.id}:${worktreeEntry.link.worktreePath ?? ""}:${threadPullRequestKeyOf(layerKey)}`
+          : `${thread!.id}:${threadPullRequestKeyOf(layerKey)}`;
         if (linkedThisSweep.has(dedupeKey)) continue;
         // Tombstones count as present: a dismissed layer is never re-added.
-        if (
-          thread.pullRequests.some((existing) => threadPullRequestKeysEqual(existing, layerKey))
-        ) {
+        const alreadyLinked = worktreeEntry
+          ? (worktreeEntry.project.worktreePullRequests ?? []).some(
+              (existing) =>
+                existing.worktreePath === worktreeEntry.link.worktreePath &&
+                threadPullRequestKeysEqual(existing, layerKey),
+            )
+          : thread!.pullRequests.some((existing) => threadPullRequestKeysEqual(existing, layerKey));
+        if (alreadyLinked) {
+          continue;
+        }
+        if (worktreeEntry === null && worktreeScopedThread) {
+          // The project entry publishes the worktree link and its compatibility
+          // shadow. Do not rediscover the same layer from that shadow.
+          linkedThisSweep.add(dedupeKey);
           continue;
         }
         const url = siblingPullRequestUrl(link.url, layer.number);
         if (url === null) continue;
         const uuid = yield* crypto.randomUUIDv4;
-        yield* engine.dispatch({
-          type: "thread.pull-request.link",
-          commandId: CommandId.make(`server:pr-stack-link:${thread.id}:${uuid}`),
-          threadId: thread.id,
-          ...layerKey,
-          url,
-          source: "stack",
-        });
+        yield* engine.dispatch(
+          worktreeEntry
+            ? {
+                type: "project.worktree-pull-request.link",
+                commandId: CommandId.make(
+                  `server:pr-stack-link:${worktreeEntry.project.id}:${uuid}`,
+                ),
+                projectId: worktreeEntry.project.id,
+                worktreePath: worktreeEntry.link.worktreePath,
+                ...layerKey,
+                url,
+                source: "stack" as const,
+              }
+            : {
+                type: "thread.pull-request.link",
+                commandId: CommandId.make(`server:pr-stack-link:${thread!.id}:${uuid}`),
+                threadId: thread!.id,
+                ...layerKey,
+                url,
+                source: "stack" as const,
+              },
+        );
+        if (
+          worktreeEntry !== null &&
+          compatibilityThread !== undefined &&
+          !compatibilityThread.pullRequests.some((existing) =>
+            threadPullRequestKeysEqual(existing, layerKey),
+          )
+        ) {
+          yield* engine.dispatch({
+            type: "thread.pull-request.link",
+            commandId: CommandId.make(`server:pr-stack-shadow:${compatibilityThread.id}:${uuid}`),
+            threadId: compatibilityThread.id,
+            ...layerKey,
+            url,
+            source: "stack",
+          });
+        }
         linkedThisSweep.add(dedupeKey);
       }
       if (changed) {
         const uuid = yield* crypto.randomUUIDv4;
-        yield* engine.dispatch({
-          type: "thread.pull-request-link.sync",
-          commandId: CommandId.make(`server:pr-sync:${thread.id}:${uuid}`),
-          threadId: thread.id,
-          host: normalizeThreadPullRequestKey(link).host,
-          repository: link.repository,
-          number: link.number,
-          snapshot: { ...fields, syncedAt: nowIso },
-          stack: nextStack,
-        });
+        yield* engine.dispatch(
+          worktreeEntry
+            ? {
+                type: "project.worktree-pull-request-link.sync",
+                commandId: CommandId.make(`server:pr-sync:${worktreeEntry.project.id}:${uuid}`),
+                projectId: worktreeEntry.project.id,
+                worktreePath: worktreeEntry.link.worktreePath,
+                host: normalizeThreadPullRequestKey(link).host,
+                repository: link.repository,
+                number: link.number,
+                snapshot: { ...fields, syncedAt: nowIso },
+                stack: nextStack,
+              }
+            : {
+                type: "thread.pull-request-link.sync",
+                commandId: CommandId.make(`server:pr-sync:${thread!.id}:${uuid}`),
+                threadId: thread!.id,
+                host: normalizeThreadPullRequestKey(link).host,
+                repository: link.repository,
+                number: link.number,
+                snapshot: { ...fields, syncedAt: nowIso },
+                stack: nextStack,
+              },
+        );
       }
     });
 
@@ -238,7 +322,7 @@ export const make = Effect.gen(function* () {
     ) {
       const first = entries[0]!;
       const ref = {
-        projectId: first.thread.projectId,
+        projectId: first.project?.id ?? first.thread!.projectId,
         host: normalizeThreadPullRequestKey(first.link).host,
         repository: first.link.repository,
         number: first.link.number,
@@ -279,18 +363,45 @@ export const make = Effect.gen(function* () {
       lastSyncedAt.set(key, nowMs);
       // A refresh requested while the host read was in flight belongs to the next sweep.
       if (requested.get(key) === generation) requested.delete(key);
+      const firstWorktree = isWorktreeEntry(first) ? first : null;
+      const compatibilityThread =
+        firstWorktree === null
+          ? undefined
+          : entries.find(
+              (entry) =>
+                entry.thread !== undefined &&
+                entry.thread.projectId === firstWorktree.project.id &&
+                entry.thread.worktreePath === firstWorktree.link.worktreePath,
+            )?.thread;
       yield* Effect.forEach(
         entries,
-        (entry) =>
-          syncEntry(entry, fields, fetchedStack).pipe(
+        (entry) => {
+          const worktreeScopedThread =
+            entry.thread !== undefined &&
+            entries.some(
+              (candidate) =>
+                isWorktreeEntry(candidate) &&
+                candidate.project.id === entry.thread!.projectId &&
+                candidate.link.worktreePath === entry.thread!.worktreePath,
+            );
+          return syncEntry(
+            entry,
+            fields,
+            fetchedStack,
+            compatibilityThread,
+            worktreeScopedThread,
+          ).pipe(
             persistence.withPermits(1),
             Effect.catchCause((cause) => {
               if (!Cause.hasInterruptsOnly(cause)) retryStacks.add(key);
-              return logSkipped("pull request sync skipped", { threadId: entry.thread.id, key })(
-                cause,
-              );
+              return logSkipped("pull request sync skipped", {
+                key,
+                ...(entry.thread === undefined ? {} : { threadId: entry.thread.id }),
+                ...(entry.project === undefined ? {} : { projectId: entry.project.id }),
+              })(cause);
             }),
-          ),
+          );
+        },
         { discard: true },
       );
     });
@@ -316,9 +427,19 @@ export const make = Effect.gen(function* () {
   )(function* () {
     const events = yield* engine.subscribeDomainEvents;
     yield* forkParked(
-      Stream.runForEach(events, (event) =>
-        event.type === "thread.pull-request-linked" ? requestSync(event.payload.link) : Effect.void,
-      ),
+      Stream.runForEach(events, (event) => {
+        if (event.type === "thread.pull-request-linked") {
+          return requestSync(event.payload.link);
+        }
+        if (event.type === "project.meta-updated") {
+          return Effect.forEach(
+            event.payload.worktreePullRequests ?? [],
+            (link) => requestSync(link),
+            { discard: true },
+          );
+        }
+        return Effect.void;
+      }),
     );
     yield* forkParked(
       Effect.gen(function* () {

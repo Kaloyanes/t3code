@@ -59,6 +59,23 @@ describe("GitPreparePullRequestThreadInput", () => {
   });
 });
 
+describe("GitRunStackedActionInput", () => {
+  it("accepts an explicit worktree PR scope while keeping omission compatible", () => {
+    expect(
+      decodeRunStackedActionInput({
+        actionId: "test-action",
+        cwd: "/repo",
+        action: "create_pr",
+        createdPullRequestScope: "worktree",
+      }).createdPullRequestScope,
+    ).toBe("worktree");
+    expect(
+      decodeRunStackedActionInput({ actionId: "test-action", cwd: "/repo", action: "create_pr" })
+        .createdPullRequestScope,
+    ).toBeUndefined();
+  });
+});
+
 describe("GitPreparePullRequestThreadResult", () => {
   it("defaults legacy responses to the pull request head", () => {
     const parsed = decodePreparePullRequestThreadResult({

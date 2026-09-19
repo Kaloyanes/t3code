@@ -14,6 +14,7 @@ import {
   type PullRequestSummary,
   type ThreadPullRequestLink,
   type ThreadPullRequestSnapshot,
+  type WorktreePullRequestLink,
 } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
@@ -41,16 +42,22 @@ const PROJECT_ID = ProjectId.make("sync-project");
 
 type SyncCommand = Extract<
   OrchestrationCommand,
-  { readonly type: "thread.pull-request-link.sync" }
+  { readonly type: "thread.pull-request-link.sync" | "project.worktree-pull-request-link.sync" }
 >;
-type LinkCommand = Extract<OrchestrationCommand, { readonly type: "thread.pull-request.link" }>;
+type LinkCommand = Extract<
+  OrchestrationCommand,
+  { readonly type: "thread.pull-request.link" | "project.worktree-pull-request.link" }
+>;
 
 const testCrypto = Crypto.make({
   randomBytes: (size) => new Uint8Array(size).fill(1),
   digest: (_algorithm, data) => Effect.succeed(data),
 });
 
-function makeProject(id: ProjectId = PROJECT_ID): OrchestrationProjectShell {
+function makeProject(
+  id: ProjectId = PROJECT_ID,
+  overrides: Partial<OrchestrationProjectShell> = {},
+): OrchestrationProjectShell {
   return {
     id,
     title: `Project ${id}`,
@@ -59,6 +66,7 @@ function makeProject(id: ProjectId = PROJECT_ID): OrchestrationProjectShell {
     scripts: [],
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: NOW,
+    ...overrides,
   };
 }
 
@@ -124,13 +132,27 @@ function makeLink(
   };
 }
 
+function makeWorktreeLink(
+  number: number,
+  overrides: Partial<WorktreePullRequestLink> = {},
+): WorktreePullRequestLink {
+  return {
+    ...makeLink(number, null, { source: "created" }),
+    projectId: PROJECT_ID,
+    worktreePath: "/tmp/worktree",
+    source: "created",
+    ...overrides,
+  };
+}
+
 function makeSnapshot(
   threads: ReadonlyArray<OrchestrationThreadShell>,
   snapshotSequence = 1,
+  projects: ReadonlyArray<OrchestrationProjectShell> = [makeProject()],
 ): OrchestrationShellSnapshot {
   return {
     snapshotSequence,
-    projects: [makeProject()],
+    projects,
     threads,
     updatedAt: NOW,
   };
@@ -192,13 +214,19 @@ const makeHarness = Effect.fn("makePullRequestSyncHarness")(function* (options: 
     });
 
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) => {
-    if (command.type === "thread.pull-request-link.sync") {
+    if (
+      command.type === "thread.pull-request-link.sync" ||
+      command.type === "project.worktree-pull-request-link.sync"
+    ) {
       return Ref.update(syncCommands, (recorded) => [...recorded, command]).pipe(
         Effect.andThen(options.onDispatch?.(command) ?? Effect.void),
         Effect.as({ sequence: 1 }),
       );
     }
-    if (command.type === "thread.pull-request.link") {
+    if (
+      command.type === "thread.pull-request.link" ||
+      command.type === "project.worktree-pull-request.link"
+    ) {
       return Ref.update(linkCommands, (recorded) => [...recorded, command]).pipe(
         Effect.andThen(options.onDispatch?.(command) ?? Effect.void),
         Effect.as({ sequence: 1 }),
@@ -275,7 +303,10 @@ function applySync(
       ...thread,
       pullRequests: thread.pullRequests.map((link) => {
         const command = commands.findLast(
-          (candidate) => candidate.threadId === thread.id && candidate.number === link.number,
+          (candidate) =>
+            candidate.type === "thread.pull-request-link.sync" &&
+            candidate.threadId === thread.id &&
+            candidate.number === link.number,
         );
         return command === undefined
           ? link
@@ -286,6 +317,53 @@ function applySync(
 }
 
 describe("PullRequestSyncReactor", () => {
+  it.effect("syncs a worktree PR once while updating its compatibility shadow", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const worktreeLink = makeWorktreeLink(42);
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot(
+            [
+              makeThread("one", {
+                worktreePath: "/tmp/worktree",
+                pullRequests: [makeLink(42, null, { source: "created" })],
+              }),
+            ],
+            1,
+            [makeProject(PROJECT_ID, { worktreePullRequests: [worktreeLink] })],
+          ),
+          stack: () =>
+            Effect.succeed({
+              id: "stack",
+              number: 42,
+              url: "https://github.com/owner/repository/stacks/42",
+              base: "main",
+              layers: [
+                { number: 41, headBranch: "base", state: "open" as const },
+                { number: 42, headBranch: "feature", state: "open" as const },
+              ],
+            }),
+        });
+        yield* Effect.gen(function* () {
+          yield* startAndSweep(fixture);
+          assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 1);
+          assert.deepStrictEqual(
+            (yield* Ref.get(fixture.syncCommands)).map((command) => command.type).sort(),
+            ["project.worktree-pull-request-link.sync", "thread.pull-request-link.sync"],
+          );
+          assert.deepStrictEqual(
+            (yield* Ref.get(fixture.linkCommands)).map((command) => [command.type, command.number]),
+            [
+              ["project.worktree-pull-request.link", 41],
+              ["thread.pull-request.link", 41],
+            ],
+          );
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
   it.effect("syncs a newly linked merged PR without waiting for the periodic sweep", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -536,6 +614,7 @@ describe("PullRequestSyncReactor", () => {
           const commands = yield* Ref.get(fixture.syncCommands);
           assert.deepStrictEqual(
             commands
+              .filter((command) => command.type === "thread.pull-request-link.sync")
               .map((command) => [command.threadId, command.repository] as const)
               .sort((left, right) => left[0].localeCompare(right[0])),
             [
@@ -801,10 +880,14 @@ describe("PullRequestSyncReactor", () => {
           stack: () => Effect.succeed(stack),
           onDispatch: (command) =>
             Effect.sync(() => {
-              thread =
-                command.type === "thread.pull-request.link"
-                  ? { ...thread, pullRequests: [...thread.pullRequests, makeLink(command.number)] }
-                  : applySync(makeSnapshot([thread]), [command]).threads[0]!;
+              if (command.type === "thread.pull-request.link") {
+                thread = {
+                  ...thread,
+                  pullRequests: [...thread.pullRequests, makeLink(command.number)],
+                };
+              } else if (command.type === "thread.pull-request-link.sync") {
+                thread = applySync(makeSnapshot([thread]), [command]).threads[0]!;
+              }
               // Every projected event may wake settlement, including the terminal root update.
               assert.isNull(
                 resolveAutoSettlementAt({

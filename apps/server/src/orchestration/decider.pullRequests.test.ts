@@ -8,6 +8,7 @@ import {
   type OrchestrationReadModel,
   type ThreadPullRequestLink,
   type ThreadPullRequestSnapshot,
+  type WorktreePullRequestLink,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
@@ -50,7 +51,22 @@ function makeLink(overrides: Partial<ThreadPullRequestLink> = {}): ThreadPullReq
   };
 }
 
-function makeReadModel(pullRequests: ReadonlyArray<ThreadPullRequestLink>): OrchestrationReadModel {
+function makeWorktreeLink(
+  overrides: Partial<WorktreePullRequestLink> = {},
+): WorktreePullRequestLink {
+  return {
+    ...makeLink({ source: "created" }),
+    projectId: ProjectId.make("project-1"),
+    worktreePath: null,
+    source: "created",
+    ...overrides,
+  };
+}
+
+function makeReadModel(
+  pullRequests: ReadonlyArray<ThreadPullRequestLink>,
+  worktreePullRequests: ReadonlyArray<WorktreePullRequestLink> = [],
+): OrchestrationReadModel {
   return {
     snapshotSequence: 0,
     projects: [
@@ -73,6 +89,7 @@ function makeReadModel(pullRequests: ReadonlyArray<ThreadPullRequestLink>): Orch
             remoteUrl: "https://github.com/t3tools/t3code.git",
           },
         },
+        worktreePullRequests,
       },
     ],
     threads: [
@@ -339,6 +356,88 @@ it.layer(NodeServices.layer)("pull request link decider", (it) => {
         stack: null,
       });
       expect(event.payload.updatedAt).not.toBe(NOW);
+    }),
+  );
+
+  it.effect("links, syncs, and unlinks a worktree pull request", () =>
+    Effect.gen(function* () {
+      const linked = yield* decideOrchestrationCommand({
+        command: {
+          type: "project.worktree-pull-request.link",
+          commandId: CommandId.make("worktree-link"),
+          projectId: ProjectId.make("project-1"),
+          worktreePath: "/tmp/worktree",
+          host: " GitHub.com ",
+          repository: "T3Tools/T3Code",
+          number: 42,
+          url: "https://github.com/t3tools/t3code/pull/42",
+          source: "created",
+        },
+        readModel: makeReadModel([]),
+      });
+      const linkEvent = expectSingleEvent(linked, "project.meta-updated");
+      expect(linkEvent.payload.worktreePullRequests).toHaveLength(1);
+      const worktreeLink = linkEvent.payload.worktreePullRequests![0]!;
+      expect(worktreeLink).toMatchObject({
+        projectId: ProjectId.make("project-1"),
+        worktreePath: "/tmp/worktree",
+        host: "github.com",
+        repository: "t3tools/t3code",
+        number: 42,
+        source: "created",
+        snapshot: null,
+        stack: null,
+      });
+
+      let model = yield* projectEvent(makeReadModel([]), { ...linkEvent, sequence: 1 });
+      const synced = yield* decideOrchestrationCommand({
+        command: {
+          type: "project.worktree-pull-request-link.sync",
+          commandId: CommandId.make("worktree-sync"),
+          projectId: ProjectId.make("project-1"),
+          worktreePath: "/tmp/worktree",
+          host: "github.com",
+          repository: "t3tools/t3code",
+          number: 42,
+          snapshot,
+          stack: null,
+        },
+        readModel: model,
+      });
+      const syncEvent = expectSingleEvent(synced, "project.meta-updated");
+      expect(syncEvent.payload.worktreePullRequests![0]!.snapshot).toEqual(snapshot);
+
+      const shadow = makeLink({ source: "created" });
+      model = {
+        ...model,
+        projects: model.projects.map((project) =>
+          project.id === ProjectId.make("project-1")
+            ? { ...project, worktreePullRequests: [worktreeLink] }
+            : project,
+        ),
+        threads: model.threads.map((thread) => ({
+          ...thread,
+          worktreePath: "/tmp/worktree",
+          pullRequests: [shadow],
+        })),
+      };
+      const unlinked = yield* decideOrchestrationCommand({
+        command: {
+          type: "project.worktree-pull-request.unlink",
+          commandId: CommandId.make("worktree-unlink"),
+          projectId: ProjectId.make("project-1"),
+          worktreePath: "/tmp/worktree",
+          host: "github.com",
+          repository: "t3tools/t3code",
+          number: 42,
+        },
+        readModel: model,
+      });
+      const events = Array.isArray(unlinked) ? unlinked : [unlinked];
+      expect(events.map((event) => event.type)).toEqual([
+        "project.meta-updated",
+        "thread.pull-request-unlinked",
+      ]);
     }),
   );
 

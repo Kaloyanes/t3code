@@ -37,6 +37,15 @@ describe("ExecutionEnvironmentDescriptor", () => {
     ).toBe(true);
   });
 
+  it("preserves the worktree-scoped pull-request capability", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, worktreePullRequests: true },
+      }).capabilities.worktreePullRequests,
+    ).toBe(true);
+  });
+
   it("treats worktree runs as an optional versioned capability", () => {
     expect(decodeDescriptor(descriptor).capabilities.worktreeRuns).toBeUndefined();
     expect(

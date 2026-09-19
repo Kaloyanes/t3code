@@ -346,6 +346,7 @@ export function projectEvent(
             faviconPath: payload.faviconPath ?? null,
             projectIcon: payload.projectIcon ?? null,
             scripts: payload.scripts,
+            worktreePullRequests: [],
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
@@ -388,6 +389,9 @@ export function projectEvent(
                     ? { projectIcon: payload.projectIcon }
                     : {}),
                   ...(payload.scripts !== undefined ? { scripts: payload.scripts } : {}),
+                  ...(payload.worktreePullRequests !== undefined
+                    ? { worktreePullRequests: payload.worktreePullRequests }
+                    : {}),
                   updatedAt: payload.updatedAt,
                 }
               : project,
