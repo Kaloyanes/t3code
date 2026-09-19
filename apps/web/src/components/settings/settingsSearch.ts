@@ -64,6 +64,7 @@ export interface SettingsSearchItem {
    */
   readonly secondary?: boolean;
   readonly requiresThreadAutoSettlement?: boolean;
+  readonly requiresIssueCompletionOnMerge?: boolean;
 }
 
 export interface SettingsSearchAvailability {
@@ -74,6 +75,7 @@ export interface SettingsSearchAvailability {
   readonly canManageLocalBackend: boolean;
   readonly isWslSettingsRowVisible: boolean;
   readonly hasThreadAutoSettlement: boolean;
+  readonly hasIssueCompletionOnMerge?: boolean;
 }
 
 /**
@@ -655,6 +657,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["pull request merge squash rebase last selected"],
   },
   {
+    id: "complete-linked-issue-on-merge",
+    title: "Complete linked issue on merge",
+    to: "/settings/source-control",
+    scope: "project-defaults",
+    requiresIssueCompletionOnMerge: true,
+    searchTerms: ["close complete github issue pull request merged automation worktree"],
+  },
+  {
     id: "worktree-branch-prefix",
     title: "Worktree branch prefix",
     to: "/settings/source-control",
@@ -844,6 +854,7 @@ export function getSettingsSearchTargetScope(targetId: string) {
         title: item.title,
         scope: item.scope ?? SETTINGS_CATEGORY_SCOPES[item.to],
         ...(item.requiresThreadAutoSettlement ? { requiresThreadAutoSettlement: true } : {}),
+        ...(item.requiresIssueCompletionOnMerge ? { requiresIssueCompletionOnMerge: true } : {}),
       }
     : null;
 }
@@ -871,6 +882,43 @@ export function getThreadAutoSettlementSearchAvailability(
     .filter(
       (environment) =>
         environment.serverConfig?.environment.capabilities.threadAutoSettlement === true,
+    )
+    .map((environment) => environment.environmentId);
+  const selected = connected.filter((environment) =>
+    scope?.environmentIds.includes(environment.environmentId),
+  );
+  return {
+    eligibleEnvironmentIds,
+    isTargetAvailable:
+      scope !== undefined &&
+      scope.kind !== "unavailable" &&
+      selected.length > 0 &&
+      selected.every((environment) => eligibleEnvironmentIds.includes(environment.environmentId)),
+  };
+}
+
+interface IssueCompletionSearchEnvironment {
+  readonly environmentId: EnvironmentId;
+  readonly connection: { readonly phase: EnvironmentConnectionPhase };
+  readonly serverConfig: {
+    readonly environment: {
+      readonly capabilities: { readonly issueCompletionOnMerge?: boolean };
+    };
+  } | null;
+}
+
+export function getIssueCompletionSearchAvailability(
+  environments: readonly IssueCompletionSearchEnvironment[],
+  scope?: Pick<ResolvedSettingsScope, "kind" | "environmentIds">,
+) {
+  const connected = environments.filter(
+    (environment) =>
+      environment.connection.phase === "connected" && environment.serverConfig !== null,
+  );
+  const eligibleEnvironmentIds = connected
+    .filter(
+      (environment) =>
+        environment.serverConfig?.environment.capabilities.issueCompletionOnMerge === true,
     )
     .map((environment) => environment.environmentId);
   const selected = connected.filter((environment) =>
@@ -948,7 +996,8 @@ export function filterAvailableSettingsSearchItems(
       (!item.localBackendManagementOnly || availability.canManageLocalBackend) &&
       (!item.localEnvironmentOnly || !availability.localEnvironmentDisabled) &&
       (!item.wslAvailableOnly || availability.isWslSettingsRowVisible) &&
-      (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement),
+      (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement) &&
+      (!item.requiresIssueCompletionOnMerge || availability.hasIssueCompletionOnMerge === true),
   );
 }
 

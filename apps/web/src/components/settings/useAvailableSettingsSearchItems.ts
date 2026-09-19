@@ -48,6 +48,11 @@ export function useAvailableSettingsSearchItems() {
         }),
         hasThreadAutoSettlement:
           getThreadAutoSettlementSearchAvailability(environments).eligibleEnvironmentIds.length > 0,
+        hasIssueCompletionOnMerge: environments.some(
+          (environment) =>
+            environment.connection.phase === "connected" &&
+            environment.serverConfig?.environment.capabilities.issueCompletionOnMerge === true,
+        ),
       }),
     [
       canManageLocalBackend,
