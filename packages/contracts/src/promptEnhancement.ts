@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, PositiveInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 export const PromptEnhancementReference = Schema.Struct({
   token: TrimmedNonEmptyString,
@@ -14,9 +14,16 @@ export const PromptEnhancementAttachment = Schema.Struct({
 });
 export type PromptEnhancementAttachment = typeof PromptEnhancementAttachment.Type;
 
+export const PromptEnhancementSelection = Schema.Struct({
+  start: NonNegativeInt,
+  end: PositiveInt,
+});
+export type PromptEnhancementSelection = typeof PromptEnhancementSelection.Type;
+
 export const PromptEnhancementInput = Schema.Struct({
   projectId: ProjectId,
   prompt: TrimmedNonEmptyString,
+  selection: Schema.optionalKey(PromptEnhancementSelection),
   references: Schema.Array(PromptEnhancementReference),
   attachments: Schema.Array(PromptEnhancementAttachment),
 });

@@ -142,6 +142,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       older servers, so clients hide the action instead of sending it. */
   threadTitleRegeneration: Schema.optionalKey(Schema.Boolean),
   promptEnhancement: Schema.optionalKey(Schema.Boolean),
+  /** Server can enhance only a selected portion while using the full draft as context. */
+  promptEnhancementSelection: Schema.optionalKey(Schema.Boolean),
   /** Server supports legacy linkedPullRequest updates through thread.meta.update.
       Independent of threadPullRequests; servers supporting both advertise both. */
   threadPullRequestLinking: Schema.optionalKey(Schema.Boolean),
