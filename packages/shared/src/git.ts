@@ -44,6 +44,123 @@ export function sanitizeBranchFragment(raw: string): string {
   return branchFragment.length > 0 ? branchFragment : "update";
 }
 
+export const WORKTREE_BRANCH_PURPOSES = [
+  "feature",
+  "bug",
+  "fix",
+  "chore",
+  "issue",
+  "maintenance",
+  "docs",
+  "refactor",
+  "test",
+  "ci",
+  "build",
+  "perf",
+  "hotfix",
+  "release",
+] as const;
+export type WorktreeBranchPurpose = (typeof WORKTREE_BRANCH_PURPOSES)[number];
+
+export type WorktreeBranchNamingSource = "first-message" | "github-issue";
+
+export interface WorktreeBranchIssueContext {
+  readonly title: string;
+  readonly body: string;
+  readonly labels: readonly string[];
+}
+
+const WORKTREE_BRANCH_PURPOSE_SET = new Set<string>(WORKTREE_BRANCH_PURPOSES);
+const WORKTREE_BRANCH_PURPOSE_ALIASES: Readonly<Record<string, WorktreeBranchPurpose>> = {
+  enhancement: "feature",
+  feature: "feature",
+  add: "feature",
+  bug: "bug",
+  defect: "bug",
+  fix: "bug",
+  hotfix: "hotfix",
+  chore: "chore",
+  maintenance: "maintenance",
+  deps: "maintenance",
+  dependencies: "maintenance",
+  docs: "docs",
+  documentation: "docs",
+  refactor: "refactor",
+  test: "test",
+  testing: "test",
+  ci: "ci",
+  build: "build",
+  perf: "perf",
+  performance: "perf",
+  release: "release",
+  issue: "issue",
+};
+
+const WORKTREE_BRANCH_PURPOSE_PATTERNS: ReadonlyArray<readonly [WorktreeBranchPurpose, RegExp]> = [
+  ["hotfix", /\bhotfix\b/u],
+  ["release", /\brelease\b|\bversion\b/u],
+  [
+    "bug",
+    /\bbug\b|\bdefect\b|\bfix(?:es|ed|ing)?\b|\bcrash(?:es|ed|ing)?\b|\bfail(?:s|ed|ing|ure)?\b/u,
+  ],
+  ["feature", /\bfeature\b|\benhancement\b|\badd(?:s|ed|ing)?\b|\bimplement(?:s|ed|ing)?\b/u],
+  ["maintenance", /\bmaintenance\b|\bdependenc(?:y|ies)\b|\bdeps\b|\bupgrade\b|\bupdate\b/u],
+  ["refactor", /\brefactor(?:s|ed|ing)?\b/u],
+  ["docs", /\bdocs?\b|\bdocumentation\b|\breadme\b/u],
+  ["test", /\btests?\b|\bcoverage\b/u],
+  ["ci", /\bci\b|\bpipeline\b|\bworkflow\b/u],
+  ["build", /\bbuild(?:s|ed|ing)?\b|\bcompile(?:s|d|ing)?\b/u],
+  ["perf", /\bperf(?:ormance)?\b|\bslow(?:er|est)?\b|\blatency\b/u],
+  ["chore", /\bchore\b|\bcleanup\b|\bclean-up\b/u],
+];
+
+function purposeFromLabel(label: string): WorktreeBranchPurpose | null {
+  const normalized = label.trim().toLowerCase();
+  return WORKTREE_BRANCH_PURPOSE_ALIASES[normalized] ?? null;
+}
+
+function purposeFromText(text: string): WorktreeBranchPurpose | null {
+  const normalized = text.toLowerCase();
+  for (const [purpose, pattern] of WORKTREE_BRANCH_PURPOSE_PATTERNS) {
+    if (pattern.test(normalized)) return purpose;
+  }
+  return null;
+}
+
+/** Resolve the branch purpose and its source using the issue-first precedence rule. */
+export function resolveWorktreeBranchNaming(input: {
+  readonly firstMessage: string;
+  readonly issue?: WorktreeBranchIssueContext;
+}): { readonly purpose: WorktreeBranchPurpose; readonly source: WorktreeBranchNamingSource } {
+  if (input.issue !== undefined) {
+    const labeledPurpose = input.issue.labels
+      .map(purposeFromLabel)
+      .find((purpose) => purpose !== null);
+    const purpose =
+      labeledPurpose ?? purposeFromText(`${input.issue.title}\n${input.issue.body}`) ?? "issue";
+    return { purpose, source: "github-issue" };
+  }
+  return {
+    purpose: purposeFromText(input.firstMessage) ?? "chore",
+    source: "first-message",
+  };
+}
+
+/** Return a recognized purpose when a generated branch already has one. */
+export function worktreeBranchPurposeFromPrefix(raw: string): WorktreeBranchPurpose | null {
+  const prefix = raw.trim().toLowerCase().split("/", 1)[0] ?? "";
+  return WORKTREE_BRANCH_PURPOSE_SET.has(prefix)
+    ? (prefix as WorktreeBranchPurpose)
+    : (WORKTREE_BRANCH_PURPOSE_ALIASES[prefix] ?? null);
+}
+
+export function buildConventionalWorktreeBranchName(
+  purpose: WorktreeBranchPurpose,
+  fragment: string,
+): string {
+  return `${purpose}/${sanitizeBranchFragment(fragment).replaceAll("/", "-").replace(/-+/g, "-")}`;
+}
+
 /**
  * Sanitize a string into a `feature/…` refName name.
  * Preserves an existing `feature/` prefix or slash-separated namespace.

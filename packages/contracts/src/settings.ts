@@ -498,6 +498,11 @@ export const WorktreeBranchPrefix = TrimmedString.check(
 export type WorktreeBranchPrefix = typeof WorktreeBranchPrefix.Type;
 export const DEFAULT_WORKTREE_BRANCH_PREFIX: WorktreeBranchPrefix = "t3code";
 
+/** Controls whether generated worktree branches use the T3 namespace or a conventional type. */
+export const WorktreeBranchNamingMode = Schema.Literals(["prefix", "conventional"]);
+export type WorktreeBranchNamingMode = typeof WorktreeBranchNamingMode.Type;
+export const DEFAULT_WORKTREE_BRANCH_NAMING_MODE: WorktreeBranchNamingMode = "prefix";
+
 const UsageModelTokenPrice = Schema.Number.check(
   Schema.isFinite(),
   Schema.isGreaterThanOrEqualTo(0),
@@ -1194,6 +1199,9 @@ export const ServerSettings = Schema.Struct({
   worktreeBranchPrefix: WorktreeBranchPrefix.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_WORKTREE_BRANCH_PREFIX)),
   ),
+  worktreeBranchNamingMode: WorktreeBranchNamingMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_WORKTREE_BRANCH_NAMING_MODE)),
+  ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
@@ -1489,6 +1497,7 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   worktreeBranchPrefix: Schema.optionalKey(WorktreeBranchPrefix),
+  worktreeBranchNamingMode: Schema.optionalKey(WorktreeBranchNamingMode),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   promptEnhancementModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),

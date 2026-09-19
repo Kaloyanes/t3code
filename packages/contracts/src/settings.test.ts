@@ -8,6 +8,7 @@ import {
   ClaudeSettings,
   DEFAULT_SERVER_SETTINGS,
   DEFAULT_WORKTREE_BRANCH_PREFIX,
+  DEFAULT_WORKTREE_BRANCH_NAMING_MODE,
   resolveProviderInstanceEnabled,
   ServerSettings,
   ServerSettingsPatch,
@@ -857,6 +858,24 @@ describe("ServerSettings.worktreeBranchPrefix", () => {
   ])("rejects invalid prefix %j", (prefix) => {
     expect(() => decodeWorktreeBranchPrefix(prefix)).toThrow();
     expect(() => decodeServerSettingsPatch({ worktreeBranchPrefix: prefix })).toThrow();
+  });
+});
+
+describe("ServerSettings.worktreeBranchNamingMode", () => {
+  it("defaults legacy settings to the existing prefix mode", () => {
+    expect(decodeServerSettings({}).worktreeBranchNamingMode).toBe(
+      DEFAULT_WORKTREE_BRANCH_NAMING_MODE,
+    );
+  });
+
+  it.each(["prefix", "conventional"] as const)("accepts %s", (mode) => {
+    expect(
+      decodeServerSettingsPatch({ worktreeBranchNamingMode: mode }).worktreeBranchNamingMode,
+    ).toBe(mode);
+  });
+
+  it("rejects unknown modes", () => {
+    expect(() => decodeServerSettingsPatch({ worktreeBranchNamingMode: "semantic" })).toThrow();
   });
 });
 

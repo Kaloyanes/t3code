@@ -3,11 +3,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   applyGitStatusStreamEvent,
+  buildConventionalWorktreeBranchName,
   buildTemporaryWorktreeBranchName,
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
   parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
   parseOriginUrlFromGitConfig,
+  resolveWorktreeBranchNaming,
   WORKTREE_BRANCH_PREFIX,
 } from "./git.ts";
 
@@ -161,6 +163,44 @@ describe("parseGitHubRepositoryNameWithOwnerFromRemoteUrl", () => {
     expect(
       parseGitHubRepositoryNameWithOwnerFromRemoteUrl("ssh://github.com/T3Tools/T3Code.git"),
     ).toBe("T3Tools/T3Code");
+  });
+});
+
+describe("conventional worktree branch naming", () => {
+  it("prefers a linked GitHub issue over the first message", () => {
+    expect(
+      resolveWorktreeBranchNaming({
+        firstMessage: "Add a new settings option",
+        issue: {
+          title: "Fix the checkout crash",
+          body: "The checkout fails after a restart.",
+          labels: ["bug"],
+        },
+      }),
+    ).toEqual({ purpose: "bug", source: "github-issue" });
+  });
+
+  it("uses the first message when there is no linked issue", () => {
+    expect(
+      resolveWorktreeBranchNaming({
+        firstMessage: "Refactor the branch naming helper",
+      }),
+    ).toEqual({ purpose: "refactor", source: "first-message" });
+  });
+
+  it("uses issue as the safe purpose for an unclassified issue", () => {
+    expect(
+      resolveWorktreeBranchNaming({
+        firstMessage: "Please investigate this",
+        issue: { title: "Something unexpected", body: "", labels: [] },
+      }),
+    ).toEqual({ purpose: "issue", source: "github-issue" });
+  });
+
+  it("builds a sanitized conventional branch", () => {
+    expect(buildConventionalWorktreeBranchName("feature", " Add / worktree option ")).toBe(
+      "feature/add-worktree-option",
+    );
   });
 });
 
