@@ -379,7 +379,12 @@ function newThreadTerminal(
   state: ThreadTerminalUiState,
   terminalId: string,
 ): ThreadTerminalUiState {
-  return upsertTerminalIntoGroups(state, terminalId, "new");
+  const normalized = normalizeThreadTerminalUiState(state);
+  const withRunTerminal =
+    normalized.terminalIds.length === 0 && terminalId !== DEFAULT_THREAD_TERMINAL_ID
+      ? upsertTerminalIntoGroups(normalized, DEFAULT_THREAD_TERMINAL_ID, "new")
+      : normalized;
+  return upsertTerminalIntoGroups(withRunTerminal, terminalId, "new");
 }
 
 function setThreadActiveTerminal(

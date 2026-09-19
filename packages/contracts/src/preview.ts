@@ -11,6 +11,7 @@
 import { Schema } from "effect";
 import { NonNegativeInt, PositiveInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { BrowserProfileId } from "./browserProfile.ts";
+import { WorktreeRunTarget } from "./worktreeRun.ts";
 
 export const PREVIEW_URL_MAX_LENGTH = 2_048;
 export const CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS = 32;
@@ -313,6 +314,7 @@ export const DiscoveredLocalServer = Schema.Struct({
       terminalId: TrimmedNonEmptyString,
     }),
   ),
+  worktreeRun: Schema.optionalKey(WorktreeRunTarget),
 });
 export type DiscoveredLocalServer = typeof DiscoveredLocalServer.Type;
 

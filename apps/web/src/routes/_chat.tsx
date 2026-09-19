@@ -27,7 +27,6 @@ import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { primaryServerKeybindingsAtom } from "~/state/server";
-import { WorktreeRunConsole } from "../components/WorktreeRunConsole";
 import { projectScriptIdFromCommand } from "../projectScripts";
 
 function ChatRouteGlobalShortcuts() {
@@ -222,7 +221,6 @@ function ChatRouteLayout() {
     <>
       <ChatRouteGlobalShortcuts />
       {threadTarget ? <ThreadRouteView target={threadTarget} /> : <Outlet />}
-      <WorktreeRunConsole />
     </>
   );
 }

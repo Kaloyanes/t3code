@@ -16,6 +16,10 @@ export function hasVisibleToastAction(actionProps: unknown): boolean {
   return children != null && children !== false && children !== "";
 }
 
+export function shouldUseToastLeadingIcon(toastType: unknown, hasLeadingIcon: boolean): boolean {
+  return hasLeadingIcon && toastType !== "loading";
+}
+
 export function shouldHideCollapsedToastContent(
   visibleToastIndex: number,
   visibleToastCount: number,

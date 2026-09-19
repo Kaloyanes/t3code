@@ -1,9 +1,11 @@
 import {
+  DEFAULT_TERMINAL_ID,
   MAX_SCRIPT_ID_LENGTH,
   SCRIPT_RUN_COMMAND_PATTERN,
   type KeybindingCommand,
   type ProjectScript,
 } from "@t3tools/contracts";
+import { nextTerminalId } from "@t3tools/shared/terminalLabels";
 import * as Schema from "effect/Schema";
 const isScriptRunCommand = Schema.is(SCRIPT_RUN_COMMAND_PATTERN);
 
@@ -91,4 +93,16 @@ export function nextProjectScriptId(name: string, existingIds: Iterable<string>)
 export function primaryProjectScript(scripts: ReadonlyArray<ProjectScript>): ProjectScript | null {
   const regular = scripts.find((script) => !script.runOnWorktreeCreate);
   return regular ?? scripts[0] ?? null;
+}
+
+export function resolveRunActionTerminal(input: {
+  readonly allocatableTerminalIds: ReadonlyArray<string>;
+  readonly runningTerminalIds: ReadonlyArray<string>;
+  readonly preferNewTerminal: boolean;
+}): { readonly terminalId: string; readonly create: boolean } {
+  const create = input.preferNewTerminal || input.runningTerminalIds.includes(DEFAULT_TERMINAL_ID);
+  return {
+    terminalId: create ? nextTerminalId(input.allocatableTerminalIds) : DEFAULT_TERMINAL_ID,
+    create,
+  };
 }

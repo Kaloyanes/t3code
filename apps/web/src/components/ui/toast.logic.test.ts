@@ -5,6 +5,7 @@ import {
   hasVisibleToastAction,
   shouldHideCollapsedToastContent,
   shouldRenderThreadScopedToast,
+  shouldUseToastLeadingIcon,
 } from "./toast.logic";
 
 describe("hasVisibleToastAction", () => {
@@ -16,6 +17,21 @@ describe("hasVisibleToastAction", () => {
     assert.equal(hasVisibleToastAction({ children: null }), false);
     assert.equal(hasVisibleToastAction({ children: "" }), false);
     assert.equal(hasVisibleToastAction(undefined), false);
+  });
+});
+
+describe("shouldUseToastLeadingIcon", () => {
+  it("uses the loading spinner instead of a custom action icon", () => {
+    assert.equal(shouldUseToastLeadingIcon("loading", true), false);
+  });
+
+  it("keeps custom icons for settled toast states", () => {
+    assert.equal(shouldUseToastLeadingIcon("success", true), true);
+    assert.equal(shouldUseToastLeadingIcon("warning", true), true);
+  });
+
+  it("does not reserve space when no custom icon exists", () => {
+    assert.equal(shouldUseToastLeadingIcon("success", false), false);
   });
 });
 

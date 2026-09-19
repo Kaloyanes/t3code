@@ -1045,7 +1045,7 @@ it.layer(
             (event) =>
               event.type === "activity" &&
               event.hasRunningSubprocess === false &&
-              event.label === "Terminal 1",
+              event.label === "Run",
           ),
         ),
         "1200 millis",

@@ -976,6 +976,8 @@ const buildAppUnderTest = (options?: {
             retain: Effect.void,
             registerTerminalProcesses: () => Effect.void,
             unregisterTerminal: () => Effect.void,
+            registerWorktreeRunProcesses: () => Effect.void,
+            unregisterWorktreeRun: () => Effect.void,
           }),
         ),
       ),

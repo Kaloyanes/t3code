@@ -1,18 +1,18 @@
-import { useAtomCommand } from "../state/use-atom-command";
 import { useEnvironmentQuery } from "../state/query";
 import { worktreeRunEnvironment } from "../state/worktreeRun";
-import { useWorktreeRunConsoleStore } from "../worktreeRunConsoleStore";
+import { useWorktreeRunTerminalStore } from "../worktreeRunTerminalStore";
 import { GhosttyTerminalSurface } from "../terminal/ghostty/surface";
 import { terminalThemeFromApp } from "./ThreadTerminalDrawer";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
-import { Square, Trash2, X } from "lucide-react";
+import { ListTree, Square, Trash2 } from "lucide-react";
 import { useEffect, useEffectEvent, useMemo, useRef } from "react";
+import { useAtomCommand } from "../state/use-atom-command";
 
-export function WorktreeRunConsole() {
-  const active = useWorktreeRunConsoleStore((state) => state.active);
-  const close = useWorktreeRunConsoleStore((state) => state.close);
-  const select = useWorktreeRunConsoleStore((state) => state.select);
+export function WorktreeRunTerminal(props: { readonly height: number }) {
+  const active = useWorktreeRunTerminalStore((state) => state.active);
+  const close = useWorktreeRunTerminalStore((state) => state.close);
+  const select = useWorktreeRunTerminalStore((state) => state.select);
   const write = useAtomCommand(worktreeRunEnvironment.write, { reportFailure: false });
   const resize = useAtomCommand(worktreeRunEnvironment.resize, { reportFailure: false });
   const clear = useAtomCommand(worktreeRunEnvironment.clear, { reportFailure: false });
@@ -24,10 +24,7 @@ export function WorktreeRunConsole() {
   );
   const attach = useEnvironmentQuery(
     active
-      ? worktreeRunEnvironment.attach({
-          environmentId: active.environmentId,
-          input: active.target,
-        })
+      ? worktreeRunEnvironment.attach({ environmentId: active.environmentId, input: active.target })
       : null,
   );
   const runs = useMemo(
@@ -57,10 +54,7 @@ export function WorktreeRunConsole() {
   });
   const resizeTerminal = useEffectEvent((cols: number, rows: number) => {
     if (active)
-      void resize({
-        environmentId: active.environmentId,
-        input: { ...active.target, cols, rows },
-      });
+      void resize({ environmentId: active.environmentId, input: { ...active.target, cols, rows } });
   });
 
   useEffect(() => {
@@ -102,16 +96,20 @@ export function WorktreeRunConsole() {
   if (!active) return null;
   const selected = runs.find((run) => run.target.scriptId === active.target.scriptId) ?? null;
   return (
-    <section className="fixed inset-x-0 bottom-0 z-40 ml-[var(--sidebar-width)] flex h-80 min-h-48 flex-col border-t border-border bg-background shadow-[0_-8px_30px_rgba(0,0,0,0.12)]">
-      <div className="flex h-10 shrink-0 items-center border-b border-border px-2">
-        <div className="flex min-w-0 flex-1 items-end gap-1 self-stretch overflow-x-auto">
+    <aside
+      className="thread-terminal-drawer flex shrink-0 flex-col overflow-hidden border-t border-border/80 bg-background"
+      style={{ height: `${props.height}px` }}
+      data-terminal-owner="worktree"
+    >
+      <div className="flex h-9 shrink-0 items-center border-b border-border/80 px-2">
+        <div className="flex min-w-0 flex-1 self-stretch overflow-x-auto">
           {runs.map((run) => (
             <button
               key={run.target.scriptId}
               type="button"
               onClick={() => select(run.target.scriptId)}
               className={cn(
-                "flex h-full shrink-0 items-center gap-2 border-b-2 px-3 text-xs",
+                "flex shrink-0 items-center gap-2 border-b-2 px-3 text-xs",
                 run.target.scriptId === active.target.scriptId
                   ? "border-primary text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground",
@@ -129,13 +127,14 @@ export function WorktreeRunConsole() {
             </button>
           ))}
         </div>
-        <span className="mr-2 max-w-64 truncate text-xs text-muted-foreground">
-          {active.target.workspacePath}
-        </span>
+        <Button variant="ghost" size="xs" onClick={close} aria-label="Show thread terminals">
+          <ListTree className="size-3.5" />
+          Thread terminals
+        </Button>
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label="Clear worktree action output"
+          aria-label="Clear workspace run output"
           onClick={() => void clear({ environmentId: active.environmentId, input: active.target })}
         >
           <Trash2 className="size-3.5" />
@@ -143,27 +142,19 @@ export function WorktreeRunConsole() {
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label="Stop worktree action"
+          aria-label="Stop workspace run"
           disabled={selected?.status !== "running" && selected?.status !== "starting"}
           onClick={() => void stop({ environmentId: active.environmentId, input: active.target })}
         >
           <Square className="size-3.5" />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Close worktree action panel"
-          onClick={close}
-        >
-          <X className="size-4" />
-        </Button>
       </div>
-      <div ref={mountRef} className="min-h-0 flex-1 bg-background" />
+      <div ref={mountRef} className="min-h-0 flex-1 bg-[var(--terminal-background)]" />
       {attach.error ? (
         <div className="border-t border-border px-3 py-1 text-xs text-destructive">
           {attach.error}
         </div>
       ) : null}
-    </section>
+    </aside>
   );
 }

@@ -70,9 +70,11 @@ import {
 } from "../keybindings";
 import {
   DEFAULT_THREAD_TERMINAL_HEIGHT,
+  DEFAULT_THREAD_TERMINAL_ID,
   MAX_TERMINALS_PER_GROUP,
   type ThreadTerminalGroup,
 } from "../types";
+
 import { readLocalApi } from "~/localApi";
 import { confirmTerminalClose } from "~/lib/terminalCloseConfirm";
 import { useClientSettings } from "../hooks/useSettings";
@@ -89,6 +91,16 @@ import {
   resolveTerminalFontSizePreference,
   TYPOGRAPHY_ADVANCED_STORAGE_KEY,
 } from "../appearanceFonts";
+
+export function terminalGroupLabel(
+  terminalIds: ReadonlyArray<string>,
+  splitDirection: "horizontal" | "vertical" = "horizontal",
+): string {
+  if (terminalIds.length > 1) {
+    return splitDirection === "vertical" ? "Stacked" : "Side by side";
+  }
+  return terminalIds[0] === DEFAULT_THREAD_TERMINAL_ID ? "Shared" : "Isolated";
+}
 
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
@@ -1635,11 +1647,10 @@ export default function ThreadTerminalDrawer({
                     : (terminalGroup.terminalIds[0] ?? resolvedActiveTerminalId);
                   const terminalCount = terminalGroup.terminalIds.length;
                   const isSplitGroup = terminalCount > 1;
-                  const groupLabel = !isSplitGroup
-                    ? "Single"
-                    : terminalGroup.splitDirection === "vertical"
-                      ? "Stacked"
-                      : "Side by side";
+                  const groupLabel = terminalGroupLabel(
+                    terminalGroup.terminalIds,
+                    terminalGroup.splitDirection,
+                  );
                   const GroupIcon = !isSplitGroup
                     ? Square
                     : terminalGroup.splitDirection === "vertical"

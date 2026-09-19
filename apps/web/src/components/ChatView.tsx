@@ -165,7 +165,6 @@ import {
 } from "../proposedPlan";
 import {
   DEFAULT_INTERACTION_MODE,
-  DEFAULT_THREAD_TERMINAL_ID,
   MAX_TERMINALS_PER_GROUP,
   type ChatMessage,
   isImageAttachment,
@@ -232,6 +231,9 @@ import {
 import { BranchToolbar, type BranchToolbarHandle } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
+import { WorktreeRunTerminal } from "./WorktreeRunTerminal";
+import { worktreeRunEnvironment } from "../state/worktreeRun";
+import { useWorktreeRunTerminalStore } from "../worktreeRunTerminalStore";
 import {
   AlarmClockIcon,
   CheckCircle2Icon,
@@ -251,6 +253,7 @@ import {
   commandForProjectScript,
   nextProjectScriptId,
   projectScriptIdFromCommand,
+  resolveRunActionTerminal,
 } from "~/projectScripts";
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { useBrowserHistoryStore } from "~/browserHistoryStore";
@@ -1511,6 +1514,14 @@ export default function ChatView(props: ChatViewProps) {
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
+  const startWorktreeRun = useAtomCommand(worktreeRunEnvironment.start, {
+    reportFailure: false,
+  });
+  const stopWorktreeRun = useAtomCommand(worktreeRunEnvironment.stop, {
+    reportFailure: false,
+  });
+  const openWorktreeRunTerminal = useWorktreeRunTerminalStore((state) => state.open);
+  const activeWorktreeRunTerminal = useWorktreeRunTerminalStore((state) => state.active);
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
@@ -1844,7 +1855,6 @@ export default function ChatView(props: ChatViewProps) {
   const storeSplitTerminal = useTerminalUiStateStore((s) => s.splitTerminal);
   const storeSplitTerminalVertical = useTerminalUiStateStore((s) => s.splitTerminalVertical);
   const storeNewTerminal = useTerminalUiStateStore((s) => s.newTerminal);
-  const storeSetActiveTerminal = useTerminalUiStateStore((s) => s.setActiveTerminal);
   const storeCloseTerminal = useTerminalUiStateStore((s) => s.closeTerminal);
   const serverThreadRefs = useThreadRefs();
   const serverThreadKeys = useMemo(() => serverThreadRefs.map(scopedThreadKey), [serverThreadRefs]);
@@ -1979,6 +1989,15 @@ export default function ChatView(props: ChatViewProps) {
     environmentId: activeThread?.environmentId ?? null,
     threadId: activeThreadId,
   });
+  const activeProjectRef = useMemo(
+    () =>
+      activeThread ? scopeProjectRef(activeThread.environmentId, activeThread.projectId) : null,
+    [activeThread?.environmentId, activeThread?.projectId],
+  );
+  const activeProject = useProject(activeProjectRef);
+  const worktreeRunMetadata = useEnvironmentQuery(
+    activeProject ? worktreeRunEnvironment.metadata({ environmentId, input: null }) : null,
+  );
   const activeServerOrderedTerminalIds = useMemo(
     () => activeThreadKnownSessions.map((session) => session.target.terminalId),
     [activeThreadKnownSessions],
@@ -1998,13 +2017,35 @@ export default function ChatView(props: ChatViewProps) {
       }),
     [activeThreadDiscoveredPorts, activeThreadId, projectScriptTerminalRuns],
   );
+  const activeWorkspacePath = activeThread?.worktreePath ?? activeProject?.workspaceRoot ?? null;
+  const workspaceRuns = useMemo(
+    () =>
+      (worktreeRunMetadata.data ?? []).filter(
+        (run) =>
+          run.target.projectId === activeProject?.id &&
+          run.target.workspacePath === activeWorkspacePath,
+      ),
+    [activeProject?.id, activeWorkspacePath, worktreeRunMetadata.data],
+  );
   const startingProjectScriptIds = useMemo(
-    () => new Set(projectScriptRunStates.startingScriptIds),
-    [projectScriptRunStates.startingScriptIds],
+    () =>
+      new Set([
+        ...projectScriptRunStates.startingScriptIds,
+        ...workspaceRuns
+          .filter((run) => run.status === "starting")
+          .map((run) => run.target.scriptId),
+      ]),
+    [projectScriptRunStates.startingScriptIds, workspaceRuns],
   );
   const runningProjectScriptIds = useMemo(
-    () => new Set(projectScriptRunStates.runningScriptIds),
-    [projectScriptRunStates.runningScriptIds],
+    () =>
+      new Set([
+        ...projectScriptRunStates.runningScriptIds,
+        ...workspaceRuns
+          .filter((run) => run.status === "running")
+          .map((run) => run.target.scriptId),
+      ]),
+    [projectScriptRunStates.runningScriptIds, workspaceRuns],
   );
   const trackProjectScriptRun = useCallback(
     (scriptId: string, terminalId: string, scope: ProjectScript["scope"]) => {
@@ -2245,12 +2286,6 @@ export default function ChatView(props: ChatViewProps) {
     });
   }, [activeTerminalDrawerPresence.present, activeThreadKey, existingOpenTerminalThreadKeys]);
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
-  const activeProjectRef = useMemo(
-    () =>
-      activeThread ? scopeProjectRef(activeThread.environmentId, activeThread.projectId) : null,
-    [activeThread?.environmentId, activeThread?.projectId],
-  );
-  const activeProject = useProject(activeProjectRef);
   // Environment settings with the active project's overrides applied.
   const activeProjectSettings = useMemo(
     () => resolveProjectSettings(settings, activeProject?.id ?? null, activeProject ?? undefined),
@@ -4325,11 +4360,40 @@ export default function ChatView(props: ChatViewProps) {
       }
       const targetWorktreePath = options?.worktreePath ?? activeThread.worktreePath ?? null;
       const targetCwd = options?.cwd ?? targetWorktreePath ?? gitCwd ?? activeProject.workspaceRoot;
-      const baseTerminalId =
-        terminalUiState.activeTerminalId || activeKnownTerminalIds[0] || DEFAULT_THREAD_TERMINAL_ID;
-      const isBaseTerminalBusy = runningTerminalIds.includes(baseTerminalId);
-      const wantsNewTerminal = Boolean(options?.preferNewTerminal) || isBaseTerminalBusy;
-      const shouldCreateNewTerminal = wantsNewTerminal;
+      if (
+        script.scope === "worktree" &&
+        environmentById.get(environmentId)?.serverConfig?.environment.capabilities.worktreeRuns ===
+          true
+      ) {
+        const workspacePath = targetWorktreePath ?? activeProject.workspaceRoot;
+        setTerminalOpen(true);
+        const result = await startWorktreeRun({
+          environmentId,
+          input: { projectId: activeProject.id, workspacePath, scriptId: script.id },
+        });
+        if (result._tag === "Failure") {
+          if (!isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            setThreadError(
+              activeThreadId,
+              error instanceof Error ? error.message : `Failed to run script "${script.name}".`,
+            );
+          }
+          return;
+        }
+        openWorktreeRunTerminal({
+          environmentId,
+          target: { projectId: activeProject.id, workspacePath, scriptId: script.id },
+        });
+        return;
+      }
+      const runTerminal = resolveRunActionTerminal({
+        allocatableTerminalIds: allocatableActiveTerminalIds,
+        runningTerminalIds,
+        preferNewTerminal: Boolean(options?.preferNewTerminal),
+      });
+      const targetTerminalId = runTerminal.terminalId;
+      const shouldCreateNewTerminal = runTerminal.create;
 
       setTerminalUiLaunchContext({
         threadId: activeThreadId,
@@ -4349,9 +4413,6 @@ export default function ChatView(props: ChatViewProps) {
         worktreePath: targetWorktreePath,
         ...(options?.env ? { extraEnv: options.env } : {}),
       });
-      const targetTerminalId = shouldCreateNewTerminal
-        ? nextTerminalId(allocatableActiveTerminalIds)
-        : baseTerminalId;
       trackProjectScriptRun(script.id, targetTerminalId, script.scope);
       const openTerminalInput: TerminalOpenInput = shouldCreateNewTerminal
         ? {
@@ -4374,7 +4435,7 @@ export default function ChatView(props: ChatViewProps) {
       if (shouldCreateNewTerminal) {
         storeNewTerminal(activeThreadRef, targetTerminalId);
       } else {
-        storeSetActiveTerminal(activeThreadRef, targetTerminalId);
+        storeEnsureTerminal(activeThreadRef, targetTerminalId, { open: true, active: true });
       }
 
       const openResult = await openTerminal({ environmentId, input: openTerminalInput });
@@ -4419,19 +4480,20 @@ export default function ChatView(props: ChatViewProps) {
       gitCwd,
       setTerminalOpen,
       setThreadError,
+      storeEnsureTerminal,
       storeNewTerminal,
-      storeSetActiveTerminal,
       setLastInvokedScriptByProjectId,
       environmentId,
       clearProjectScriptRun,
       finishProjectScriptLaunch,
       trackProjectScriptRun,
       openTerminal,
-      activeKnownTerminalIds,
       allocatableActiveTerminalIds,
       runningTerminalIds,
-      terminalUiState.activeTerminalId,
       writeTerminal,
+      environmentById,
+      openWorktreeRunTerminal,
+      startWorktreeRun,
     ],
   );
 
@@ -4440,6 +4502,17 @@ export default function ChatView(props: ChatViewProps) {
       .projectSettingsOverrides === true;
   const stopProjectScript = useCallback(
     (script: ProjectScript) => {
+      if (script.scope === "worktree" && activeProject && activeWorkspacePath) {
+        void stopWorktreeRun({
+          environmentId,
+          input: {
+            projectId: activeProject.id,
+            workspacePath: activeWorkspacePath,
+            scriptId: script.id,
+          },
+        });
+        return;
+      }
       const run = projectScriptTerminalRuns.find(
         (candidate) => candidate.threadId === activeThreadId && candidate.scriptId === script.id,
       );
@@ -4453,7 +4526,15 @@ export default function ChatView(props: ChatViewProps) {
         },
       });
     },
-    [activeThreadId, environmentId, projectScriptTerminalRuns, writeTerminal],
+    [
+      activeProject,
+      activeThreadId,
+      activeWorkspacePath,
+      environmentId,
+      projectScriptTerminalRuns,
+      stopWorktreeRun,
+      writeTerminal,
+    ],
   );
   const persistProjectScripts = useCallback(
     async (input: {
@@ -10458,12 +10539,24 @@ export default function ChatView(props: ChatViewProps) {
         </div>
         {/* end horizontal flex container */}
 
+        {activeWorktreeRunTerminal?.environmentId === environmentId &&
+        activeWorktreeRunTerminal.target.projectId === activeProject?.id &&
+        activeWorktreeRunTerminal.target.workspacePath === activeWorkspacePath ? (
+          <WorktreeRunTerminal height={terminalUiState.terminalHeight} />
+        ) : null}
         {mountedTerminalThreadRefs.map(({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
           <PersistentThreadTerminalDrawer
             key={mountedThreadKey}
             threadRef={mountedThreadRef}
             threadId={mountedThreadRef.threadId}
-            active={mountedThreadKey === activeThreadKey}
+            active={
+              mountedThreadKey === activeThreadKey &&
+              !(
+                activeWorktreeRunTerminal?.environmentId === environmentId &&
+                activeWorktreeRunTerminal.target.projectId === activeProject?.id &&
+                activeWorktreeRunTerminal.target.workspacePath === activeWorkspacePath
+              )
+            }
             launchContext={
               mountedThreadKey === activeThreadKey ? (activeTerminalLaunchContext ?? null) : null
             }

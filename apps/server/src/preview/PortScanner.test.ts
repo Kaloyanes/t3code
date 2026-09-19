@@ -4,6 +4,7 @@ import { it as effectIt } from "@effect/vitest";
 import {
   CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS,
   PREVIEW_URL_MAX_LENGTH,
+  ProjectId,
   type DiscoveredLocalServer,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
@@ -88,6 +89,7 @@ const LSOF_TEST_PORT = 43_123;
 
 const makeLsofScannerLayer = (input: {
   readonly pid: () => number;
+  readonly processGroupId?: () => number;
   readonly fetch: typeof globalThis.fetch;
 }) =>
   PortScanner.layer.pipe(
@@ -96,7 +98,7 @@ const makeLsofScannerLayer = (input: {
         Layer.succeed(ProcessRunner.ProcessRunner, {
           run: () =>
             Effect.succeed({
-              stdout: `p${input.pid()}\ncnode\nn*:${LSOF_TEST_PORT}\n`,
+              stdout: `p${input.pid()}\ncnode\ng${input.processGroupId?.() ?? input.pid()}\nn*:${LSOF_TEST_PORT}\n`,
               stderr: "",
               code: null,
               timedOut: false,
@@ -549,6 +551,55 @@ effectIt.effect("falls back to HTTPS and does not follow redirects while probing
     expect(servers).toHaveLength(1);
     expect(servers[0]?.url).toBe(`https://localhost:${LSOF_TEST_PORT}`);
     expect(redirects).toEqual(["manual", "manual"]);
+  }).pipe(Effect.provide(layer));
+});
+
+effectIt.effect("attributes a discovered server to its worktree run", () => {
+  const fetchFn = ((_input: Parameters<typeof globalThis.fetch>[0]) =>
+    Promise.resolve(
+      new Response("app", { headers: { "content-type": "text/html" } }),
+    )) as typeof globalThis.fetch;
+  const layer = makeLsofScannerLayer({ pid: () => 1234, fetch: fetchFn });
+
+  return Effect.gen(function* () {
+    const scanner = yield* PortScanner.PortDiscovery;
+    yield* scanner.registerWorktreeRunProcesses({
+      projectId: ProjectId.make("project-1"),
+      workspacePath: "/repo/worktree",
+      scriptId: "dev",
+      processIds: [1234],
+    });
+    const [server] = yield* scanner.scan();
+    expect(server?.terminal).toBeNull();
+    expect(server?.worktreeRun).toEqual({
+      projectId: ProjectId.make("project-1"),
+      workspacePath: "/repo/worktree",
+      scriptId: "dev",
+    });
+  }).pipe(Effect.provide(layer));
+});
+
+effectIt.effect("attributes a child server through its worktree run process group", () => {
+  const fetchFn = ((_input: Parameters<typeof globalThis.fetch>[0]) =>
+    Promise.resolve(
+      new Response("app", { headers: { "content-type": "text/html" } }),
+    )) as typeof globalThis.fetch;
+  const layer = makeLsofScannerLayer({
+    pid: () => 5678,
+    processGroupId: () => 1234,
+    fetch: fetchFn,
+  });
+
+  return Effect.gen(function* () {
+    const scanner = yield* PortScanner.PortDiscovery;
+    yield* scanner.registerWorktreeRunProcesses({
+      projectId: ProjectId.make("project-1"),
+      workspacePath: "/repo/worktree",
+      scriptId: "dev",
+      processIds: [1234],
+    });
+    const [server] = yield* scanner.scan();
+    expect(server?.worktreeRun?.scriptId).toBe("dev");
   }).pipe(Effect.provide(layer));
 });
 

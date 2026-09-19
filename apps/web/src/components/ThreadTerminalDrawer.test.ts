@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  terminalGroupLabel,
   shouldClearTerminalSelectionAction,
   shouldHandleTerminalExit,
   terminalContextMenuItems,
@@ -8,6 +9,18 @@ import {
   terminalSelectionMenuItems,
   terminalThemeFromApp,
 } from "./ThreadTerminalDrawer";
+
+describe("terminal group labels", () => {
+  it("distinguishes the shared Run terminal from isolated terminals", () => {
+    expect(terminalGroupLabel(["term-1"])).toBe("Shared");
+    expect(terminalGroupLabel(["term-2"])).toBe("Isolated");
+  });
+
+  it("describes split terminal layouts", () => {
+    expect(terminalGroupLabel(["term-1", "term-2"])).toBe("Side by side");
+    expect(terminalGroupLabel(["term-1", "term-2"], "vertical")).toBe("Stacked");
+  });
+});
 
 describe("terminal selection menus", () => {
   it("omits Add to chat when the terminal has no chat target", () => {

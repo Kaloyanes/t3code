@@ -3644,12 +3644,19 @@ const makeWsRpcLayer = (
                   });
                 }
               }
-              return yield* worktreeRuns.start({
+              const run = yield* worktreeRuns.start({
                 input: { ...input, workspacePath },
                 name: script.name,
                 command: script.command,
                 projectRoot,
               });
+              if (run.pid !== null) {
+                yield* portDiscovery.registerWorktreeRunProcesses({
+                  ...run.target,
+                  processIds: [run.pid],
+                });
+              }
+              return run;
             }).pipe(
               Effect.mapError((error) =>
                 Schema.is(WorktreeRunError)(error)
@@ -3683,9 +3690,13 @@ const makeWsRpcLayer = (
             "rpc.aggregate": "terminal",
           }),
         [WS_METHODS.worktreeRunStop]: (input) =>
-          observeRpcEffect(WS_METHODS.worktreeRunStop, worktreeRuns.stop(input), {
-            "rpc.aggregate": "terminal",
-          }),
+          observeRpcEffect(
+            WS_METHODS.worktreeRunStop,
+            worktreeRuns
+              .stop(input)
+              .pipe(Effect.tap(() => portDiscovery.unregisterWorktreeRun(input))),
+            { "rpc.aggregate": "terminal" },
+          ),
         [WS_METHODS.subscribeWorktreeRuns]: (_input) =>
           observeRpcStream(
             WS_METHODS.subscribeWorktreeRuns,

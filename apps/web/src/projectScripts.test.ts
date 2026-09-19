@@ -1,4 +1,4 @@
-import { MAX_SCRIPT_ID_LENGTH } from "@t3tools/contracts";
+import { DEFAULT_TERMINAL_ID, MAX_SCRIPT_ID_LENGTH } from "@t3tools/contracts";
 import { shortcutLabelForCommand } from "./keybindings";
 import { describe, expect, it } from "vite-plus/test";
 import {
@@ -13,6 +13,7 @@ import {
   nextProjectScriptId,
   primaryProjectScript,
   projectScriptIdFromCommand,
+  resolveRunActionTerminal,
 } from "./projectScripts";
 
 describe("projectScripts helpers", () => {
@@ -150,6 +151,26 @@ describe("projectScripts helpers", () => {
 
     expect(primaryProjectScript(scripts)?.id).toBe("test");
     expect(setupProjectScript(scripts)?.id).toBe("setup");
+  });
+
+  it("keeps Run actions on the shared terminal instead of the selected isolated terminal", () => {
+    expect(
+      resolveRunActionTerminal({
+        allocatableTerminalIds: [DEFAULT_TERMINAL_ID, "term-2"],
+        runningTerminalIds: ["term-2"],
+        preferNewTerminal: false,
+      }),
+    ).toEqual({ terminalId: DEFAULT_TERMINAL_ID, create: false });
+  });
+
+  it("preserves spillover behavior when the shared Run terminal is busy", () => {
+    expect(
+      resolveRunActionTerminal({
+        allocatableTerminalIds: [DEFAULT_TERMINAL_ID, "term-2"],
+        runningTerminalIds: [DEFAULT_TERMINAL_ID],
+        preferNewTerminal: false,
+      }),
+    ).toEqual({ terminalId: "term-3", create: true });
   });
 
   it("builds default runtime env for scripts", () => {

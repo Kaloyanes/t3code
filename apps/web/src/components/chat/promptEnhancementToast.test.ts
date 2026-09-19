@@ -19,7 +19,7 @@ describe("prompt enhancement loading toast", () => {
     });
   });
 
-  it("provides a cancel action with the enhancement icon", () => {
+  it("provides a cancel action without overriding the loading spinner", () => {
     const onCancel = () => {};
     const toast = promptEnhancementLoadingToast(false, onCancel);
 
@@ -35,7 +35,7 @@ describe("prompt enhancement loading toast", () => {
         },
       ],
     });
-    expect(toast.data?.leadingIcon).toBeDefined();
+    expect(toast.data?.leadingIcon).toBeUndefined();
   });
 
   it("uses the shared disabled button state while cancelling", () => {

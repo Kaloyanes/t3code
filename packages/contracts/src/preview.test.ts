@@ -323,6 +323,23 @@ describe("DiscoveredLocalServer", () => {
     expect(server.processName).toBeNull();
   });
 
+  it("decodes a server owned by a worktree run", () => {
+    const server = decodeServer({
+      host: "localhost",
+      port: 5173,
+      url: "http://localhost:5173",
+      processName: "node",
+      pid: 12345,
+      terminal: null,
+      worktreeRun: {
+        projectId: "project-1",
+        workspacePath: "/repo/worktree",
+        scriptId: "dev",
+      },
+    });
+    expect(server.worktreeRun?.workspacePath).toBe("/repo/worktree");
+  });
+
   it("rejects invalid ports", () => {
     expect(() =>
       decodeServer({

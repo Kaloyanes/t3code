@@ -36,6 +36,7 @@ import {
   hasVisibleToastAction,
   shouldHideCollapsedToastContent,
   shouldRenderThreadScopedToast,
+  shouldUseToastLeadingIcon,
 } from "./toast.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./tooltip";
 
@@ -352,7 +353,7 @@ function ToastBodyContent({
         )}
       >
         <div className="flex min-w-0 gap-2">
-          {leadingIcon ? (
+          {shouldUseToastLeadingIcon(toastType, leadingIcon != null) ? (
             <div
               className="flex h-lh w-4 shrink-0 items-center justify-center"
               data-slot="toast-icon"

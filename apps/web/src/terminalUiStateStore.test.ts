@@ -123,17 +123,21 @@ describe("terminalUiStateStore actions", () => {
     ]);
   });
 
-  it("creates new terminals in a separate group", () => {
+  it("keeps the shared Run terminal when creating an isolated terminal", () => {
     useTerminalUiStateStore.getState().newTerminal(THREAD_REF, "terminal-2");
 
     const terminalUiState = selectThreadTerminalUiState(
       useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
       THREAD_REF,
     );
-    expect(terminalUiState.terminalIds).toEqual(["terminal-2"]);
+    expect(terminalUiState.terminalIds).toEqual([DEFAULT_THREAD_TERMINAL_ID, "terminal-2"]);
     expect(terminalUiState.activeTerminalId).toBe("terminal-2");
     expect(terminalUiState.activeTerminalGroupId).toBe("group-terminal-2");
     expect(terminalUiState.terminalGroups).toEqual([
+      {
+        id: `group-${DEFAULT_THREAD_TERMINAL_ID}`,
+        terminalIds: [DEFAULT_THREAD_TERMINAL_ID],
+      },
       { id: "group-terminal-2", terminalIds: ["terminal-2"] },
     ]);
   });
@@ -147,9 +151,13 @@ describe("terminalUiStateStore actions", () => {
       THREAD_REF,
     );
     expect(terminalUiState.terminalOpen).toBe(true);
-    expect(terminalUiState.terminalIds).toEqual(["setup-setup"]);
+    expect(terminalUiState.terminalIds).toEqual([DEFAULT_THREAD_TERMINAL_ID, "setup-setup"]);
     expect(terminalUiState.activeTerminalId).toBe("setup-setup");
     expect(terminalUiState.terminalGroups).toEqual([
+      {
+        id: `group-${DEFAULT_THREAD_TERMINAL_ID}`,
+        terminalIds: [DEFAULT_THREAD_TERMINAL_ID],
+      },
       { id: "group-setup-setup", terminalIds: ["setup-setup"] },
     ]);
   });
@@ -170,7 +178,7 @@ describe("terminalUiStateStore actions", () => {
         useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
         OTHER_THREAD_REF,
       ).terminalIds,
-    ).toEqual(["env-b-terminal"]);
+    ).toEqual([DEFAULT_THREAD_TERMINAL_ID, "env-b-terminal"]);
   });
 
   it("drops persisted entries whose thread keys are not valid scoped keys", () => {
@@ -216,6 +224,7 @@ describe("terminalUiStateStore actions", () => {
     const store = useTerminalUiStateStore.getState();
     store.newTerminal(THREAD_REF, "terminal-only");
     store.closeTerminal(THREAD_REF, "terminal-only");
+    store.closeTerminal(THREAD_REF, DEFAULT_THREAD_TERMINAL_ID);
 
     expect(
       useTerminalUiStateStore.getState().terminalUiStateByThreadKey[scopedThreadKey(THREAD_REF)],
@@ -243,6 +252,20 @@ describe("terminalUiStateStore actions", () => {
     expect(terminalUiState.terminalGroups).toEqual([
       { id: "group-terminal-2", terminalIds: ["terminal-2"] },
     ]);
+  });
+
+  it("restores the shared Run terminal beside existing isolated terminals", () => {
+    const store = useTerminalUiStateStore.getState();
+    store.newTerminal(THREAD_REF, "term-2");
+    store.closeTerminal(THREAD_REF, DEFAULT_THREAD_TERMINAL_ID);
+    store.ensureTerminal(THREAD_REF, DEFAULT_THREAD_TERMINAL_ID, { open: true, active: true });
+
+    const terminalUiState = selectThreadTerminalUiState(
+      useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
+      THREAD_REF,
+    );
+    expect(terminalUiState.terminalIds).toEqual(["term-2", DEFAULT_THREAD_TERMINAL_ID]);
+    expect(terminalUiState.activeTerminalId).toBe(DEFAULT_THREAD_TERMINAL_ID);
   });
 
   it("reconciles terminal ids from an external ordered list", () => {

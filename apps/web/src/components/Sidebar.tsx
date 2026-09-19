@@ -44,7 +44,6 @@ import {
   type IssueLinkedWork,
   type ProjectId,
   type ProjectIconOverride,
-  type ProjectScript,
   type ScopedThreadRef,
   type ThreadId,
   type WorktreePullRequestLink,
@@ -89,7 +88,7 @@ import {
 } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
 
-import { useRightPanelStore } from "../rightPanelStore";
+import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 import {
   isAtomCommandInterrupted,
   settlePromise,
@@ -239,10 +238,11 @@ import {
 } from "../providerInstances";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useDiscoveredPortsState } from "../portDiscoveryState";
-import { resolveWorktreeServerPorts } from "../worktreeServerStatus";
-import { worktreeRunEnvironment } from "../state/worktreeRun";
-import { useWorktreeRunConsoleStore } from "../worktreeRunConsoleStore";
-import { resolveProjectScripts } from "@t3tools/shared/projectScripts";
+import {
+  resolveWorktreeServers,
+  resolveWorktreeServerPorts,
+  type WorktreeServer,
+} from "../worktreeServerStatus";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Button } from "./ui/button";
 import {
@@ -259,8 +259,8 @@ import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
+import { useWorktreeRunTerminalStore } from "../worktreeRunTerminalStore";
 import {
   composerDraftHasUserContent,
   DraftId,
@@ -1101,6 +1101,90 @@ const SidebarRepositoryHeader = memo(function SidebarRepositoryHeader(props: {
   );
 });
 
+function WorkspaceServersPopover(props: {
+  readonly servers: ReadonlyArray<WorktreeServer>;
+  readonly label: string;
+  readonly onFocusTerminal: (server: WorktreeServer) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const closeTimerRef = useRef<number | null>(null);
+  const cancelClose = useCallback(() => {
+    if (closeTimerRef.current === null) return;
+    window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
+  }, []);
+  const scheduleClose = useCallback(() => {
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      setOpen(false);
+    }, 120);
+  }, [cancelClose]);
+  useEffect(() => cancelClose, [cancelClose]);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            aria-label={`${props.servers.length} ${props.servers.length === 1 ? "server" : "servers"} running in ${props.label}`}
+            className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring"
+            onMouseEnter={() => {
+              cancelClose();
+              setOpen(true);
+            }}
+            onMouseLeave={scheduleClose}
+            onClick={(event) => event.stopPropagation()}
+          />
+        }
+      >
+        <span aria-hidden className="size-1.5 rounded-full bg-emerald-500" />
+      </PopoverTrigger>
+      <PopoverPopup
+        side="right"
+        align="start"
+        className="w-64"
+        viewportClassName="p-1.5"
+        onMouseEnter={cancelClose}
+        onMouseLeave={scheduleClose}
+      >
+        <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">
+          Running servers
+        </div>
+        <div className="flex flex-col gap-0.5">
+          {props.servers.map((server) => (
+            <div
+              key={`${server.worktreeRun?.scriptId ?? server.terminal?.terminalId ?? "server"}:${server.port}`}
+              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs"
+            >
+              <span className="min-w-0 flex-1 truncate text-foreground/90">
+                {server.processName ?? "Server"}
+              </span>
+              <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+                :{server.port}
+              </span>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label={`Focus terminal for server on port ${server.port}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setOpen(false);
+                  props.onFocusTerminal(server);
+                }}
+              >
+                <TerminalIcon className="size-3.5" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      </PopoverPopup>
+    </Popover>
+  );
+}
+
 const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
@@ -1116,17 +1200,30 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
   readonly threadRef: ScopedThreadRef;
   readonly isActive: boolean;
   readonly onThreadActivate: (threadRef: ScopedThreadRef) => void;
-  readonly worktreeRunsSupported: boolean;
-  readonly scripts: readonly ProjectScript[];
-  readonly onRunScript: (script: ProjectScript) => void;
   readonly onCreateThread: () => void;
   readonly onToggle: () => void;
 }) {
   const { servers } = useDiscoveredPortsState(props.environmentId);
   const threadIds = useMemo(() => new Set(props.threadIds), [props.threadIds]);
+  const workspaceServers = useMemo(
+    () =>
+      resolveWorktreeServers({
+        servers,
+        threadIds,
+        projectId: props.projectId,
+        workspacePath: props.path,
+      }),
+    [props.path, props.projectId, servers, threadIds],
+  );
   const serverPorts = useMemo(
-    () => resolveWorktreeServerPorts({ servers, threadIds }),
-    [servers, threadIds],
+    () =>
+      resolveWorktreeServerPorts({
+        servers,
+        threadIds,
+        projectId: props.projectId,
+        workspacePath: props.path,
+      }),
+    [props.path, props.projectId, servers, threadIds],
   );
   const serverLabel =
     serverPorts.length === 1
@@ -1166,21 +1263,36 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
     },
     [openIssueLink, props.environmentId, props.isActive, props.onThreadActivate, props.threadRef],
   );
-  const metadata = useEnvironmentQuery(
-    props.worktreeRunsSupported
-      ? worktreeRunEnvironment.metadata({ environmentId: props.environmentId, input: null })
-      : null,
-  );
-  const runningScriptIds = new Set(
-    (metadata.data ?? [])
-      .filter(
-        (run) =>
-          run.target.projectId === props.projectId &&
-          run.target.workspacePath === props.path &&
-          (run.status === "running" || run.status === "starting"),
-      )
-      .map((run) => run.target.scriptId),
-  );
+  const focusServerTerminal = (server: WorktreeServer) => {
+    if (server.worktreeRun) {
+      useWorktreeRunTerminalStore.getState().open({
+        environmentId: props.environmentId,
+        target: server.worktreeRun,
+      });
+      useTerminalUiStateStore.getState().setTerminalOpen(props.threadRef, true);
+      props.onThreadActivate(props.threadRef);
+      return;
+    }
+    const terminal = server.terminal;
+    if (!terminal) return;
+    const threadRef = scopeThreadRef(props.environmentId, terminal.threadId);
+    const rightPanels = useRightPanelStore.getState();
+    const panelTerminal = selectThreadRightPanelState(
+      rightPanels.byThreadKey,
+      threadRef,
+    ).surfaces.find(
+      (surface) => surface.kind === "terminal" && surface.terminalIds.includes(terminal.terminalId),
+    );
+    if (panelTerminal?.kind === "terminal") {
+      rightPanels.activateTerminal(threadRef, panelTerminal.id, terminal.terminalId);
+      rightPanels.show(threadRef);
+    } else {
+      useTerminalUiStateStore
+        .getState()
+        .ensureTerminal(threadRef, terminal.terminalId, { open: true, active: true });
+    }
+    props.onThreadActivate(threadRef);
+  };
   return (
     <li className="group flex h-8 list-none items-center gap-0.5 ps-3">
       <Tooltip>
@@ -1209,13 +1321,6 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
               primary
             </span>
           ) : null}
-          {serverPorts.length > 0 ? (
-            <span
-              role="img"
-              aria-label={serverLabel}
-              className="size-1.5 shrink-0 rounded-full bg-emerald-500"
-            />
-          ) : null}
           {props.hasUnread ? (
             <span
               role="img"
@@ -1241,6 +1346,13 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
           </div>
         </TooltipPopup>
       </Tooltip>
+      {workspaceServers.length > 0 ? (
+        <WorkspaceServersPopover
+          servers={workspaceServers}
+          label={props.label}
+          onFocusTerminal={focusServerTerminal}
+        />
+      ) : null}
       {badge !== null && current !== null ? (
         <ThreadPullRequestBadgeControl
           variant="underline"
@@ -1277,34 +1389,6 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
           </Tooltip>
         );
       })}
-      {props.scripts.length > 0 ? (
-        <Menu>
-          <MenuTrigger
-            render={
-              <button
-                type="button"
-                aria-label={`Run action in ${props.label}`}
-                className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
-              />
-            }
-          >
-            <TerminalIcon aria-hidden className="size-3.5" />
-            {runningScriptIds.size > 0 ? (
-              <span className="absolute size-1.5 translate-x-2 -translate-y-2 rounded-full bg-emerald-500" />
-            ) : null}
-          </MenuTrigger>
-          <MenuPopup align="end">
-            {props.scripts.map((script) => (
-              <MenuItem key={script.id} onClick={() => props.onRunScript(script)}>
-                <TerminalIcon
-                  className={cn("size-3.5", runningScriptIds.has(script.id) && "text-emerald-500")}
-                />
-                {script.name}
-              </MenuItem>
-            ))}
-          </MenuPopup>
-        </Menu>
-      ) : null}
       <Tooltip>
         <TooltipTrigger
           render={
@@ -2602,10 +2686,6 @@ export default function Sidebar() {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
-  const startWorktreeRun = useAtomCommand(worktreeRunEnvironment.start, {
-    reportFailure: false,
-  });
-  const openWorktreeRunConsole = useWorktreeRunConsoleStore((state) => state.open);
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) => {
       toastManager.add({
@@ -5313,21 +5393,6 @@ export default function Sidebar() {
                             />,
                           );
                           for (const worktree of repository.worktrees) {
-                            const worktreeThread = worktree.threads[0]!;
-                            const project = projects.find(
-                              (candidate) =>
-                                candidate.environmentId === worktreeThread.environmentId &&
-                                candidate.id === worktreeThread.projectId,
-                            );
-                            const config = serverConfigs.get(worktreeThread.environmentId);
-                            const worktreeRunsSupported =
-                              config?.environment.capabilities.worktreeRuns === true;
-                            const worktreeScripts =
-                              project && worktreeRunsSupported
-                                ? resolveProjectScripts(config.settings, project).filter(
-                                    (script) => script.scope === "worktree",
-                                  )
-                                : [];
                             const containsRoute = worktree.threads.some(
                               (thread) =>
                                 scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) ===
@@ -5384,42 +5449,6 @@ export default function Sidebar() {
                                   )
                                 }
                                 onThreadActivate={navigateToThread}
-                                worktreeRunsSupported={worktreeRunsSupported}
-                                scripts={worktreeScripts}
-                                onRunScript={(script) => {
-                                  void startWorktreeRun({
-                                    environmentId: contextThread.environmentId,
-                                    input: {
-                                      projectId: contextThread.projectId,
-                                      workspacePath: worktree.path,
-                                      scriptId: script.id,
-                                    },
-                                  }).then((result) => {
-                                    if (
-                                      result._tag === "Failure" &&
-                                      !isAtomCommandInterrupted(result)
-                                    ) {
-                                      const error = squashAtomCommandFailure(result);
-                                      toastManager.add({
-                                        type: "error",
-                                        title: `Could not run ${script.name}`,
-                                        description:
-                                          error instanceof Error ? error.message : String(error),
-                                      });
-                                      return;
-                                    }
-                                    if (result._tag === "Success") {
-                                      openWorktreeRunConsole({
-                                        environmentId: contextThread.environmentId,
-                                        target: {
-                                          projectId: contextThread.projectId,
-                                          workspacePath: worktree.path,
-                                          scriptId: script.id,
-                                        },
-                                      });
-                                    }
-                                  });
-                                }}
                                 onCreateThread={() => {
                                   void handleNewThreadRef.current(
                                     scopeProjectRef(

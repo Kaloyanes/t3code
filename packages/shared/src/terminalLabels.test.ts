@@ -6,8 +6,8 @@ import { DEFAULT_TERMINAL_ID } from "@t3tools/contracts";
 import { getTerminalLabel, nextTerminalId, resolveTerminalSessionLabel } from "./terminalLabels.ts";
 
 describe("getTerminalLabel", () => {
-  it("uses the numeric suffix for term-* ids", () => {
-    expect(getTerminalLabel(DEFAULT_TERMINAL_ID)).toBe("Terminal 1");
+  it("distinguishes the shared Run terminal from isolated terminals", () => {
+    expect(getTerminalLabel(DEFAULT_TERMINAL_ID)).toBe("Run");
     expect(getTerminalLabel("term-2")).toBe("Terminal 2");
     expect(getTerminalLabel("term-12")).toBe("Terminal 12");
     expect(getTerminalLabel("terminal-3")).toBe("Terminal 3");
@@ -21,13 +21,15 @@ describe("getTerminalLabel", () => {
 describe("resolveTerminalSessionLabel", () => {
   it("prefers a non-empty summary label", () => {
     const summary = { label: "  bun  " } as Pick<TerminalSummary, "label">;
-    expect(resolveTerminalSessionLabel("term-1", summary)).toBe("bun");
+    expect(resolveTerminalSessionLabel("term-2", summary)).toBe("bun");
   });
 
-  it("falls back to getTerminalLabel when summary is missing or blank", () => {
-    expect(resolveTerminalSessionLabel(DEFAULT_TERMINAL_ID, { label: "   " })).toBe("Terminal 1");
-    expect(resolveTerminalSessionLabel(DEFAULT_TERMINAL_ID, null)).toBe("Terminal 1");
+  it("keeps the Run label stable while allowing isolated terminal process labels", () => {
+    expect(resolveTerminalSessionLabel(DEFAULT_TERMINAL_ID, { label: "pnpm" })).toBe("Run");
+    expect(resolveTerminalSessionLabel(DEFAULT_TERMINAL_ID, { label: "   " })).toBe("Run");
+    expect(resolveTerminalSessionLabel(DEFAULT_TERMINAL_ID, null)).toBe("Run");
     expect(resolveTerminalSessionLabel("term-2", undefined)).toBe("Terminal 2");
+    expect(resolveTerminalSessionLabel("term-2", { label: "vite" })).toBe("vite");
   });
 });
 

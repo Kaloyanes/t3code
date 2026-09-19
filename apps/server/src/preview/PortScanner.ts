@@ -1,7 +1,7 @@
 /**
  * In-process PortScanner implementation.
  *
- * macOS/Linux: parses `lsof -iTCP -sTCP:LISTEN -P -n -F pcn` (-F output is a
+ * macOS/Linux: parses `lsof -iTCP -sTCP:LISTEN -P -n -F pcgn` (-F output is a
  * stable line-prefixed field format; this is the only `lsof` flag set we rely
  * on).
  *
@@ -21,6 +21,7 @@ import {
   PREVIEW_URL_MAX_LENGTH,
   ThreadId,
   type DiscoveredLocalServer,
+  type WorktreeRunTarget,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Net from "@t3tools/shared/Net";
@@ -63,6 +64,12 @@ export class PortDiscovery extends Context.Service<
       readonly threadId: string;
       readonly terminalId: string;
     }) => Effect.Effect<void>;
+    readonly registerWorktreeRunProcesses: (
+      input: WorktreeRunTarget & {
+        readonly processIds: ReadonlyArray<number>;
+      },
+    ) => Effect.Effect<void>;
+    readonly unregisterWorktreeRun: (input: WorktreeRunTarget) => Effect.Effect<void>;
   }
 >()("t3/preview/PortScanner/PortDiscovery") {}
 
@@ -90,17 +97,16 @@ interface ScannerState {
   readonly terminalProcesses: ReadonlyMap<
     string,
     {
-      readonly owner: TerminalProcessOwner;
+      readonly owner: ProcessOwner;
       readonly processIds: ReadonlySet<number>;
     }
   >;
   readonly retainCount: number;
 }
 
-interface TerminalProcessOwner {
-  readonly threadId: ThreadId;
-  readonly terminalId: string;
-}
+type ProcessOwner =
+  | { readonly kind: "terminal"; readonly threadId: ThreadId; readonly terminalId: string }
+  | { readonly kind: "worktreeRun"; readonly target: WorktreeRunTarget };
 
 interface WebProbeCacheEntry {
   readonly pid: number | null;
@@ -123,6 +129,16 @@ const terminalOwnerKey = (owner: {
   readonly threadId: string;
   readonly terminalId: string;
 }): string => `${owner.threadId}\u0000${owner.terminalId}`;
+
+const worktreeRunOwnerKey = (target: WorktreeRunTarget): string =>
+  `worktree:${JSON.stringify([target.projectId, target.workspacePath, target.scriptId])}`;
+
+const ownerFields = (owner: ProcessOwner | undefined) =>
+  owner?.kind === "terminal"
+    ? { terminal: { threadId: owner.threadId, terminalId: owner.terminalId } }
+    : owner?.kind === "worktreeRun"
+      ? { terminal: null, worktreeRun: owner.target }
+      : { terminal: null };
 
 const parseConfiguredUrl = (raw: string): URL | null => {
   try {
@@ -184,10 +200,11 @@ const projectWebProbeSnapshot = (
 
 const parseLsofOutput = (
   raw: string,
-  terminalByProcessId: ReadonlyMap<number, TerminalProcessOwner> = new Map(),
+  terminalByProcessId: ReadonlyMap<number, ProcessOwner> = new Map(),
 ): ReadonlyArray<DiscoveredLocalServer> => {
   const seen = new Map<string, DiscoveredLocalServer>();
   let pid: number | null = null;
+  let processGroupId: number | null = null;
   let processName: string | null = null;
 
   for (const line of raw.split("\n")) {
@@ -197,11 +214,17 @@ const parseLsofOutput = (
     if (tag === "p") {
       const parsed = Number.parseInt(value, 10);
       pid = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+      processGroupId = null;
       processName = null;
       continue;
     }
     if (tag === "c") {
       processName = value.trim() || null;
+      continue;
+    }
+    if (tag === "g") {
+      const parsed = Number.parseInt(value, 10);
+      processGroupId = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
       continue;
     }
     if (tag === "n") {
@@ -216,7 +239,12 @@ const parseLsofOutput = (
         url,
         processName,
         pid,
-        terminal: pid === null ? null : (terminalByProcessId.get(pid) ?? null),
+        ...ownerFields(
+          pid === null
+            ? undefined
+            : (terminalByProcessId.get(pid) ??
+                (processGroupId === null ? undefined : terminalByProcessId.get(processGroupId))),
+        ),
       });
     }
   }
@@ -241,7 +269,7 @@ const parsePortFromLsofName = (name: string): number | null => {
 
 const parseWindowsListenerOutput = (
   raw: string,
-  terminalByProcessId: ReadonlyMap<number, TerminalProcessOwner> = new Map(),
+  terminalByProcessId: ReadonlyMap<number, ProcessOwner> = new Map(),
 ): ReadonlyArray<DiscoveredLocalServer> => {
   const seen = new Map<number, DiscoveredLocalServer>();
   for (const line of raw.split(/\r?\n/g)) {
@@ -259,7 +287,7 @@ const parseWindowsListenerOutput = (
       url: `http://localhost:${port}`,
       processName: processNameRaw?.trim() || null,
       pid: normalizedPid,
-      terminal: normalizedPid === null ? null : (terminalByProcessId.get(normalizedPid) ?? null),
+      ...ownerFields(normalizedPid === null ? undefined : terminalByProcessId.get(normalizedPid)),
     });
   }
   return [...seen.values()].toSorted((left, right) => left.port - right.port);
@@ -281,7 +309,10 @@ const serversEqual = (
       a.processName !== b.processName ||
       a.pid !== b.pid ||
       a.terminal?.threadId !== b.terminal?.threadId ||
-      a.terminal?.terminalId !== b.terminal?.terminalId
+      a.terminal?.terminalId !== b.terminal?.terminalId ||
+      a.worktreeRun?.projectId !== b.worktreeRun?.projectId ||
+      a.worktreeRun?.workspacePath !== b.worktreeRun?.workspacePath ||
+      a.worktreeRun?.scriptId !== b.worktreeRun?.scriptId
     ) {
       return false;
     }
@@ -482,7 +513,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     configuredUrls: ReadonlyArray<string>,
   ) {
     const state = yield* Ref.get(stateRef);
-    const terminalByProcessId = new Map<number, TerminalProcessOwner>();
+    const terminalByProcessId = new Map<number, ProcessOwner>();
     for (const registration of state.terminalProcesses.values()) {
       for (const processId of registration.processIds) {
         terminalByProcessId.set(processId, registration.owner);
@@ -517,7 +548,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     const lsofResult = yield* processRunner
       .run({
         command: "lsof",
-        args: ["-iTCP", "-sTCP:LISTEN", "-P", "-n", "-F", "pcn"],
+        args: ["-iTCP", "-sTCP:LISTEN", "-P", "-n", "-F", "pcgn"],
         timeout: Duration.millis(LSOF_TIMEOUT_MS),
         maxOutputBytes: 1024 * 1024,
         outputMode: "truncate",
@@ -625,6 +656,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
   const registerTerminalProcesses: PortDiscovery["Service"]["registerTerminalProcesses"] =
     Effect.fn("PortDiscovery.registerTerminalProcesses")(function* (input) {
       const owner = {
+        kind: "terminal" as const,
         threadId: ThreadId.make(input.threadId),
         terminalId: input.terminalId,
       };
@@ -653,12 +685,48 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     });
   });
 
+  const registerWorktreeRunProcesses: PortDiscovery["Service"]["registerWorktreeRunProcesses"] =
+    Effect.fn("PortDiscovery.registerWorktreeRunProcesses")(function* (input) {
+      const target: WorktreeRunTarget = {
+        projectId: input.projectId,
+        workspacePath: input.workspacePath,
+        scriptId: input.scriptId,
+      };
+      const processIds = new Set(
+        input.processIds.filter((processId) => Number.isInteger(processId) && processId > 0),
+      );
+      yield* Ref.update(stateRef, (state) => {
+        const terminalProcesses = new Map(state.terminalProcesses);
+        const key = worktreeRunOwnerKey(target);
+        if (processIds.size === 0) terminalProcesses.delete(key);
+        else {
+          terminalProcesses.set(key, {
+            owner: { kind: "worktreeRun", target },
+            processIds,
+          });
+        }
+        return { ...state, terminalProcesses };
+      });
+    });
+
+  const unregisterWorktreeRun: PortDiscovery["Service"]["unregisterWorktreeRun"] = Effect.fn(
+    "PortDiscovery.unregisterWorktreeRun",
+  )(function* (input) {
+    yield* Ref.update(stateRef, (state) => {
+      const terminalProcesses = new Map(state.terminalProcesses);
+      terminalProcesses.delete(worktreeRunOwnerKey(input));
+      return { ...state, terminalProcesses };
+    });
+  });
+
   return PortDiscovery.of({
     scan: scanOnce,
     subscribe,
     retain,
     registerTerminalProcesses,
     unregisterTerminal,
+    registerWorktreeRunProcesses,
+    unregisterWorktreeRun,
   });
 }).pipe(Effect.withSpan("PortDiscovery.make"));
 

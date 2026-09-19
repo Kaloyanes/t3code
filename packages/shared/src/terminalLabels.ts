@@ -1,7 +1,9 @@
-import type { TerminalSummary } from "@t3tools/contracts";
+import { DEFAULT_TERMINAL_ID, type TerminalSummary } from "@t3tools/contracts";
 
 /** Human-readable label for a terminal tab; matches mobile and web sidebars. */
 export function getTerminalLabel(terminalId: string): string {
+  if (terminalId === DEFAULT_TERMINAL_ID) return "Run";
+
   const numericSuffix = /^term(?:inal)?-(\d+)$/i.exec(terminalId)?.[1];
   if (numericSuffix) {
     return `Terminal ${numericSuffix}`;
@@ -15,6 +17,8 @@ export function resolveTerminalSessionLabel(
   terminalId: string,
   summary: Pick<TerminalSummary, "label"> | null | undefined,
 ): string {
+  if (terminalId === DEFAULT_TERMINAL_ID) return getTerminalLabel(terminalId);
+
   const trimmed = summary?.label?.trim();
   if (trimmed && trimmed.length > 0) {
     return trimmed;
