@@ -321,12 +321,13 @@ const make = Effect.gen(function* () {
           WHERE automation_id = ${input.id}
         `,
       );
-      if (status === "canceled") {
+      if (status === "canceled" || status === "paused") {
         yield* failSql(
-          "cancel",
+          status === "canceled" ? "cancel" : "pause",
           sql`
             UPDATE projection_automation_runs
-            SET status = 'canceled', completed_at = ${nowIso(nowMs)}, reason = 'Automation canceled'
+            SET status = 'canceled', completed_at = ${nowIso(nowMs)},
+                reason = ${status === "canceled" ? "Automation canceled" : "Automation paused"}
             WHERE automation_id = ${input.id} AND status = 'scheduled' AND trigger = 'schedule'
           `,
         );
@@ -461,13 +462,17 @@ const make = Effect.gen(function* () {
 
             const dueRuns = yield* sql<AutomationRunRow>`
               SELECT
-                run_id AS "runId", automation_id AS "automationId", project_id AS "projectId",
-                thread_id AS "threadId", trigger, prompt, execution_json AS "executionJson",
-                scheduled_at AS "scheduledAt", status, started_at AS "startedAt",
-                completed_at AS "completedAt", late_by_ms AS "lateByMs", reason
-              FROM projection_automation_runs
-              WHERE status = 'scheduled' AND scheduled_at <= ${now}
-              ORDER BY scheduled_at ASC
+                runs.run_id AS "runId", runs.automation_id AS "automationId", runs.project_id AS "projectId",
+                runs.thread_id AS "threadId", runs.trigger, runs.prompt, runs.execution_json AS "executionJson",
+                runs.scheduled_at AS "scheduledAt", runs.status, runs.started_at AS "startedAt",
+                runs.completed_at AS "completedAt", runs.late_by_ms AS "lateByMs", runs.reason
+              FROM projection_automation_runs AS runs
+              INNER JOIN projection_automations AS automations
+                ON automations.automation_id = runs.automation_id
+              WHERE runs.status = 'scheduled'
+                AND runs.scheduled_at <= ${now}
+                AND automations.status <> 'canceled'
+              ORDER BY runs.scheduled_at ASC
             `;
             const claimedRuns: AutomationRun[] = [];
             for (const row of dueRuns) {

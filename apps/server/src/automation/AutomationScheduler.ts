@@ -160,6 +160,18 @@ const make = Effect.gen(function* () {
               reason: "The agent turn was interrupted.",
             });
           }
+          if (
+            run.status === "running" &&
+            run.startedAt !== null &&
+            run.execution.timeoutMs !== undefined &&
+            nowMs - Date.parse(run.startedAt) > run.execution.timeoutMs
+          ) {
+            return automation.finish({
+              runId: run.id,
+              status: "failed",
+              reason: "Timed out during agent execution.",
+            });
+          }
           if (thread.hasPendingApprovals || thread.hasPendingUserInput) {
             return run.status === "running" ? automation.markWaiting(run.id) : Effect.void;
           }
