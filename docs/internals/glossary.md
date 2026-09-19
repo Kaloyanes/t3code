@@ -24,6 +24,7 @@ Terms whose meaning matters across T3 Code. Architecture and lifecycle constrain
 | Automation     | A reusable definition containing an agent instruction, execution settings, and a time-based schedule.                                                   |
 | Scheduled run  | One occurrence of an automation. Each scheduled run starts its own thread so runs keep separate history and workspace state.                             |
 | Missed run     | A scheduled run whose due time passed while its environment was unavailable. The environment may run it once after recovery and marks it as late.       |
+| Automation manager | The environment-scoped place where users view, configure, control, and inspect automations and their scheduled runs.                                  |
 
 ## Orchestration
 
