@@ -510,7 +510,7 @@ function WorktreeBranchPrefixSettings() {
         serverScoped
         settingKeys={["worktreeBranchPrefix"]}
         {...setting}
-        description={`Prefix for branches created by T3 Code, such as ${prefixMixed ? "custom" : settings.worktreeBranchPrefix}/a1b2c3d4. Existing branches are unchanged.`}
+        description={`Configured prefix for temporary worktree branches, such as ${prefixMixed ? "custom" : settings.worktreeBranchPrefix}/a1b2c3d4. Existing branches are unchanged.`}
         resetAction={
           !prefixMixed && settings.worktreeBranchPrefix !== DEFAULT_WORKTREE_BRANCH_PREFIX ? (
             <SettingResetButton
