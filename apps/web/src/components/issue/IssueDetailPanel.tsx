@@ -28,10 +28,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import ChatMarkdown from "../ChatMarkdown";
 import { useNavigate } from "@tanstack/react-router";
-import { issueEnvironment, useIssueComments, useIssueDetail } from "~/state/issues";
+import {
+  issueEnvironment,
+  useIssueCandidates,
+  useIssueComments,
+  useIssueDetail,
+} from "~/state/issues";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useThreadShells } from "~/state/entities";
 import { Button } from "../ui/button";
+import { IssueLabelPill } from "./IssueLabelPill";
 import { Badge } from "../ui/badge";
 import { Checkbox } from "../ui/checkbox";
 import {
@@ -231,6 +237,19 @@ export function IssueDetailPanel({
   const [comment, setComment] = useState("");
   const [worktreeOpen, setWorktreeOpen] = useState(false);
   const issue = detailQuery.data;
+  const labelCandidatesQuery = useIssueCandidates(
+    editing
+      ? {
+          environmentId,
+          input: { ...reference, kind: "labels", limit: 100 },
+        }
+      : null,
+  );
+  const labelColors = new Map(
+    labelCandidatesQuery.data?._tag === "labels"
+      ? labelCandidatesQuery.data.candidates.map((candidate) => [candidate.name, candidate.color])
+      : (issue?.labels.map((label) => [label.name, label.color]) ?? []),
+  );
 
   useEffect(() => {
     if (!issue || editing) return;
@@ -487,6 +506,15 @@ export function IssueDetailPanel({
                   placeholder="bug, enhancement"
                   disabled={updatePending}
                 />
+                <span className="mt-2 flex flex-wrap gap-1">
+                  {labels
+                    .split(",")
+                    .map((name) => name.trim())
+                    .filter(Boolean)
+                    .map((name) => (
+                      <IssueLabelPill key={name} name={name} color={labelColors.get(name)} />
+                    ))}
+                </span>
               </label>
               <label className="block text-xs font-medium">
                 Assignees
@@ -541,18 +569,7 @@ export function IssueDetailPanel({
 
           <section className="flex flex-wrap items-center gap-2">
             {issue.labels.map((label) => (
-              <Badge
-                key={label.name}
-                size="sm"
-                variant="secondary"
-                style={
-                  label.color
-                    ? { borderColor: `#${label.color}`, color: `#${label.color}` }
-                    : undefined
-                }
-              >
-                {label.name}
-              </Badge>
+              <IssueLabelPill key={label.name} name={label.name} color={label.color} />
             ))}
             {issue.assignees.length > 0 ? (
               <span className="text-xs text-muted-foreground">

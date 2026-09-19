@@ -110,6 +110,24 @@ export function issueEntriesForQuery(
   });
 }
 
+export function normalizeIssueLabelColor(color: string | null | undefined): string | null {
+  const normalized = color?.replace(/^#/, "") ?? "";
+  return /^[\da-f]{6}$/i.test(normalized) ? `#${normalized.toLowerCase()}` : null;
+}
+
+export function issueLabelForeground(color: string): "#000000" | "#ffffff" {
+  const normalized = normalizeIssueLabelColor(color);
+  if (normalized === null) return "#000000";
+  const channels = [1, 3, 5].map((offset) =>
+    Number.parseInt(normalized.slice(offset, offset + 2), 16),
+  );
+  const luminance = channels
+    .map((channel) => channel / 255)
+    .map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4))
+    .reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index]!, 0);
+  return (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) ? "#000000" : "#ffffff";
+}
+
 export function sortIssueEntries(
   entries: ReadonlyArray<IssueListEntry>,
 ): ReadonlyArray<IssueListEntry> {

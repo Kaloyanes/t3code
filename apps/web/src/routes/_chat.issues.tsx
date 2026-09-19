@@ -7,6 +7,7 @@ import type {
   ProjectId,
 } from "@t3tools/contracts";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useAtomValue } from "@effect/atom-react";
 import {
   CircleAlertIcon,
   CircleCheckIcon,
@@ -20,7 +21,7 @@ import {
   SearchIcon,
   XCircleIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
 
 import {
   issueRepositoryForProject,
@@ -31,6 +32,8 @@ import {
   normalizeIssueHost,
 } from "../components/issue/issue.logic";
 import { IssueDetailPanel } from "../components/issue/IssueDetailPanel";
+import { IssueLabelPill } from "../components/issue/IssueLabelPill";
+import { PanelLayoutControls } from "../components/chat/PanelLayoutControls";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import {
@@ -41,7 +44,6 @@ import {
   ComboboxList,
   ComboboxPopup,
 } from "../components/ui/combobox";
-import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import {
   Dialog,
@@ -91,6 +93,11 @@ import {
   type IssueSurface,
 } from "../rightPanelStore";
 import { cn } from "../lib/utils";
+import { isCommandPaletteOpen } from "../commandPaletteBus";
+import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import { isTerminalFocused } from "../lib/terminalFocus";
+import { usePanelAnimationSettings, usePanelPresence } from "../panelAnimations";
+import { primaryServerKeybindingsAtom } from "../state/server";
 
 export interface IssuesSearch {
   readonly state: IssueListState;
@@ -131,6 +138,7 @@ export const Route = createFileRoute("/_chat/issues")({
 });
 
 function IssuesRouteView() {
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const projects = useProjects();
@@ -356,8 +364,23 @@ function IssuesRouteView() {
   const selectedSurface = useRightPanelStore((state) =>
     selectActiveRightPanelSurface(state.byThreadKey, ISSUES_PANEL_REF),
   );
-  const activeSurface =
-    rightPanelState.isOpen && selectedSurface?.kind === "issue" ? selectedSurface : null;
+  const selectedIssueSurface = selectedSurface?.kind === "issue" ? selectedSurface : null;
+  const activeSurface = rightPanelState.isOpen ? selectedIssueSurface : null;
+  const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
+    usePanelAnimationSettings();
+  const rightPanelPresenceValue = useMemo(
+    () => ({ activeSurface: selectedIssueSurface, surfaces: rightPanelState.surfaces }),
+    [rightPanelState.surfaces, selectedIssueSurface],
+  );
+  const rightPanelPresence = usePanelPresence(
+    rightPanelState.isOpen && selectedIssueSurface !== null,
+    rightPanelPresenceValue,
+    panelAnimationsActive,
+    ISSUES_PANEL_REF.threadId,
+    panelAnimationDurationMs,
+  );
+  const renderedIssueSurface = rightPanelPresence.value?.activeSurface ?? null;
+  const renderedRightPanelSurfaces = rightPanelPresence.value?.surfaces ?? [];
   const openIssue = useCallback(
     (entry: {
       readonly projectId: ProjectId;
@@ -386,7 +409,17 @@ function IssuesRouteView() {
   useEffect(() => {
     if (!selection || !selectedProject || !search.selectedIssue) return;
     const existing = entries.find((entry) => entry.number === search.selectedIssue);
-    if (existing) openIssue(existing);
+    if (existing) {
+      openIssue(existing);
+      return;
+    }
+    useRightPanelStore.getState().openIssue(ISSUES_PANEL_REF, {
+      environmentId: selectedProject.environmentId,
+      projectId: selectedProject.id,
+      host: selection.host,
+      repository: selection.repository,
+      number: search.selectedIssue,
+    });
   }, [entries, openIssue, search.selectedIssue, selectedProject, selection]);
   const loadMore = () => {
     if (listQuery.isPending || !data || selection === null || selectedProject === null) return;
@@ -438,13 +471,81 @@ function IssuesRouteView() {
       (errorText !== null && /not authenticated|unauthenticated/iu.test(errorText)));
   const showLoading = selection !== null && listQuery.isPending && data === null;
   const panelEnvironmentId =
-    (activeSurface?.environmentId as EnvironmentId | undefined) ??
+    (renderedIssueSurface?.environmentId as EnvironmentId | undefined) ??
     selectedProject?.environmentId ??
     null;
+  const selectSurfaceInUrl = (surface: IssueSurface | null) =>
+    updateSearch(
+      surface === null
+        ? { selectedIssue: undefined }
+        : {
+            projectId: surface.projectId as ProjectId,
+            environmentId: surface.environmentId as EnvironmentId | undefined,
+            host: surface.host,
+            selectedIssue: surface.number,
+          },
+    );
   const closePanel = (surface: IssueSurface) => {
     useRightPanelStore.getState().closeSurface(ISSUES_PANEL_REF, surface.id);
-    updateSearch({ selectedIssue: undefined });
+    const next = selectActiveRightPanelSurface(
+      useRightPanelStore.getState().byThreadKey,
+      ISSUES_PANEL_REF,
+    );
+    selectSurfaceInUrl(next?.kind === "issue" ? next : null);
   };
+  const toggleRightPanel = () => {
+    if (rightPanelState.isOpen) {
+      useRightPanelStore.getState().close(ISSUES_PANEL_REF);
+      selectSurfaceInUrl(null);
+    } else if (selectedIssueSurface !== null) {
+      useRightPanelStore.getState().show(ISSUES_PANEL_REF);
+      selectSurfaceInUrl(selectedIssueSurface);
+    }
+  };
+  const closeActiveSurfaceFromShortcut = useEffectEvent((event: KeyboardEvent) => {
+    if (activeSurface === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.repeat) closePanel(activeSurface);
+  });
+  const toggleRightPanelFromShortcut = useEffectEvent((event: KeyboardEvent) => {
+    if (selectedIssueSurface === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.repeat) toggleRightPanel();
+  });
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isCommandPaletteOpen()) return;
+      const command = resolveShortcutCommand(event, keybindings, {
+        context: { terminalFocus: isTerminalFocused(), terminalOpen: false },
+      });
+      if (command === "rightPanel.close") closeActiveSurfaceFromShortcut(event);
+      if (command === "rightPanel.toggle") toggleRightPanelFromShortcut(event);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [keybindings]);
+  const panelControls = (
+    <PanelLayoutControls
+      showTerminalControl={false}
+      terminalAvailable={false}
+      terminalOpen={false}
+      terminalShortcutLabel={null}
+      rightPanelAvailable={selectedIssueSurface !== null}
+      rightPanelOpen={rightPanelState.isOpen}
+      rightPanelShortcutLabel={shortcutLabelForCommand(keybindings, "rightPanel.toggle")}
+      rightPanelUnavailableLabel="Select an issue first"
+      liveAgentCount={0}
+      onToggleTerminal={() => undefined}
+      onToggleRightPanel={toggleRightPanel}
+    />
+  );
+  const titlebarPanelControls = (
+    <div className="absolute top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] z-50 mr-px flex h-[var(--workspace-topbar-height)] items-center [-webkit-app-region:no-drag]">
+      {panelControls}
+    </div>
+  );
   const showListError = hasListError && !stale && !unavailable && !unauthenticated;
   const body = showLoading ? (
     <LoadingState />
@@ -485,7 +586,7 @@ function IssuesRouteView() {
       ) : null}
       <IssueRows
         entries={entries}
-        selectedNumber={activeSurface?.number ?? search.selectedIssue ?? null}
+        selectedNumber={selectedIssueSurface?.number ?? search.selectedIssue ?? null}
         onSelect={openIssue}
       />
     </>
@@ -494,7 +595,8 @@ function IssuesRouteView() {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
       <div className="relative flex min-h-0 flex-1">
-        <main className={cn("min-w-0 flex-1 flex-col", activeSurface ? "hidden" : "flex")}>
+        {rightPanelPresence.present ? titlebarPanelControls : null}
+        <main className="flex min-w-0 flex-1 flex-col">
           <WorkspacePageHeader electron={isElectron} className="border-b">
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <GithubIcon className="size-4" />
@@ -509,6 +611,7 @@ function IssuesRouteView() {
               <Button size="sm" onClick={() => setNewIssueOpen(true)} disabled={selection === null}>
                 <PlusIcon /> New issue
               </Button>
+              {!rightPanelPresence.present ? panelControls : null}
             </div>
           </WorkspacePageHeader>
           <div className="flex min-h-0 flex-1 flex-col">
@@ -629,14 +732,15 @@ function IssuesRouteView() {
             </div>
           </div>
         </main>
-        {activeSurface && panelEnvironmentId ? (
+        {rightPanelPresence.present && renderedIssueSurface && panelEnvironmentId ? (
           <RightPanelTabs
             mode="inline"
-            maximized
             open={rightPanelState.isOpen}
-            surfaces={rightPanelState.surfaces}
+            widthStorageKey="t3code:work-item-panel-width"
+            defaultWidth={typeof window === "undefined" ? 640 : Math.floor(window.innerWidth / 2)}
+            surfaces={renderedRightPanelSurfaces}
             environmentId={panelEnvironmentId}
-            activeSurfaceId={activeSurface.id}
+            activeSurfaceId={renderedIssueSurface.id}
             pendingSurfaceIds={new Set()}
             previewSessions={{}}
             desktopByTabId={{}}
@@ -652,11 +756,15 @@ function IssuesRouteView() {
             }}
             onCloseOtherSurfaces={(surface) => {
               useRightPanelStore.getState().closeOtherSurfaces(ISSUES_PANEL_REF, surface.id);
-              if (surface.kind === "issue") updateSearch({ selectedIssue: surface.number });
+              if (surface.kind === "issue") selectSurfaceInUrl(surface);
             }}
             onCloseSurfacesToRight={(surface) => {
               useRightPanelStore.getState().closeSurfacesToRight(ISSUES_PANEL_REF, surface.id);
-              if (surface.kind === "issue") updateSearch({ selectedIssue: surface.number });
+              const next = selectActiveRightPanelSurface(
+                useRightPanelStore.getState().byThreadKey,
+                ISSUES_PANEL_REF,
+              );
+              selectSurfaceInUrl(next?.kind === "issue" ? next : null);
             }}
             onCloseAllSurfaces={() => {
               useRightPanelStore.getState().closeAllSurfaces(ISSUES_PANEL_REF);
@@ -682,17 +790,19 @@ function IssuesRouteView() {
             deviceAvailable={false}
             liveAgentCount={0}
           >
-            {activeSurface.kind === "issue" ? (
+            {renderedIssueSurface.kind === "issue" ? (
               <IssueDetailPanel
-                key={activeSurface.id}
-                environmentId={(activeSurface.environmentId as EnvironmentId) ?? panelEnvironmentId}
+                key={renderedIssueSurface.id}
+                environmentId={
+                  (renderedIssueSurface.environmentId as EnvironmentId) ?? panelEnvironmentId
+                }
                 reference={{
-                  projectId: activeSurface.projectId as ProjectId,
-                  host: activeSurface.host,
-                  repository: activeSurface.repository,
-                  number: activeSurface.number,
+                  projectId: renderedIssueSurface.projectId as ProjectId,
+                  host: renderedIssueSurface.host,
+                  repository: renderedIssueSurface.repository,
+                  number: renderedIssueSurface.number,
                 }}
-                onBack={() => closePanel(activeSurface)}
+                onBack={() => closePanel(renderedIssueSurface)}
               />
             ) : null}
           </RightPanelTabs>
@@ -764,9 +874,7 @@ function IssueRows({
             </span>
             <span className="mt-2 flex flex-wrap gap-1">
               {entry.labels.slice(0, 4).map((label) => (
-                <Badge key={label.name} size="sm" variant="secondary">
-                  {label.name}
-                </Badge>
+                <IssueLabelPill key={label.name} name={label.name} color={label.color} />
               ))}
             </span>
           </span>
@@ -1094,6 +1202,7 @@ function IssueCreateDialog({
       ? labelsCandidatesQuery.data.candidates.map((candidate) => ({
           value: candidate.name,
           label: candidate.name,
+          color: candidate.color,
         }))
       : [];
   const assigneeCandidates =
@@ -1261,6 +1370,7 @@ interface IssueCandidate {
   readonly value: string;
   readonly label: string;
   readonly detail?: string | null;
+  readonly color?: string | null;
 }
 
 function IssueCandidateField({
@@ -1289,6 +1399,10 @@ function IssueCandidateField({
   );
   const items = candidates.map((candidate) => candidate.value);
   const filteredItems = filteredCandidates.map((candidate) => candidate.value);
+  const selectedValues = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
   const selectCandidate = (candidateValue: string | null) => {
     if (candidateValue === null) return;
     const selected = candidates.find((candidate) => candidate.value === candidateValue);
@@ -1314,6 +1428,17 @@ function IssueCandidateField({
         onOpenChange={setOpen}
         onValueChange={selectCandidate}
       >
+        {label === "Labels" && selectedValues.length > 0 ? (
+          <span className="mt-1 flex flex-wrap gap-1">
+            {selectedValues.map((name) => (
+              <IssueLabelPill
+                key={name}
+                name={name}
+                color={candidates.find((candidate) => candidate.value === name)?.color}
+              />
+            ))}
+          </span>
+        ) : null}
         <ComboboxInput
           className="mt-1"
           value={value}
@@ -1347,7 +1472,11 @@ function IssueCandidateField({
                   disabled={isPending}
                 >
                   <span className="flex items-center justify-between gap-2">
-                    <span className="truncate">{candidate.label}</span>
+                    {candidate.color === undefined ? (
+                      <span className="truncate">{candidate.label}</span>
+                    ) : (
+                      <IssueLabelPill name={candidate.label} color={candidate.color} />
+                    )}
                     {candidate.detail ? (
                       <span className="truncate text-xs text-muted-foreground">
                         {candidate.detail}
