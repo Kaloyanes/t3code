@@ -47,6 +47,7 @@ import {
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
   ProjectId,
+  PromptEnhancementError,
   type ProjectEntriesFailure,
   type ProjectFileFailure,
   type ProjectFileOperation,
@@ -79,8 +80,14 @@ import {
   WORKTREE_SETUP_ACTIVITY_KIND,
   worktreeSetupActivityId,
   type WorktreeSetupSnapshot,
+  WorktreeRunError,
+  type WorktreeRunAttachEvent,
+  type WorktreeRunMetadataEvent,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { isModelSelectionProviderEnabled } from "@t3tools/shared/serverSettings";
+import { resolveProjectScripts } from "@t3tools/shared/projectScripts";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
@@ -119,6 +126,8 @@ import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
+import * as WorktreeRunManager from "./worktreeRun/Manager.ts";
+import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
@@ -555,6 +564,7 @@ const makeWsRpcLayer = (
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager.TerminalManager;
+      const worktreeRuns = yield* WorktreeRunManager.WorktreeRunManager;
       const previewManager = yield* PreviewManager.PreviewManager;
       const deviceService = yield* DeviceService.DeviceService;
       const deviceHostContext =
@@ -571,6 +581,7 @@ const makeWsRpcLayer = (
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const textGeneration = yield* TextGeneration.TextGeneration;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -1229,6 +1240,16 @@ const makeWsRpcLayer = (
                         Effect.as(null),
                       ),
                     onSuccess: (setupResult) => {
+                      if (setupResult.status === "worktree-started") {
+                        return track(
+                          worktreeSetupTracker.stageStatus(
+                            threadId,
+                            "setup-script",
+                            "done",
+                            `${setupResult.scriptName} is running for this worktree`,
+                          ),
+                        ).pipe(Effect.as(null));
+                      }
                       if (setupResult.status !== "started") {
                         return track(
                           worktreeSetupTracker.stageStatus(
@@ -1650,7 +1671,8 @@ const makeWsRpcLayer = (
                   : Effect.void;
                 const removeCreatedWorktree =
                   tracked && targetWorktreePath && bootstrap?.prepareWorktree
-                    ? closeSetupTerminal.pipe(
+                    ? worktreeRuns.stopWorkspace(targetWorktreePath).pipe(
+                        Effect.andThen(closeSetupTerminal),
                         Effect.ignoreCause({ log: true }),
                         Effect.andThen(
                           gitWorkflow
@@ -1837,6 +1859,9 @@ const makeWsRpcLayer = (
             Effect.gen(function* () {
               yield* ProjectCloneTracker.rejectCommandsDuringClone(projectCloneTracker, command);
               const normalizedCommand = yield* normalizeDispatchCommand(command);
+              if (normalizedCommand.type === "project.delete") {
+                yield* worktreeRuns.stopProject(normalizedCommand.projectId);
+              }
               // Archive removes the thread from the client, so this transport
               // closes its session and terminals after the command lands.
               // Settlement cleanup is driven by thread.settled events in the
@@ -2533,6 +2558,84 @@ const makeWsRpcLayer = (
             {
               "rpc.aggregate": "server",
             },
+          ),
+        [WS_METHODS.promptEnhance]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.promptEnhance,
+            Effect.gen(function* () {
+              const tokens = input.references.map((reference) => reference.token);
+              if (new Set(tokens).size !== tokens.length) {
+                return yield* new PromptEnhancementError({
+                  message: "Prompt references must use unique tokens.",
+                });
+              }
+              if (tokens.some((token) => input.prompt.split(token).length !== 2)) {
+                return yield* new PromptEnhancementError({
+                  message: "The draft contains an invalid prompt reference.",
+                });
+              }
+              if (
+                input.selection &&
+                (input.selection.start >= input.selection.end ||
+                  input.selection.end > input.prompt.length ||
+                  input.prompt.slice(input.selection.start, input.selection.end).trim().length ===
+                    0)
+              ) {
+                return yield* new PromptEnhancementError({
+                  message: "The selected prompt range is invalid.",
+                });
+              }
+              const targetPrompt = input.selection
+                ? input.prompt.slice(input.selection.start, input.selection.end)
+                : input.prompt;
+              const targetTokens = tokens.filter((token) => targetPrompt.includes(token));
+              const settings = resolveProjectSettings(
+                yield* serverSettings.getSettings.pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new PromptEnhancementError({
+                        message: cause.message || "Prompt enhancement settings are unavailable.",
+                      }),
+                  ),
+                ),
+                input.projectId,
+              ).settings;
+              const configured = settings.promptEnhancementModelSelection;
+              const modelSelection =
+                configured && isModelSelectionProviderEnabled(settings, configured)
+                  ? configured
+                  : settings.textGenerationModelSelection;
+              const generated = yield* textGeneration
+                .enhancePrompt({
+                  cwd: config.stateDir,
+                  prompt: input.prompt,
+                  ...(input.selection ? { selection: input.selection } : {}),
+                  references: input.references,
+                  attachments: input.attachments,
+                  modelSelection,
+                })
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new PromptEnhancementError({
+                        message: cause.detail || "The prompt could not be rewritten.",
+                      }),
+                  ),
+                );
+              if (
+                generated.prompt.trim().length === 0 ||
+                targetTokens.some((token) => generated.prompt.split(token).length !== 2) ||
+                tokens.some(
+                  (token) => !targetTokens.includes(token) && generated.prompt.includes(token),
+                )
+              ) {
+                return yield* new PromptEnhancementError({
+                  message: "The rewritten prompt did not preserve its references.",
+                });
+              }
+              return generated;
+            }),
+            { "rpc.aggregate": "prompt" },
           ),
         [WS_METHODS.serverUpdateSettings]: ({ patch }) =>
           observeRpcEffect(
@@ -3392,7 +3495,10 @@ const makeWsRpcLayer = (
         [WS_METHODS.vcsRemoveWorktree]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsRemoveWorktree,
-            gitWorkflow.removeWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            worktreeRuns.stopWorkspace(input.path).pipe(
+              Effect.andThen(gitWorkflow.removeWorktree(input)),
+              Effect.tap(() => refreshGitStatus(input.cwd)),
+            ),
             { "rpc.aggregate": "vcs" },
           ),
         [WS_METHODS.vcsCreateRef]: (input) =>
@@ -3477,6 +3583,107 @@ const makeWsRpcLayer = (
             Stream.callback<TerminalMetadataStreamEvent>((queue) =>
               Effect.acquireRelease(
                 terminalManager.subscribeMetadata((event) => Queue.offer(queue, event)),
+                (unsubscribe) => Effect.sync(unsubscribe),
+              ),
+            ),
+            { "rpc.aggregate": "terminal" },
+          ),
+        [WS_METHODS.worktreeRunStart]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.worktreeRunStart,
+            Effect.gen(function* () {
+              const project = Option.getOrUndefined(
+                yield* projectionSnapshotQuery.getProjectShellById(input.projectId),
+              );
+              if (!project) {
+                return yield* new WorktreeRunError({
+                  operation: "start",
+                  message: "Project not found.",
+                });
+              }
+              const settings = yield* serverSettings.getSettings;
+              const script = resolveProjectScripts(settings, project).find(
+                (candidate) => candidate.id === input.scriptId && candidate.scope === "worktree",
+              );
+              if (!script) {
+                return yield* new WorktreeRunError({
+                  operation: "start",
+                  message: "Worktree action not found.",
+                });
+              }
+              const path = yield* Path.Path;
+              const workspacePath = path.resolve(input.workspacePath);
+              const projectRoot = path.resolve(project.workspaceRoot);
+              if (workspacePath !== projectRoot) {
+                let cursor: number | undefined;
+                let isProjectWorktree = false;
+                do {
+                  const refs = yield* gitWorkflow.listRefs({
+                    cwd: project.workspaceRoot,
+                    limit: 200,
+                    ...(cursor === undefined ? { refresh: true } : { cursor }),
+                  });
+                  isProjectWorktree = refs.refs.some(
+                    (ref) =>
+                      ref.worktreePath !== null && path.resolve(ref.worktreePath) === workspacePath,
+                  );
+                  cursor = refs.nextCursor ?? undefined;
+                } while (!isProjectWorktree && cursor !== undefined);
+                if (!isProjectWorktree) {
+                  return yield* new WorktreeRunError({
+                    operation: "start",
+                    message: "The selected path is not a worktree for this project.",
+                  });
+                }
+              }
+              return yield* worktreeRuns.start({
+                input: { ...input, workspacePath },
+                name: script.name,
+                command: script.command,
+                projectRoot,
+              });
+            }).pipe(
+              Effect.mapError((error) =>
+                Schema.is(WorktreeRunError)(error)
+                  ? error
+                  : new WorktreeRunError({ operation: "start", message: String(error) }),
+              ),
+            ),
+            { "rpc.aggregate": "terminal" },
+          ),
+        [WS_METHODS.worktreeRunAttach]: (input) =>
+          observeRpcStream(
+            WS_METHODS.worktreeRunAttach,
+            Stream.callback<WorktreeRunAttachEvent, WorktreeRunError>((queue) =>
+              Effect.acquireRelease(
+                worktreeRuns.attach(input, (event) => Queue.offer(queue, event)),
+                (unsubscribe) => Effect.sync(unsubscribe),
+              ),
+            ),
+            { "rpc.aggregate": "terminal" },
+          ),
+        [WS_METHODS.worktreeRunWrite]: (input) =>
+          observeRpcEffect(WS_METHODS.worktreeRunWrite, worktreeRuns.write(input), {
+            "rpc.aggregate": "terminal",
+          }),
+        [WS_METHODS.worktreeRunResize]: (input) =>
+          observeRpcEffect(WS_METHODS.worktreeRunResize, worktreeRuns.resize(input), {
+            "rpc.aggregate": "terminal",
+          }),
+        [WS_METHODS.worktreeRunClear]: (input) =>
+          observeRpcEffect(WS_METHODS.worktreeRunClear, worktreeRuns.clear(input), {
+            "rpc.aggregate": "terminal",
+          }),
+        [WS_METHODS.worktreeRunStop]: (input) =>
+          observeRpcEffect(WS_METHODS.worktreeRunStop, worktreeRuns.stop(input), {
+            "rpc.aggregate": "terminal",
+          }),
+        [WS_METHODS.subscribeWorktreeRuns]: (_input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeWorktreeRuns,
+            Stream.callback<WorktreeRunMetadataEvent>((queue) =>
+              Effect.acquireRelease(
+                worktreeRuns.subscribeMetadata((event) => Queue.offer(queue, event)),
                 (unsubscribe) => Effect.sync(unsubscribe),
               ),
             ),

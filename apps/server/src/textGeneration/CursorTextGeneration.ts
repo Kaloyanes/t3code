@@ -15,6 +15,7 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildPromptEnhancementPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
@@ -54,7 +55,8 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "enhancePrompt";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -261,10 +263,25 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const enhancePrompt: TextGeneration.TextGeneration["Service"]["enhancePrompt"] = Effect.fn(
+    "CursorTextGeneration.enhancePrompt",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildPromptEnhancementPrompt(input);
+    const generated = yield* runCursorJson({
+      operation: "enhancePrompt",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+    return { prompt: generated.prompt.trim() };
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    enhancePrompt,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

@@ -90,7 +90,9 @@ export function resolveProjectSettings(
     // A model on a disabled provider falls back to the environment, like the
     // environment-level guards do for these keys.
     if (
-      (key === "textGenerationModelSelection" || key === "defaultModelSelection") &&
+      (key === "textGenerationModelSelection" ||
+        key === "promptEnhancementModelSelection" ||
+        key === "defaultModelSelection") &&
       value !== undefined &&
       value !== null &&
       !isModelSelectionProviderEnabled(settings, value as ModelSelection)

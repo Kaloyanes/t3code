@@ -71,6 +71,25 @@ describe("resolveProjectSettings", () => {
     expect(resolved.sources.textGenerationModelSelection).toBe("environment");
   });
 
+  it("inherits or overrides the nullable prompt enhancement model per project", () => {
+    const environmentSelection = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.5");
+    const projectSelection = createModelSelection(ProviderInstanceId.make("claudeAgent"), "opus");
+    const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      providers: { claudeAgent: { enabled: true } },
+      promptEnhancementModelSelection: environmentSelection,
+      projectSettingsOverrides: {
+        [projectId]: { promptEnhancementModelSelection: projectSelection },
+        [otherProjectId]: { promptEnhancementModelSelection: null },
+      },
+    });
+    expect(
+      resolveProjectSettings(settings, projectId).settings.promptEnhancementModelSelection,
+    ).toEqual(projectSelection);
+    expect(
+      resolveProjectSettings(settings, otherProjectId).settings.promptEnhancementModelSelection,
+    ).toBeNull();
+  });
+
   it("honours the aggregate's own fields only until the server has folded them", () => {
     const aggregateModel = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.5");
     const project = {

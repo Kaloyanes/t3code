@@ -49,6 +49,16 @@ checkouts and removal. Actions belong to a project: editing them creates the pro
 on each selected environment, and reset returns to the environment's shared list. A project's
 `t3.json` actions can be imported there.
 
+Actions normally run in the current thread terminal. Set **Run in** to **Worktree** for a
+long-lived action such as a development server. Web and desktop show these actions on each
+worktree in the sidebar and open their output in a worktree console. There is one run per action
+and checkout: moving between threads, archiving a thread, or closing the console does not stop it.
+Use the console's stop control to end it. T3 Code also stops it when its worktree or project is
+removed, or when the server shuts down. Worktree actions are always asynchronous and do not
+support previews. When **Run when creating a worktree** is enabled, the action starts after the
+checkout is created and the first agent turn continues as soon as the process has spawned.
+Mobile hides worktree actions; use web or desktop to start and manage them.
+
 For workspace mode, a project's `t3.json` preference applies when the project has no override.
 Browser access changes apply when an agent session next starts.
 

@@ -73,6 +73,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
+import * as WorktreeRunManager from "../worktreeRun/Manager.ts";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { VcsListRefsResult } from "@t3tools/contracts";
@@ -599,6 +600,7 @@ export const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const worktreeRuns = yield* WorktreeRunManager.WorktreeRunManager;
 
   const listCache = new Map<string, CacheEntry<IssueListResult>>();
   const detailCache = new Map<string, CacheEntry<IssueDetail>>();
@@ -1876,6 +1878,7 @@ export const make = Effect.gen(function* () {
             ),
           );
         yield* dispatchWorkspace(selection.threadId, null, null, "delete");
+        yield* worktreeRuns.stopWorkspace(attachedPath);
         const removed = yield* Effect.option(
           git.removeWorktree({
             cwd: projectRoot,

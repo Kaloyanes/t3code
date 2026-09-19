@@ -52,6 +52,7 @@ interface ProjectScriptsControlProps {
     input: NewProjectScriptInput,
   ) => Promise<ProjectScriptActionResult>;
   onDeleteScript: (scriptId: string) => Promise<ProjectScriptActionResult>;
+  supportsWorktreeRuns?: boolean;
 }
 
 export default function ProjectScriptsControl({
@@ -63,6 +64,7 @@ export default function ProjectScriptsControl({
   onAddScript,
   onUpdateScript,
   onDeleteScript,
+  supportsWorktreeRuns = false,
 }: ProjectScriptsControlProps) {
   const [actionsMenuOpen, setActionsMenuOpen] = useState({
     scripts: false,
@@ -81,13 +83,14 @@ export default function ProjectScriptsControl({
     () =>
       fileScripts.filter(
         (fileScript) =>
+          (supportsWorktreeRuns || fileScript.scope !== "worktree") &&
           !scripts.some(
             (script) =>
               script.command === fileScript.command ||
               script.name.toLowerCase() === fileScript.name.toLowerCase(),
           ),
       ),
-    [fileScripts, scripts],
+    [fileScripts, scripts, supportsWorktreeRuns],
   );
   const dropdownItemClassName =
     "data-highlighted:bg-transparent data-highlighted:text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground data-highlighted:hover:bg-accent data-highlighted:hover:text-accent-foreground data-highlighted:focus-visible:bg-accent data-highlighted:focus-visible:text-accent-foreground";
@@ -113,6 +116,7 @@ export default function ProjectScriptsControl({
       command: fileScript.command,
       icon: fileScript.icon ?? "play",
       runOnWorktreeCreate: fileScript.runOnWorktreeCreate ?? false,
+      scope: fileScript.scope ?? "thread",
       waitForSetup: fileScript.runOnWorktreeCreate === true && fileScript.async === false,
       keybinding: null,
       previewUrl: fileScript.previewUrl ?? null,
@@ -294,6 +298,7 @@ export default function ProjectScriptsControl({
         onSubmit={submitScript}
         onDelete={(scriptId) => void onDeleteScript(scriptId)}
         onClose={() => setEditorRequest(null)}
+        supportsWorktreeRuns={supportsWorktreeRuns}
       />
     </>
   );

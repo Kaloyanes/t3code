@@ -60,4 +60,25 @@ describe("T3ProjectFile", () => {
     expect(decode({ defaultThreadEnvMode: "local" }).defaultThreadEnvMode).toBe("local");
     expect(() => decode({ defaultThreadEnvMode: "remote" })).toThrow();
   });
+
+  it("decodes worktree actions while leaving missing scope thread-scoped", () => {
+    const decoded = decode({
+      scripts: [
+        { name: "Thread", command: "pnpm test" },
+        { name: "Dev", command: "pnpm dev", scope: "worktree", runOnWorktreeCreate: true },
+      ],
+    });
+
+    expect(decoded.scripts?.[0]?.scope).toBeUndefined();
+    expect(decoded.scripts?.[1]?.scope).toBe("worktree");
+  });
+
+  it.each([{ async: false }, { previewUrl: "http://localhost:3000" }, { autoOpenPreview: true }])(
+    "rejects unsupported worktree action options: %o",
+    (options) => {
+      expect(() =>
+        decode({ scripts: [{ name: "Dev", command: "pnpm dev", scope: "worktree", ...options }] }),
+      ).toThrow();
+    },
+  );
 });

@@ -18,6 +18,7 @@ import * as Schema from "effect/Schema";
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
+import * as WorktreeRunManager from "../worktreeRun/Manager.ts";
 
 export interface ProjectSetupScriptRunnerResultNoScript {
   readonly status: "no-script";
@@ -40,6 +41,15 @@ export interface ProjectSetupScriptRunnerResultStarted {
   readonly completion?: Effect.Effect<ProjectSetupScriptCompletion>;
 }
 
+export interface ProjectSetupScriptRunnerResultWorktreeStarted {
+  readonly status: "worktree-started";
+  readonly scriptId: string;
+  readonly scriptName: string;
+  readonly scriptCommand: string;
+  readonly cwd: string;
+  readonly async: true;
+}
+
 export interface ProjectSetupScriptCompletion {
   readonly exitCode: number | null;
   readonly durationMs: number;
@@ -51,7 +61,8 @@ export interface ProjectSetupScriptOutputLine {
 
 export type ProjectSetupScriptRunnerResult =
   | ProjectSetupScriptRunnerResultNoScript
-  | ProjectSetupScriptRunnerResultStarted;
+  | ProjectSetupScriptRunnerResultStarted
+  | ProjectSetupScriptRunnerResultWorktreeStarted;
 
 export interface ProjectSetupScriptRunnerInput {
   readonly threadId: string;
@@ -76,7 +87,13 @@ export class ProjectSetupScriptOperationError extends Schema.TaggedError<Project
     projectId: Schema.optional(Schema.String),
     projectCwd: Schema.optional(Schema.String),
     worktreePath: Schema.String,
-    operation: Schema.Literals(["resolveProject", "readSettings", "openTerminal", "writeCommand"]),
+    operation: Schema.Literals([
+      "resolveProject",
+      "readSettings",
+      "openTerminal",
+      "writeCommand",
+      "startWorktreeRun",
+    ]),
     cause: Schema.Defect(),
   },
 ) {
@@ -194,6 +211,7 @@ function wrapCommandForCompletion(
 export const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const terminalManager = yield* TerminalManager.TerminalManager;
+  const worktreeRuns = yield* WorktreeRunManager.WorktreeRunManager;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const completionShell = resolveCompletionShell(
     yield* HostProcessPlatform,
@@ -341,6 +359,38 @@ export const make = Effect.gen(function* () {
     if (!script) {
       return {
         status: "no-script",
+      } as const;
+    }
+
+    if (script.scope === "worktree") {
+      yield* worktreeRuns
+        .start({
+          input: {
+            projectId: project.id,
+            workspacePath: input.worktreePath,
+            scriptId: script.id,
+          },
+          name: script.name,
+          command: script.command,
+          projectRoot: project.workspaceRoot,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProjectSetupScriptOperationError({
+                ...errorContext,
+                operation: "startWorktreeRun",
+                cause,
+              }),
+          ),
+        );
+      return {
+        status: "worktree-started",
+        scriptId: script.id,
+        scriptName: script.name,
+        scriptCommand: script.command,
+        cwd: input.worktreePath,
+        async: true,
       } as const;
     }
 

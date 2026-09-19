@@ -210,7 +210,6 @@ import {
   selectThreadPreviewMiniPlayer,
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
-import { isThreadOwnPullRequest } from "./pullRequest/pullRequestDetail.logic";
 import { IssueDetailPanel } from "./issue/IssueDetailPanel";
 import { useOpenIssueLink } from "~/lib/openIssueLink";
 import { pullRequestPanelContext } from "./pullRequest/pullRequestDetail.logic";
@@ -345,6 +344,8 @@ import {
   serverEnvironment,
 } from "../state/server";
 import { terminalEnvironment } from "../state/terminal";
+import { worktreeRunEnvironment } from "../state/worktreeRun";
+import { useWorktreeRunConsoleStore } from "../worktreeRunConsoleStore";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import {
   requestOlderThreadTurns,
@@ -1499,6 +1500,10 @@ export default function ChatView(props: ChatViewProps) {
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
+  const startWorktreeRun = useAtomCommand(worktreeRunEnvironment.start, {
+    reportFailure: false,
+  });
+  const openWorktreeRunConsole = useWorktreeRunConsoleStore((state) => state.open);
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
@@ -4208,6 +4213,34 @@ export default function ChatView(props: ChatViewProps) {
           return { ...current, [activeProject.id]: script.id };
         });
       }
+      if (script.scope === "worktree") {
+        const workspacePath = activeThread.worktreePath ?? activeProject.workspaceRoot;
+        const capability =
+          environmentById.get(environmentId)?.serverConfig?.environment.capabilities.worktreeRuns;
+        if (capability !== true) {
+          toastManager.add({
+            type: "info",
+            title: "Worktree actions are unavailable",
+            description: "Update this T3 Code server to run worktree-scoped actions.",
+          });
+          return;
+        }
+        const target = { projectId: activeProject.id, workspacePath, scriptId: script.id };
+        const result = await startWorktreeRun({ environmentId, input: target });
+        if (result._tag === "Failure") {
+          if (!isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            toastManager.add({
+              type: "error",
+              title: `Could not run ${script.name}`,
+              description: error instanceof Error ? error.message : String(error),
+            });
+          }
+          return;
+        }
+        openWorktreeRunConsole({ environmentId, target });
+        return;
+      }
       const targetCwd = options?.cwd ?? gitCwd ?? activeProject.workspaceRoot;
       const baseTerminalId =
         terminalUiState.activeTerminalId || activeKnownTerminalIds[0] || DEFAULT_THREAD_TERMINAL_ID;
@@ -4301,12 +4334,15 @@ export default function ChatView(props: ChatViewProps) {
       storeSetActiveTerminal,
       setLastInvokedScriptByProjectId,
       environmentId,
+      environmentById,
+      openWorktreeRunConsole,
       openTerminal,
       activeKnownTerminalIds,
       allocatableActiveTerminalIds,
       runningTerminalIds,
       terminalUiState.activeTerminalId,
       writeTerminal,
+      startWorktreeRun,
     ],
   );
 
@@ -6866,13 +6902,6 @@ export default function ChatView(props: ChatViewProps) {
         event.preventDefault();
         event.stopPropagation();
         if (!event.repeat) branchToolbarRef.current?.openBranchPicker();
-        return;
-      }
-
-      if (command === "composer.previousWorktree") {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!event.repeat) branchToolbarRef.current?.usePreviousWorktree();
         return;
       }
 
@@ -9819,7 +9848,13 @@ export default function ChatView(props: ChatViewProps) {
             isServerThread={isServerThread}
             activeProject={activeProject}
             openInCwd={gitCwd}
-            activeProjectScripts={activeProjectScripts}
+            activeProjectScripts={activeProjectScripts.filter(
+              (script) => (script.scope ?? "thread") === "thread",
+            )}
+            supportsWorktreeRuns={
+              environmentById.get(environmentId)?.serverConfig?.environment.capabilities
+                .worktreeRuns === true
+            }
             preferredScriptId={
               activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
             }
@@ -10124,6 +10159,14 @@ export default function ChatView(props: ChatViewProps) {
                             keybindings={keybindings}
                             terminalOpen={Boolean(terminalUiState.terminalOpen)}
                             gitCwd={gitCwd}
+                            projectId={activeProject?.id ?? null}
+                            supportsPromptEnhancement={
+                              serverConfig?.environment.capabilities.promptEnhancement === true
+                            }
+                            supportsPromptEnhancementSelection={
+                              serverConfig?.environment.capabilities.promptEnhancementSelection ===
+                              true
+                            }
                             pullRequestProjectId={
                               supportsPullRequests ? (activeProject?.id ?? null) : null
                             }

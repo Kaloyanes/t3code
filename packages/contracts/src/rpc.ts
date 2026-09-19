@@ -222,6 +222,17 @@ import {
   TerminalWriteInput,
 } from "./terminal.ts";
 import {
+  WorktreeRunAttachEvent,
+  WorktreeRunAttachInput,
+  WorktreeRunError,
+  WorktreeRunMetadataEvent,
+  WorktreeRunResizeInput,
+  WorktreeRunSessionInput,
+  WorktreeRunSnapshot,
+  WorktreeRunStartInput,
+  WorktreeRunWriteInput,
+} from "./worktreeRun.ts";
+import {
   DiscoveredLocalServerList,
   ConfiguredLocalServerUrls,
   PreviewCloseInput,
@@ -314,6 +325,11 @@ import {
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
+import {
+  PromptEnhancementError,
+  PromptEnhancementInput,
+  PromptEnhancementResult,
+} from "./promptEnhancement.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -349,6 +365,7 @@ export const WS_METHODS = {
   providerInstallCancel: "provider.install.cancel",
   providerInstallSubscribe: "provider.install.subscribe",
   providerInstallRemove: "provider.install.remove",
+  promptEnhance: "prompt.enhance",
 
   // VCS methods
   vcsPull: "vcs.pull",
@@ -377,6 +394,13 @@ export const WS_METHODS = {
   terminalClear: "terminal.clear",
   terminalRestart: "terminal.restart",
   terminalClose: "terminal.close",
+  worktreeRunStart: "worktreeRun.start",
+  worktreeRunAttach: "worktreeRun.attach",
+  worktreeRunWrite: "worktreeRun.write",
+  worktreeRunResize: "worktreeRun.resize",
+  worktreeRunClear: "worktreeRun.clear",
+  worktreeRunStop: "worktreeRun.stop",
+  subscribeWorktreeRuns: "subscribeWorktreeRuns",
 
   // Preview methods
   previewOpen: "preview.open",
@@ -641,6 +665,12 @@ const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
   payload: Schema.Struct({}),
   success: ServerSettings,
   error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
+});
+
+const WsPromptEnhanceRpc = Rpc.make(WS_METHODS.promptEnhance, {
+  payload: PromptEnhancementInput,
+  success: PromptEnhancementResult,
+  error: Schema.Union([PromptEnhancementError, EnvironmentAuthorizationError]),
 });
 
 const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSettings, {
@@ -1330,6 +1360,34 @@ const WsTerminalCloseRpc = Rpc.make(WS_METHODS.terminalClose, {
   error: Schema.Union([TerminalError, EnvironmentAuthorizationError]),
 });
 
+const WsWorktreeRunStartRpc = Rpc.make(WS_METHODS.worktreeRunStart, {
+  payload: WorktreeRunStartInput,
+  success: WorktreeRunSnapshot,
+  error: Schema.Union([WorktreeRunError, EnvironmentAuthorizationError]),
+});
+const WsWorktreeRunAttachRpc = Rpc.make(WS_METHODS.worktreeRunAttach, {
+  payload: WorktreeRunAttachInput,
+  success: WorktreeRunAttachEvent,
+  error: Schema.Union([WorktreeRunError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+const WsWorktreeRunWriteRpc = Rpc.make(WS_METHODS.worktreeRunWrite, {
+  payload: WorktreeRunWriteInput,
+  error: Schema.Union([WorktreeRunError, EnvironmentAuthorizationError]),
+});
+const WsWorktreeRunResizeRpc = Rpc.make(WS_METHODS.worktreeRunResize, {
+  payload: WorktreeRunResizeInput,
+  error: Schema.Union([WorktreeRunError, EnvironmentAuthorizationError]),
+});
+const WsWorktreeRunClearRpc = Rpc.make(WS_METHODS.worktreeRunClear, {
+  payload: WorktreeRunSessionInput,
+  error: Schema.Union([WorktreeRunError, EnvironmentAuthorizationError]),
+});
+const WsWorktreeRunStopRpc = Rpc.make(WS_METHODS.worktreeRunStop, {
+  payload: WorktreeRunSessionInput,
+  error: Schema.Union([WorktreeRunError, EnvironmentAuthorizationError]),
+});
+
 const WsPreviewOpenRpc = Rpc.make(WS_METHODS.previewOpen, {
   payload: PreviewOpenInput,
   success: PreviewSessionSnapshot,
@@ -1521,6 +1579,12 @@ const WsSubscribeTerminalMetadataRpc = Rpc.make(WS_METHODS.subscribeTerminalMeta
   error: EnvironmentAuthorizationError,
   stream: true,
 });
+const WsSubscribeWorktreeRunsRpc = Rpc.make(WS_METHODS.subscribeWorktreeRuns, {
+  payload: Schema.Struct({}),
+  success: WorktreeRunMetadataEvent,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
 
 export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerConfig, {
   payload: Schema.Struct({
@@ -1595,6 +1659,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerUpsertKeybindingRpc,
   WsServerRemoveKeybindingRpc,
   WsServerGetSettingsRpc,
+  WsPromptEnhanceRpc,
   WsServerUpdateSettingsRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,
@@ -1703,8 +1768,15 @@ export const WsRpcGroup = RpcGroup.make(
   WsTerminalClearRpc,
   WsTerminalRestartRpc,
   WsTerminalCloseRpc,
+  WsWorktreeRunStartRpc,
+  WsWorktreeRunAttachRpc,
+  WsWorktreeRunWriteRpc,
+  WsWorktreeRunResizeRpc,
+  WsWorktreeRunClearRpc,
+  WsWorktreeRunStopRpc,
   WsSubscribeTerminalEventsRpc,
   WsSubscribeTerminalMetadataRpc,
+  WsSubscribeWorktreeRunsRpc,
   WsPreviewOpenRpc,
   WsPreviewNavigateRpc,
   WsPreviewResizeRpc,

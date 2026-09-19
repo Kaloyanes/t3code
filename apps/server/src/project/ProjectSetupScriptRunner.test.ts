@@ -9,6 +9,7 @@ import * as Schema from "effect/Schema";
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
+import * as WorktreeRunManager from "../worktreeRun/Manager.ts";
 import * as ProjectSetupScriptRunner from "./ProjectSetupScriptRunner.ts";
 
 const isProjectSetupScriptOperationError = Schema.is(
@@ -72,18 +73,88 @@ const makeTerminalManagerLayer = (overrides: TerminalOverrides) =>
     ...overrides,
   });
 
+const makeWorktreeRunManagerLayer = (
+  overrides: Partial<WorktreeRunManager.WorktreeRunManager["Service"]> = {},
+) =>
+  Layer.succeed(WorktreeRunManager.WorktreeRunManager, {
+    start: () => Effect.die(new Error("unused")),
+    write: () => Effect.die(new Error("unused")),
+    resize: () => Effect.die(new Error("unused")),
+    clear: () => Effect.die(new Error("unused")),
+    stop: () => Effect.die(new Error("unused")),
+    stopWorkspace: () => Effect.void,
+    stopProject: () => Effect.void,
+    attach: () => Effect.die(new Error("unused")),
+    subscribeMetadata: () => Effect.die(new Error("unused")),
+    shutdown: Effect.void,
+    ...overrides,
+  });
+
 const testLayer = (
   project: OrchestrationProject,
   terminal: TerminalOverrides,
   settings = ServerSettings.layerTest(),
+  worktreeRuns = makeWorktreeRunManagerLayer(),
 ) =>
   ProjectSetupScriptRunner.layer.pipe(
     Layer.provideMerge(makeProjectionSnapshotQueryLayer(project)),
     Layer.provideMerge(makeTerminalManagerLayer(terminal)),
+    Layer.provideMerge(worktreeRuns),
     Layer.provide(settings),
   );
 
 describe("ProjectSetupScriptRunner", () => {
+  it.effect("starts a worktree-scoped setup action without a thread terminal", () => {
+    const start = vi.fn(() =>
+      Effect.succeed({
+        target: {
+          projectId: ProjectId.make("project-1"),
+          workspacePath: "/repo/worktrees/a",
+          scriptId: "dev",
+        },
+        name: "Dev",
+        command: "pnpm dev",
+        status: "running" as const,
+        pid: 123,
+        history: "",
+        exitCode: null,
+        exitSignal: null,
+        label: "Dev",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    const project = makeProject([
+      {
+        id: "dev",
+        name: "Dev",
+        command: "pnpm dev",
+        icon: "debug",
+        scope: "worktree",
+        runOnWorktreeCreate: true,
+      },
+    ]);
+    return Effect.gen(function* () {
+      const runner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+      const result = yield* runner.runForThread({
+        threadId: "thread-1",
+        projectId: project.id,
+        worktreePath: "/repo/worktrees/a",
+      });
+
+      expect(result.status).toBe("worktree-started");
+      expect(start).toHaveBeenCalledOnce();
+    }).pipe(
+      Effect.provide(
+        testLayer(
+          project,
+          { open: () => Effect.die("unused"), write: () => Effect.die("unused") },
+          ServerSettings.layerTest(),
+          makeWorktreeRunManagerLayer({ start }),
+        ),
+      ),
+    );
+  });
+
   it.effect("runs the inherited machine setup action in the checkout's worktree", () => {
     const open = vi.fn(() =>
       Effect.succeed({

@@ -454,6 +454,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["generated thread titles source control content default provider"],
   },
   {
+    id: "prompt-enhancement-model",
+    title: "Prompt enhancement model",
+    to: "/settings/general",
+    scope: "project-defaults",
+    searchTerms: ["rewrite improve composer new thread provider"],
+  },
+  {
     id: "diagnostics",
     title: "Diagnostics",
     to: "/settings/general",

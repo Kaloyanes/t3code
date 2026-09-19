@@ -82,7 +82,7 @@ const isSnapShotSource = Schema.is(SnapShotSource);
 const isPreviewAnnotationPayload = Schema.is(PreviewAnnotationPayloadSchema);
 
 export const COMPOSER_DRAFT_STORAGE_KEY = "t3code:composer-drafts:v1";
-const COMPOSER_DRAFT_STORAGE_VERSION = 9;
+const COMPOSER_DRAFT_STORAGE_VERSION = 10;
 const DraftThreadEnvModeSchema = Schema.Literals(["local", "worktree"]);
 export type DraftThreadEnvMode = typeof DraftThreadEnvModeSchema.Type;
 
@@ -245,6 +245,12 @@ const PersistedComposerThreadDraftState = Schema.Struct({
   // signature at runtime (Schema rejects the combination). Absence of
   // an entry already encodes "no selection for this instance".
   modelSelectionByProvider: Schema.optionalKey(Schema.Record(ProviderInstanceId, ModelSelection)),
+  modelOptionsByProviderAndModel: Schema.optionalKey(
+    Schema.Record(
+      ProviderInstanceId,
+      Schema.Record(Schema.String, Schema.Array(ProviderOptionSelection)),
+    ),
+  ),
   activeProvider: Schema.optionalKey(Schema.NullOr(ProviderInstanceId)),
   // True only when a human picked this selection in the composer. Seeded
   // selections (project default / sticky) leave it unset so later seeds can
@@ -254,6 +260,10 @@ const PersistedComposerThreadDraftState = Schema.Struct({
   interactionMode: Schema.optionalKey(ProviderInteractionMode),
 });
 type PersistedComposerThreadDraftState = typeof PersistedComposerThreadDraftState.Type;
+
+type ModelOptionsByProviderAndModel = DeepMutable<
+  NonNullable<PersistedComposerThreadDraftState["modelOptionsByProviderAndModel"]>
+>;
 
 /**
  * Per-provider record of generic option selections. Used as a transient
@@ -341,6 +351,12 @@ const PersistedComposerDraftStoreState = Schema.Struct({
   stickyModelSelectionByProvider: Schema.optionalKey(
     Schema.Record(ProviderInstanceId, ModelSelection),
   ),
+  stickyModelOptionsByProviderAndModel: Schema.optionalKey(
+    Schema.Record(
+      ProviderInstanceId,
+      Schema.Record(Schema.String, Schema.Array(ProviderOptionSelection)),
+    ),
+  ),
   stickyActiveProvider: Schema.optionalKey(Schema.NullOr(ProviderInstanceId)),
 });
 type PersistedComposerDraftStoreState = typeof PersistedComposerDraftStoreState.Type;
@@ -393,6 +409,8 @@ export interface ComposerThreadDraftState {
    * legacy kind-keyed drafts round-trip unchanged.
    */
   modelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>;
+  /** Explicit option selections remembered independently for each model. */
+  modelOptionsByProviderAndModel: ModelOptionsByProviderAndModel;
   /** Routing key of the last picked instance (see `modelSelectionByProvider`). */
   activeProvider: ProviderInstanceId | null;
   /**
@@ -486,6 +504,7 @@ interface ComposerDraftStoreState {
   backgroundSubmissionThreadKeys: Record<string, true>;
   rewindingThreadKeys: ReadonlySet<string>;
   stickyModelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>;
+  stickyModelOptionsByProviderAndModel: ModelOptionsByProviderAndModel;
   stickyActiveProvider: ProviderInstanceId | null;
   /** Returns the editable composer content for a draft session or server thread. */
   getComposerDraft: (target: ComposerThreadTarget) => ComposerThreadDraftState | null;
@@ -703,6 +722,78 @@ interface ComposerDraftModelState {
   modelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>;
 }
 
+function cloneModelOptionsByProviderAndModel(
+  history: ModelOptionsByProviderAndModel | null | undefined,
+): ModelOptionsByProviderAndModel {
+  const result = {} as ModelOptionsByProviderAndModel;
+  for (const [instanceId, modelOptions] of Object.entries(history ?? {})) {
+    if (!modelOptions || typeof modelOptions !== "object") continue;
+    const clonedModelOptions = {} as ModelOptionsByProviderAndModel[ProviderInstanceId];
+    for (const [model, options] of Object.entries(modelOptions)) {
+      if (options && options.length > 0) {
+        clonedModelOptions[model] = options.map((option) => ({ ...option }));
+      }
+    }
+    if (Object.keys(clonedModelOptions).length > 0) {
+      result[instanceId as ProviderInstanceId] = clonedModelOptions;
+    }
+  }
+  return result;
+}
+
+function rememberModelOptions(
+  history: ModelOptionsByProviderAndModel,
+  instanceId: ProviderInstanceId,
+  model: string,
+  options: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+): ModelOptionsByProviderAndModel {
+  const next = cloneModelOptionsByProviderAndModel(history);
+  const modelOptions = { ...(next[instanceId] ?? {}) };
+  if (options && options.length > 0) {
+    modelOptions[model] = options.map((option) => ({ ...option }));
+  } else {
+    delete modelOptions[model];
+  }
+  if (Object.keys(modelOptions).length > 0) {
+    next[instanceId] = modelOptions;
+  } else {
+    delete next[instanceId];
+  }
+  return next;
+}
+
+function rememberSelections(
+  history: ModelOptionsByProviderAndModel,
+  selections: Partial<Record<ProviderInstanceId, ModelSelection>>,
+): ModelOptionsByProviderAndModel {
+  let next = history;
+  for (const selection of Object.values(selections)) {
+    if (!selection?.options || selection.options.length === 0) {
+      continue;
+    }
+    const instanceId = normalizeProviderInstanceId(selection.instanceId);
+    if (!instanceId || typeof selection.model !== "string") {
+      continue;
+    }
+    const provider = normalizeProviderDriverKind(instanceId);
+    const model = provider
+      ? (normalizeModelSlug(selection.model, provider) ?? selection.model.trim())
+      : selection.model.trim();
+    if (model) {
+      next = rememberModelOptions(next, instanceId, model, selection.options);
+    }
+  }
+  return next;
+}
+
+function rememberedModelOptions(
+  history: ModelOptionsByProviderAndModel,
+  instanceId: ProviderInstanceId,
+  model: string,
+): ReadonlyArray<ProviderOptionSelection> | undefined {
+  return history[instanceId]?.[model];
+}
+
 function providerSelectionsFromModelSelection(
   modelSelection: ModelSelection | null | undefined,
 ): ProviderOptionSelectionsByProvider | null {
@@ -753,6 +844,7 @@ const EMPTY_PERSISTED_DRAFT_STORE_STATE = Object.freeze<PersistedComposerDraftSt
   draftThreadsByThreadKey: {},
   logicalProjectDraftThreadKeyByLogicalProjectKey: {},
   stickyModelSelectionByProvider: {},
+  stickyModelOptionsByProviderAndModel: {},
   stickyActiveProvider: null,
 });
 
@@ -786,6 +878,7 @@ const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
   previewAnnotations: EMPTY_PREVIEW_ANNOTATIONS,
   reviewComments: EMPTY_REVIEW_COMMENTS,
   modelSelectionByProvider: EMPTY_MODEL_SELECTION_BY_PROVIDER,
+  modelOptionsByProviderAndModel: {},
   activeProvider: null,
   runtimeMode: null,
   interactionMode: null,
@@ -808,6 +901,7 @@ function createEmptyThreadDraft(): ComposerThreadDraftState {
     previewAnnotations: [],
     reviewComments: [],
     modelSelectionByProvider: {},
+    modelOptionsByProviderAndModel: {},
     activeProvider: null,
     runtimeMode: null,
     interactionMode: null,
@@ -902,6 +996,7 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
     draft.previewAnnotations.length === 0 &&
     draft.reviewComments.length === 0 &&
     Object.keys(draft.modelSelectionByProvider).length === 0 &&
+    Object.keys(draft.modelOptionsByProviderAndModel).length === 0 &&
     draft.activeProvider === null &&
     draft.runtimeMode === null &&
     draft.interactionMode === null
@@ -971,6 +1066,26 @@ function coerceProviderOptionSelections(
     return out.length > 0 ? out : undefined;
   }
   return undefined;
+}
+
+function normalizeModelOptionsByProviderAndModel(value: unknown): ModelOptionsByProviderAndModel {
+  if (!value || typeof value !== "object") return {};
+  const result = {} as ModelOptionsByProviderAndModel;
+  for (const [rawInstanceId, rawModelOptions] of Object.entries(value)) {
+    const instanceId = normalizeProviderInstanceId(rawInstanceId);
+    if (!instanceId || !rawModelOptions || typeof rawModelOptions !== "object") continue;
+    const provider = normalizeProviderDriverKind(instanceId);
+    const modelOptions = {} as ModelOptionsByProviderAndModel[ProviderInstanceId];
+    for (const [rawModel, rawOptions] of Object.entries(rawModelOptions)) {
+      const model = provider
+        ? (normalizeModelSlug(rawModel, provider) ?? rawModel.trim())
+        : rawModel.trim();
+      const options = coerceProviderOptionSelections(rawOptions);
+      if (model && options) modelOptions[model] = options.map((option) => ({ ...option }));
+    }
+    if (Object.keys(modelOptions).length > 0) result[instanceId] = modelOptions;
+  }
+  return result;
 }
 
 /**
@@ -1942,6 +2057,9 @@ function normalizePersistedDraftsByThreadId(
     // If the draft already has the v3 shape, use it directly
     const legacyDraftCandidate = draftValue as LegacyPersistedComposerThreadDraftState;
     let modelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>> = {};
+    let modelOptionsByProviderAndModel = normalizeModelOptionsByProviderAndModel(
+      draftCandidate.modelOptionsByProviderAndModel,
+    );
     let activeProvider: ProviderInstanceId | null = null;
     let modelSelectionExplicit: true | undefined = undefined;
 
@@ -1986,9 +2104,15 @@ function normalizePersistedDraftsByThreadId(
       );
       activeProvider = modelSelection?.instanceId ?? null;
     }
+    modelOptionsByProviderAndModel = rememberSelections(
+      modelOptionsByProviderAndModel,
+      modelSelectionByProvider,
+    );
 
     const hasModelData =
-      Object.keys(modelSelectionByProvider).length > 0 || activeProvider !== null;
+      Object.keys(modelSelectionByProvider).length > 0 ||
+      Object.keys(modelOptionsByProviderAndModel).length > 0 ||
+      activeProvider !== null;
     if (
       promptCandidate.length === 0 &&
       attachments.length === 0 &&
@@ -2026,6 +2150,9 @@ function normalizePersistedDraftsByThreadId(
       ...(hasModelData
         ? {
             modelSelectionByProvider: compactModelSelectionByProvider(modelSelectionByProvider),
+            modelOptionsByProviderAndModel: cloneModelOptionsByProviderAndModel(
+              modelOptionsByProviderAndModel,
+            ),
             activeProvider,
             ...(modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
           }
@@ -2066,6 +2193,7 @@ function stripLegacyModelSeedsFromEmptyDraftSessions(
       const {
         activeProvider: _activeProvider,
         modelSelectionByProvider: _modelSelectionByProvider,
+        modelOptionsByProviderAndModel: _modelOptionsByProviderAndModel,
         modelSelectionExplicit: _modelSelectionExplicit,
         ...retained
       } = draft;
@@ -2122,7 +2250,9 @@ export function partializeComposerDraftStoreState(
       continue;
     }
     const hasModelData =
-      Object.keys(draft.modelSelectionByProvider).length > 0 || draft.activeProvider !== null;
+      Object.keys(draft.modelSelectionByProvider).length > 0 ||
+      Object.keys(draft.modelOptionsByProviderAndModel).length > 0 ||
+      draft.activeProvider !== null;
     if (
       draft.prompt.length === 0 &&
       draft.persistedAttachments.length === 0 &&
@@ -2190,6 +2320,9 @@ export function partializeComposerDraftStoreState(
             modelSelectionByProvider: compactModelSelectionByProvider(
               draft.modelSelectionByProvider,
             ),
+            modelOptionsByProviderAndModel: cloneModelOptionsByProviderAndModel(
+              draft.modelOptionsByProviderAndModel,
+            ),
             activeProvider: draft.activeProvider,
             ...(draft.modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
           }
@@ -2216,6 +2349,9 @@ export function partializeComposerDraftStoreState(
     stickyModelSelectionByProvider: compactModelSelectionByProvider(
       state.stickyModelSelectionByProvider,
     ),
+    stickyModelOptionsByProviderAndModel: cloneModelOptionsByProviderAndModel(
+      state.stickyModelOptionsByProviderAndModel,
+    ),
     stickyActiveProvider: state.stickyActiveProvider,
   };
 }
@@ -2239,6 +2375,9 @@ function normalizeCurrentPersistedComposerDraftStoreState(
 
   // Handle both v3 (modelSelectionByProvider) and v2/legacy formats
   let stickyModelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>> = {};
+  let stickyModelOptionsByProviderAndModel = normalizeModelOptionsByProviderAndModel(
+    normalizedPersistedState.stickyModelOptionsByProviderAndModel,
+  );
   let stickyActiveProvider: ProviderInstanceId | null = null;
   if (
     normalizedPersistedState.stickyModelSelectionByProvider &&
@@ -2277,6 +2416,10 @@ function normalizeCurrentPersistedComposerDraftStoreState(
     );
     stickyActiveProvider = normalizeProviderInstanceId(normalizedPersistedState.stickyProvider);
   }
+  stickyModelOptionsByProviderAndModel = rememberSelections(
+    stickyModelOptionsByProviderAndModel,
+    stickyModelSelectionByProvider,
+  );
 
   return {
     draftsByThreadKey: normalizePersistedDraftsByThreadId(
@@ -2286,6 +2429,9 @@ function normalizeCurrentPersistedComposerDraftStoreState(
     draftThreadsByThreadKey,
     logicalProjectDraftThreadKeyByLogicalProjectKey,
     stickyModelSelectionByProvider: compactModelSelectionByProvider(stickyModelSelectionByProvider),
+    stickyModelOptionsByProviderAndModel: cloneModelOptionsByProviderAndModel(
+      stickyModelOptionsByProviderAndModel,
+    ),
     stickyActiveProvider,
   };
 }
@@ -2420,6 +2566,10 @@ function toHydratedThreadDraft(
   // The persisted draft is already in v3 shape (migration handles older formats)
   const modelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>> =
     persistedDraft.modelSelectionByProvider ?? {};
+  const modelOptionsByProviderAndModel = rememberSelections(
+    normalizeModelOptionsByProviderAndModel(persistedDraft.modelOptionsByProviderAndModel),
+    modelSelectionByProvider,
+  );
   const activeProvider = normalizeProviderInstanceId(persistedDraft.activeProvider) ?? null;
   const files: ComposerFileAttachment[] =
     persistedDraft.files?.map((file) => ({
@@ -2458,6 +2608,7 @@ function toHydratedThreadDraft(
       persistedDraft.previewAnnotations?.map((annotation) => ({ ...annotation })) ?? [],
     reviewComments: persistedDraft.reviewComments?.map((comment) => ({ ...comment })) ?? [],
     modelSelectionByProvider,
+    modelOptionsByProviderAndModel,
     activeProvider,
     ...(persistedDraft.modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
     runtimeMode: persistedDraft.runtimeMode ?? null,
@@ -2517,6 +2668,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
         backgroundSubmissionThreadKeys: {},
         rewindingThreadKeys: new Set<string>(),
         stickyModelSelectionByProvider: {},
+        stickyModelOptionsByProviderAndModel: {},
         stickyActiveProvider: null,
         getComposerDraft: (target) => getComposerDraftState(get(), target),
         getDraftThreadByLogicalProjectKey: (logicalProjectKey) => {
@@ -2924,25 +3076,41 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             if (!normalized) {
               return state;
             }
-            const current = state.stickyModelSelectionByProvider[normalized.instanceId];
-            // Model-only picker updates omit options (same contract as
-            // setModelSelection). Keep the last sticky traits so Fast/Normal
-            // survives Composer 2 → 2.5 and new chats.
-            const nextSelection =
-              normalized.options !== undefined
-                ? normalized
-                : createModelSelection(normalized.instanceId, normalized.model, current?.options);
+            let nextHistory = rememberSelections(
+              state.stickyModelOptionsByProviderAndModel,
+              state.stickyModelSelectionByProvider,
+            );
+            const options =
+              normalized.options ??
+              rememberedModelOptions(nextHistory, normalized.instanceId, normalized.model);
+            if (normalized.options !== undefined) {
+              nextHistory = rememberModelOptions(
+                nextHistory,
+                normalized.instanceId,
+                normalized.model,
+                normalized.options,
+              );
+            }
+            const nextSelection = createModelSelection(
+              normalized.instanceId,
+              normalized.model,
+              options,
+            );
             const nextMap: Partial<Record<ProviderInstanceId, ModelSelection>> = {
               ...state.stickyModelSelectionByProvider,
               [normalized.instanceId]: nextSelection,
             };
-            if (Equal.equals(state.stickyModelSelectionByProvider, nextMap)) {
+            if (
+              Equal.equals(state.stickyModelSelectionByProvider, nextMap) &&
+              Equal.equals(state.stickyModelOptionsByProviderAndModel, nextHistory)
+            ) {
               return state.stickyActiveProvider === normalized.instanceId
                 ? state
                 : { stickyActiveProvider: normalized.instanceId };
             }
             return {
               stickyModelSelectionByProvider: nextMap,
+              stickyModelOptionsByProviderAndModel: nextHistory,
               stickyActiveProvider: normalized.instanceId,
             };
           });
@@ -2958,8 +3126,12 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const existing = state.draftsByThreadKey[threadKey];
             const base = existing ?? createEmptyThreadDraft();
             const nextMap = compactModelSelectionByProvider(stickyMap);
+            const nextHistory = cloneModelOptionsByProviderAndModel(
+              state.stickyModelOptionsByProviderAndModel,
+            );
             if (
               Equal.equals(base.modelSelectionByProvider, nextMap) &&
+              Equal.equals(base.modelOptionsByProviderAndModel, nextHistory) &&
               base.activeProvider === stickyActiveProvider &&
               base.modelSelectionExplicit === undefined
             ) {
@@ -2969,6 +3141,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const nextDraft: ComposerThreadDraftState = {
               ...retained,
               modelSelectionByProvider: nextMap,
+              modelOptionsByProviderAndModel: nextHistory,
               activeProvider: stickyActiveProvider,
             };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
@@ -3048,25 +3221,36 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             }
             const base = existing ?? createEmptyThreadDraft();
             const nextMap = { ...base.modelSelectionByProvider };
+            let nextHistory = rememberSelections(
+              base.modelOptionsByProviderAndModel,
+              base.modelSelectionByProvider,
+            );
             if (normalized) {
               const current = nextMap[normalized.instanceId];
+              const nextOptions =
+                normalized.options ??
+                (opts?.replaceOptions
+                  ? undefined
+                  : (rememberedModelOptions(nextHistory, normalized.instanceId, normalized.model) ??
+                    (current?.model === normalized.model ? current.options : undefined)));
               if (normalized.options !== undefined || opts?.replaceOptions) {
-                // Explicit options provided (or the caller passed a complete
-                // snapshot whose absent options mean "no options") → use the
-                // selection as-is.
-                nextMap[normalized.instanceId] = normalized as ModelSelection;
-              } else {
-                // No options in selection → preserve existing options, update provider+model
-                nextMap[normalized.instanceId] = createModelSelection(
+                nextHistory = rememberModelOptions(
+                  nextHistory,
                   normalized.instanceId,
                   normalized.model,
-                  current?.options,
+                  nextOptions,
                 );
               }
+              nextMap[normalized.instanceId] = createModelSelection(
+                normalized.instanceId,
+                normalized.model,
+                nextOptions,
+              );
             }
             const nextActiveProvider = normalized?.instanceId ?? base.activeProvider;
             if (
               Equal.equals(base.modelSelectionByProvider, nextMap) &&
+              Equal.equals(base.modelOptionsByProviderAndModel, nextHistory) &&
               base.activeProvider === nextActiveProvider &&
               (base.modelSelectionExplicit ?? false) === (opts?.explicit === true)
             ) {
@@ -3079,6 +3263,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const nextDraft: ComposerThreadDraftState = {
               ...restBase,
               modelSelectionByProvider: nextMap,
+              modelOptionsByProviderAndModel: nextHistory,
               activeProvider: nextActiveProvider,
               ...(opts?.explicit === true ? { modelSelectionExplicit: true as const } : {}),
             };
@@ -3103,6 +3288,10 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             }
             const base = existing ?? createEmptyThreadDraft();
             const nextMap = { ...base.modelSelectionByProvider };
+            let nextHistory = rememberSelections(
+              base.modelOptionsByProviderAndModel,
+              base.modelSelectionByProvider,
+            );
             for (const provider of ["codex", "claudeAgent", "cursor", "opencode"] as const) {
               if (!modelOptions || !(provider in modelOptions)) continue;
               const opts = modelOptions[provider];
@@ -3110,22 +3299,34 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               const instanceKey = defaultInstanceIdForDriver(driverKind);
               const current = nextMap[instanceKey];
               if (opts && opts.length > 0) {
-                nextMap[instanceKey] = createModelSelection(
+                const nextSelection = createModelSelection(
                   instanceKey,
                   current?.model ?? DEFAULT_MODEL_BY_PROVIDER[driverKind] ?? DEFAULT_MODEL,
+                  opts,
+                );
+                nextMap[instanceKey] = nextSelection;
+                nextHistory = rememberModelOptions(
+                  nextHistory,
+                  instanceKey,
+                  nextSelection.model,
                   opts,
                 );
               } else if (current?.options) {
                 const { options: _, ...rest } = current;
                 nextMap[instanceKey] = rest as ModelSelection;
+                nextHistory = rememberModelOptions(nextHistory, instanceKey, current.model, null);
               }
             }
-            if (Equal.equals(base.modelSelectionByProvider, nextMap)) {
+            if (
+              Equal.equals(base.modelSelectionByProvider, nextMap) &&
+              Equal.equals(base.modelOptionsByProviderAndModel, nextHistory)
+            ) {
               return state;
             }
             const nextDraft: ComposerThreadDraftState = {
               ...base,
               modelSelectionByProvider: nextMap,
+              modelOptionsByProviderAndModel: nextHistory,
             };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
             if (shouldRemoveDraft(nextDraft)) {
@@ -3160,36 +3361,54 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             // Update the map entry for this provider
             const nextMap = { ...base.modelSelectionByProvider };
             const currentForProvider = nextMap[instanceKey];
+            const model = currentForProvider?.model ?? fallbackModel;
+            let nextHistory = rememberSelections(
+              base.modelOptionsByProviderAndModel,
+              base.modelSelectionByProvider,
+            );
             if (providerOpts) {
-              nextMap[instanceKey] = createModelSelection(
-                instanceKey,
-                currentForProvider?.model ?? fallbackModel,
-                providerOpts,
-              );
+              const nextSelection = createModelSelection(instanceKey, model, providerOpts);
+              nextMap[instanceKey] = nextSelection;
+              nextHistory = rememberModelOptions(nextHistory, instanceKey, model, providerOpts);
             } else if (currentForProvider && (currentForProvider.options?.length ?? 0) > 0) {
               const { options: _, ...rest } = currentForProvider;
               nextMap[instanceKey] = rest as ModelSelection;
             }
+            if (!providerOpts) {
+              nextHistory = rememberModelOptions(nextHistory, instanceKey, model, null);
+            }
 
             // Handle sticky persistence
             let nextStickyMap = state.stickyModelSelectionByProvider;
+            let nextStickyHistory = state.stickyModelOptionsByProviderAndModel;
             let nextStickyActiveProvider = state.stickyActiveProvider;
             if (options?.persistSticky === true) {
               nextStickyMap = { ...state.stickyModelSelectionByProvider };
+              nextStickyHistory = rememberSelections(
+                state.stickyModelOptionsByProviderAndModel,
+                state.stickyModelSelectionByProvider,
+              );
               const stickyBase =
                 nextStickyMap[instanceKey] ??
                 base.modelSelectionByProvider[instanceKey] ??
                 createModelSelection(instanceKey, fallbackModel);
+              const stickyModel = stickyBase.model;
               if (providerOpts) {
                 nextStickyMap[instanceKey] = createModelSelection(
                   instanceKey,
-                  stickyBase.model,
+                  stickyModel,
                   providerOpts,
                 );
               } else if ((stickyBase.options?.length ?? 0) > 0) {
                 const { options: _, ...rest } = stickyBase;
                 nextStickyMap[instanceKey] = rest as ModelSelection;
               }
+              nextStickyHistory = rememberModelOptions(
+                nextStickyHistory,
+                instanceKey,
+                stickyModel,
+                providerOpts,
+              );
               nextStickyActiveProvider = options.instanceId
                 ? instanceKey
                 : (base.activeProvider ?? instanceKey);
@@ -3197,7 +3416,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
 
             if (
               Equal.equals(base.modelSelectionByProvider, nextMap) &&
+              Equal.equals(base.modelOptionsByProviderAndModel, nextHistory) &&
               Equal.equals(state.stickyModelSelectionByProvider, nextStickyMap) &&
+              Equal.equals(state.stickyModelOptionsByProviderAndModel, nextStickyHistory) &&
               state.stickyActiveProvider === nextStickyActiveProvider
             ) {
               return state;
@@ -3210,6 +3431,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               ...restBase,
               ...(options?.instanceId ? { activeProvider: instanceKey } : {}),
               modelSelectionByProvider: nextMap,
+              modelOptionsByProviderAndModel: nextHistory,
               modelSelectionExplicit: true,
             };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
@@ -3224,6 +3446,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               ...(options?.persistSticky === true
                 ? {
                     stickyModelSelectionByProvider: nextStickyMap,
+                    stickyModelOptionsByProviderAndModel: nextStickyHistory,
                     stickyActiveProvider: nextStickyActiveProvider,
                   }
                 : {}),
@@ -4076,6 +4299,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           logicalProjectDraftThreadKeyByLogicalProjectKey:
             normalizedPersisted.logicalProjectDraftThreadKeyByLogicalProjectKey,
           stickyModelSelectionByProvider: normalizedPersisted.stickyModelSelectionByProvider ?? {},
+          stickyModelOptionsByProviderAndModel: normalizeModelOptionsByProviderAndModel(
+            normalizedPersisted.stickyModelOptionsByProviderAndModel,
+          ),
           stickyActiveProvider: normalizedPersisted.stickyActiveProvider ?? null,
         };
       },

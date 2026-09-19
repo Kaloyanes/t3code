@@ -43,6 +43,15 @@ import {
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import {
+  preparePromptEnhancement,
+  replaceEnhancedPromptTarget,
+  restoreEnhancedPrompt,
+} from "@t3tools/client-runtime/prompt-enhancement";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
+import {
   isPasteAsTextShortcut,
   nextPastedTextFileName,
   pastedTextDisposition,
@@ -926,16 +935,19 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
 }
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
+import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { toastManager } from "../ui/toast";
+import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
   FileIcon,
   BotIcon,
   CircleAlertIcon,
+  PenLineIcon,
   PaperclipIcon,
   PencilRulerIcon,
   PlayIcon,
   ShieldIcon,
+  SparklesIcon,
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
@@ -1381,6 +1393,9 @@ export interface ChatComposerProps {
   keybindings: ResolvedKeybindingsConfig;
   terminalOpen: boolean;
   gitCwd: string | null;
+  projectId: ProjectId | null;
+  supportsPromptEnhancement: boolean;
+  supportsPromptEnhancementSelection: boolean;
   pullRequestProjectId: ProjectId | null;
   pullRequestRepository: string | null;
   restingControlsHost: HTMLDivElement | null;
@@ -1506,6 +1521,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     keybindings,
     terminalOpen,
     gitCwd,
+    projectId,
+    supportsPromptEnhancement,
+    supportsPromptEnhancementSelection,
     pullRequestProjectId,
     pullRequestRepository,
     restingControlsHost,
@@ -1575,6 +1593,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   attachmentTargetKeyRef.current = attachmentTargetKey;
   const questionPreparations = useQuestionAttachmentPreparation((state) => state.counts);
   const prompt = composerDraft.prompt;
+  const [isEnhancingPrompt, setIsEnhancingPrompt] = useState(false);
+  const [isEnhancingSelection, setIsEnhancingSelection] = useState(false);
+  const promptEnhancementRequestRef = useRef(false);
+  const [showPromptEnhancementHalo, setShowPromptEnhancementHalo] = useState(false);
+  const promptEnhancementHaloTimerRef = useRef<number | null>(null);
   const composerImages = attachmentDraft.images;
   const composerFiles = attachmentDraft.files;
   // A question answer has no chips: its files live in the question draft and show in the
@@ -1864,6 +1887,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     selectedProviderEntry?.instanceId ?? NO_PROVIDER_MODEL_SELECTION.instanceId;
   const noProviderAvailable =
     selectedProviderEntry === undefined && multipleModelSelections === null;
+  const promptEnhancementModelSelection =
+    settings.promptEnhancementModelSelection ?? settings.textGenerationModelSelection;
+  const promptEnhancementModelAvailable = providerInstanceEntries.some(
+    (entry) =>
+      entry.instanceId === promptEnhancementModelSelection.instanceId &&
+      entry.enabled &&
+      entry.installed &&
+      entry.isAvailable &&
+      entry.status === "ready" &&
+      entry.snapshot.supportsTextGeneration !== false &&
+      entry.models.some(
+        (model) =>
+          model.slug === promptEnhancementModelSelection.model ||
+          model.aliases?.includes(promptEnhancementModelSelection.model),
+      ),
+  );
   // Before the catalog arrives, every thread resolves to "no provider". Send
   // stays blocked either way; only the chrome waits, keeping the picker with
   // the thread's own selection instead of swapping in the setup button and
@@ -1919,6 +1958,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
+  const enhancePrompt = useAtomCommand(serverEnvironment.enhancePrompt, { reportFailure: false });
   const workspaceRefreshKeyRef = useRef<string | null>(null);
   const workspaceRefreshRetryRef = useRef<{ key: string; notBefore: number } | null>(null);
   const hadWorkspaceSnapshotRef = useRef(false);
@@ -3427,6 +3467,131 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       addComposerDraftFiles,
       attachmentDraftTarget,
     ],
+  );
+
+  const runPromptEnhancement = useCallback(async () => {
+    const previousPrompt = promptRef.current;
+    const previousTargetKey = composerDraftTargetKeyRef.current;
+    if (
+      promptEnhancementRequestRef.current ||
+      projectId === null ||
+      previousPrompt.trim().length === 0
+    )
+      return;
+
+    const selection = supportsPromptEnhancementSelection
+      ? composerEditorRef.current?.readSelectionRange()
+      : undefined;
+    const prepared = preparePromptEnhancement(previousPrompt, selection);
+    const enhancingSelection = prepared.originalSelection !== undefined;
+    promptEnhancementRequestRef.current = true;
+    setIsEnhancingPrompt(true);
+    setIsEnhancingSelection(enhancingSelection);
+    const result = await enhancePrompt({
+      environmentId,
+      input: {
+        projectId,
+        prompt: prepared.prompt,
+        ...(supportsPromptEnhancementSelection && prepared.selection
+          ? { selection: prepared.selection }
+          : {}),
+        references: prepared.references,
+        attachments: [...composerImagesRef.current, ...composerFilesRef.current].map(
+          ({ name, mimeType }) => ({ name, mimeType }),
+        ),
+      },
+    });
+    promptEnhancementRequestRef.current = false;
+    setIsEnhancingPrompt(false);
+    setIsEnhancingSelection(false);
+
+    if (result._tag === "Failure") {
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Couldn't enhance prompt",
+            description: error instanceof Error ? error.message : "Try again in a moment.",
+          }),
+        );
+      }
+      return;
+    }
+    if (
+      promptRef.current !== previousPrompt ||
+      composerDraftTargetKeyRef.current !== previousTargetKey
+    ) {
+      return;
+    }
+
+    const restored = restoreEnhancedPrompt(prepared, result.value.prompt);
+    if (restored === null || restored.trim().length === 0) {
+      toastManager.add({ type: "error", title: "Couldn't preserve prompt references" });
+      return;
+    }
+    const replacementRange = prepared.originalSelection;
+    const nextPrompt = replaceEnhancedPromptTarget(previousPrompt, prepared, restored);
+    const nextCursor = collapseExpandedComposerCursor(
+      nextPrompt,
+      replacementRange ? replacementRange.start + restored.length : restored.length,
+    );
+    onPromptChange(
+      nextPrompt,
+      nextCursor,
+      expandCollapsedComposerCursor(nextPrompt, nextCursor),
+      false,
+      collectInlineContextIds(nextPrompt),
+    );
+    scheduleComposerFocus();
+    setShowPromptEnhancementHalo(true);
+    if (promptEnhancementHaloTimerRef.current !== null) {
+      window.clearTimeout(promptEnhancementHaloTimerRef.current);
+    }
+    promptEnhancementHaloTimerRef.current = window.setTimeout(
+      () => setShowPromptEnhancementHalo(false),
+      220,
+    );
+    toastManager.add(
+      stackedThreadToast({
+        type: "success",
+        title: enhancingSelection ? "Prompt section enhanced" : "Prompt enhanced",
+        timeout: 5_000,
+        actionProps: {
+          children: "Undo",
+          onClick: () => {
+            onPromptChange(
+              previousPrompt,
+              collapseExpandedComposerCursor(previousPrompt, previousPrompt.length),
+              previousPrompt.length,
+              false,
+              collectInlineContextIds(previousPrompt),
+            );
+            scheduleComposerFocus();
+          },
+        },
+      }),
+    );
+  }, [
+    composerFilesRef,
+    composerImagesRef,
+    composerEditorRef,
+    enhancePrompt,
+    environmentId,
+    onPromptChange,
+    projectId,
+    promptRef,
+    scheduleComposerFocus,
+    supportsPromptEnhancementSelection,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (promptEnhancementHaloTimerRef.current !== null) {
+        window.clearTimeout(promptEnhancementHaloTimerRef.current);
+      }
+    },
+    [],
   );
 
   // ------------------------------------------------------------------
@@ -6299,6 +6464,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ) : null}
       </ComposerBanner.Dock>
       <div className="relative">
+        <span
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute -inset-1 rounded-[24px] ring-2 ring-primary/35 opacity-0 scale-[0.985] transition-[opacity,transform] duration-[220ms] ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:scale-100",
+            showPromptEnhancementHalo && "opacity-100 scale-[1.01]",
+          )}
+        />
         <ComposerSurface.Main
           ref={composerMainSurfaceRef}
           className={composerProviderState.composerFrameClassName}
@@ -6930,6 +7102,55 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
+                  {routeKind === "draft" && supportsPromptEnhancement ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            onPointerDown={(event) => event.preventDefault()}
+                            onClick={() => void runPromptEnhancement()}
+                            disabled={
+                              prompt.trim().length === 0 ||
+                              isEnhancingPrompt ||
+                              isConnecting ||
+                              environmentUnavailable !== null ||
+                              projectId === null ||
+                              !promptEnhancementModelAvailable
+                            }
+                            aria-label={
+                              isEnhancingPrompt
+                                ? isEnhancingSelection
+                                  ? "Enhancing selection"
+                                  : "Enhancing prompt"
+                                : "Enhance prompt"
+                            }
+                            aria-busy={isEnhancingPrompt}
+                          />
+                        }
+                      >
+                        {isEnhancingPrompt ? (
+                          <Spinner className="size-4" aria-hidden />
+                        ) : (
+                          <span className="relative size-4" aria-hidden="true">
+                            <PenLineIcon className="absolute inset-0 size-4" />
+                            <SparklesIcon className="absolute -end-1 -top-1 size-2.5" />
+                          </span>
+                        )}
+                      </TooltipTrigger>
+                      <TooltipPopup>
+                        {isEnhancingPrompt
+                          ? isEnhancingSelection
+                            ? "Enhancing selection…"
+                            : "Enhancing prompt…"
+                          : promptEnhancementModelAvailable
+                            ? "Enhance prompt"
+                            : "Prompt enhancement model unavailable"}
+                      </TooltipPopup>
+                    </Tooltip>
+                  ) : null}
                   {showComposerAttachAction ? (
                     <>
                       <input

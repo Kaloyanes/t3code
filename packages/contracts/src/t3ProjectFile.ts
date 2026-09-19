@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
 import { ThreadEnvMode } from "./environment.ts";
-import { ProjectScriptIcon } from "./orchestration.ts";
+import { ProjectScriptIcon, ProjectScriptScope } from "./orchestration.ts";
 
 /** File name of the checked-in T3 project file, resolved at the workspace root. */
 export const T3_PROJECT_FILE_NAME = "t3.json";
@@ -31,6 +31,12 @@ export const T3ProjectFileScript = Schema.Struct({
   command: trimmedNonEmpty({
     description: "Shell command executed in a T3 Code terminal at the project root.",
   }),
+  scope: Schema.optionalKey(
+    ProjectScriptScope.annotate({
+      description:
+        'Where the script runs: "thread" uses the active thread terminal; "worktree" owns one long-lived run per checkout.',
+    }),
+  ),
   icon: Schema.optionalKey(
     ProjectScriptIcon.annotate({
       description: 'Icon shown next to the script in the scripts menu. Defaults to "play".',
@@ -60,9 +66,20 @@ export const T3ProjectFileScript = Schema.Struct({
         "When true, automatically open the preview panel at `previewUrl` the moment the script starts.",
     }),
   ),
-}).annotate({
-  description: "A project script that team members can import into T3 Code.",
-});
+})
+  .check(
+    Schema.makeFilter(
+      (script) =>
+        script.scope !== "worktree" ||
+        (script.async !== false &&
+          script.previewUrl === undefined &&
+          script.autoOpenPreview === undefined) ||
+        "Worktree-scoped scripts must be asynchronous and cannot configure a preview.",
+    ),
+  )
+  .annotate({
+    description: "A project script that team members can import into T3 Code.",
+  });
 export type T3ProjectFileScript = typeof T3ProjectFileScript.Type;
 
 export const T3ProjectFile = Schema.Struct({

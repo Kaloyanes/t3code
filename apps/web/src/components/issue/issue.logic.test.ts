@@ -1,7 +1,39 @@
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { issueDeletePreflightSummary, selectIssueWorktreeAction } from "./issue.logic";
+import {
+  issueDeletePreflightSummary,
+  issueLabelForeground,
+  normalizeIssueLabelColor,
+  selectIssueWorktreeAction,
+} from "./issue.logic";
+
+function contrastRatio(background: string, foreground: string) {
+  const luminance = (color: string) =>
+    [1, 3, 5]
+      .map((offset) => Number.parseInt(color.slice(offset, offset + 2), 16) / 255)
+      .map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4))
+      .reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index]!, 0);
+  const values = [luminance(background), luminance(foreground)].toSorted((a, b) => b - a);
+  return (values[0]! + 0.05) / (values[1]! + 0.05);
+}
+
+describe("issue label colors", () => {
+  it("normalizes six-digit GitHub colors and rejects invalid values", () => {
+    expect(normalizeIssueLabelColor("#ABC123")).toBe("#abc123");
+    expect(normalizeIssueLabelColor("abc123")).toBe("#abc123");
+    expect(normalizeIssueLabelColor("abc")).toBeNull();
+    expect(normalizeIssueLabelColor("not-a-color")).toBeNull();
+  });
+
+  it.each(["#b60205", "#0e8a16", "#fbca04", "#d4c5f9"])(
+    "selects readable text for %s",
+    (background) => {
+      const foreground = issueLabelForeground(background);
+      expect(contrastRatio(background, foreground)).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+});
 
 describe("selectIssueWorktreeAction", () => {
   it("opens linked work before offering replacement or creation", () => {

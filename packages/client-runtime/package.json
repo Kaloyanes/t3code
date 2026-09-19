@@ -19,6 +19,10 @@
       "types": "./src/pendingRequests.ts",
       "default": "./src/pendingRequests.ts"
     },
+    "./prompt-enhancement": {
+      "types": "./src/promptEnhancement.ts",
+      "default": "./src/promptEnhancement.ts"
+    },
     "./connection": {
       "types": "./src/connection/index.ts",
       "default": "./src/connection/index.ts"
@@ -210,6 +214,10 @@
     "./state/terminal": {
       "types": "./src/state/terminal.ts",
       "default": "./src/state/terminal.ts"
+    },
+    "./state/worktreeRun": {
+      "types": "./src/state/worktreeRun.ts",
+      "default": "./src/state/worktreeRun.ts"
     },
     "./state/threads": {
       "types": "./src/state/threads.ts",

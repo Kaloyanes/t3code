@@ -8,7 +8,10 @@ import { resolveThreadRouteTarget } from "../threadRoutes";
 import { openCommandPalette } from "../commandPaletteBus";
 import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { selectProjectGroupingSettings } from "../logicalProject";
-import { resolveScopedThreadActionProjectRef } from "../lib/chatThreadActions";
+import {
+  resolveScopedThreadActionProjectRef,
+  resolveThreadActionWorkspaceOptions,
+} from "../lib/chatThreadActions";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { useProjects } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
@@ -24,6 +27,8 @@ import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { primaryServerKeybindingsAtom } from "~/state/server";
+import { WorktreeRunConsole } from "../components/WorktreeRunConsole";
+import { projectScriptIdFromCommand } from "../projectScripts";
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
@@ -66,6 +71,19 @@ function ChatRouteGlobalShortcuts() {
     projects,
     sidebarProjectScopeKey,
   ]);
+  const shortcutWorkspaceOptions = useMemo(
+    () =>
+      resolveThreadActionWorkspaceOptions(
+        {
+          activeDraftThread,
+          activeThread: activeThread ?? undefined,
+          defaultProjectRef,
+          handleNewThread,
+        },
+        shortcutProjectRef,
+      ),
+    [activeDraftThread, activeThread, defaultProjectRef, handleNewThread, shortcutProjectRef],
+  );
 
   const terminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
@@ -106,7 +124,7 @@ function ChatRouteGlobalShortcuts() {
         event.preventDefault();
         event.stopPropagation();
         if (shortcutProjectRef) {
-          void handleNewThread(shortcutProjectRef);
+          void handleNewThread(shortcutProjectRef, shortcutWorkspaceOptions ?? undefined);
         } else {
           openCommandPalette({ open: "new-thread-in" });
         }
@@ -161,6 +179,16 @@ function ChatRouteGlobalShortcuts() {
                   ? "zoom-out"
                   : "reset-zoom";
         dispatchPreviewAction(action);
+        return;
+      }
+
+      if (command && projectScriptIdFromCommand(command) !== null && !routeThreadRef) {
+        event.preventDefault();
+        event.stopPropagation();
+        toastManager.add({
+          type: "info",
+          title: "Open a thread to choose a worktree",
+        });
       }
     };
 
@@ -176,6 +204,7 @@ function ChatRouteGlobalShortcuts() {
     routeThreadRef,
     selectedThreadKeysSize,
     shortcutProjectRef,
+    shortcutWorkspaceOptions,
     terminalOpen,
   ]);
 
@@ -193,6 +222,7 @@ function ChatRouteLayout() {
     <>
       <ChatRouteGlobalShortcuts />
       {threadTarget ? <ThreadRouteView target={threadTarget} /> : <Outlet />}
+      <WorktreeRunConsole />
     </>
   );
 }
