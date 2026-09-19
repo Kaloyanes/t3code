@@ -78,19 +78,20 @@ describe("TextGeneration.make", () => {
   });
 
   it("asks for only the selected replacement while providing the full draft as context", () => {
-    const prompt = "Keep this context.\nFix the login flow.\nKeep this too.";
+    const prompt = "Keep [[T3_CONTEXT_0]] as context.\nFix the login flow.\nKeep this too.";
     const selection = { start: prompt.indexOf("Fix"), end: prompt.indexOf(" flow.") + 6 };
     const built = buildPromptEnhancementPrompt({
       prompt,
       selection,
-      references: [],
+      references: [{ token: "[[T3_CONTEXT_0]]", label: "src/app.ts" }],
       attachments: [],
     });
 
     expect(built.prompt).toContain("Return only the enhanced selected portion");
     expect(built.prompt).toContain("The surrounding draft is context only");
+    expect(built.prompt).toContain("Do not include tokens that appear only in surrounding context");
     expect(built.prompt).toContain("Fix the login flow.");
-    expect(built.prompt).toContain("Keep this context.");
+    expect(built.prompt).toContain("Keep [[T3_CONTEXT_0]] as context.");
   });
 
   it.effect("routes prompt enhancement to the selected provider instance", () =>

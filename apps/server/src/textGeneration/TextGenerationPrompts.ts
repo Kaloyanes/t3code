@@ -359,7 +359,9 @@ export function buildPromptEnhancementPrompt(input: {
     ...(input.selection
       ? ["- Do not rewrite or return any text outside the selected portion."]
       : []),
-    "- Preserve every opaque reference token exactly once. Do not edit the tokens.",
+    input.selection
+      ? "- Preserve each opaque reference token in the selected portion exactly once. Do not include tokens that appear only in surrounding context."
+      : "- Preserve every opaque reference token exactly once. Do not edit the tokens.",
     "- Attachment metadata is context only. Do not claim to have read attachment contents.",
     ...(referenceLines.length > 0 ? ["", "Opaque references:", ...referenceLines] : []),
     ...(attachmentLines.length > 0 ? ["", "Attachment metadata:", ...attachmentLines] : []),
