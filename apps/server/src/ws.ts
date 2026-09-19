@@ -2377,9 +2377,23 @@ const makeWsRpcLayer = (
             "rpc.aggregate": "automations",
           }),
         [WS_METHODS.automationsStopRun]: (input) =>
-          observeRpcEffect(WS_METHODS.automationsStopRun, automationService.stopRun(input), {
-            "rpc.aggregate": "automations",
-          }),
+          observeRpcEffect(
+            WS_METHODS.automationsStopRun,
+            Effect.gen(function* () {
+              const snapshot = yield* automationService.getSnapshot();
+              const run = snapshot.runs.find((candidate) => candidate.id === input.id);
+              if (run?.threadId !== null && run?.threadId !== undefined) {
+                yield* orchestrationEngine.dispatch({
+                  type: "thread.turn.interrupt",
+                  commandId: yield* serverCommandId("automation-stop"),
+                  threadId: ThreadId.make(run.threadId),
+                  createdAt: yield* nowIso,
+                });
+              }
+              return yield* automationService.stopRun(input);
+            }),
+            { "rpc.aggregate": "automations" },
+          ),
         [WS_METHODS.serverRefreshProviders]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverRefreshProviders,
