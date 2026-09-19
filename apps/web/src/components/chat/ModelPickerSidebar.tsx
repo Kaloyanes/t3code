@@ -212,9 +212,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                         ? "var(--background)"
                         : "color-mix(in oklab, var(--muted) 30%, transparent)"
                   }
-                  {...(entry.accentColor
-                    ? { badgeClassName: "h-3 min-w-3 px-0.5 text-[7px]" }
-                    : {})}
+                  badgeClassName="right-[-0.125rem] bottom-[-0.125rem] h-2.5 min-w-2.5 px-0.5 text-[6px]"
                 />
                 {showNewBadge ? (
                   <span className={NEW_BADGE_CLASS} aria-hidden>

@@ -1154,7 +1154,7 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
               type="button"
               aria-label={`New thread in ${props.label}`}
               onClick={props.onCreateThread}
-              className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 outline-none transition-opacity hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 motion-reduce:transition-none"
+              className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
             />
           }
         >

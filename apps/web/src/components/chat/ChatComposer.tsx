@@ -938,6 +938,7 @@ import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { stackedThreadToast, toastManager } from "../ui/toast";
+import { promptEnhancementLoadingToast } from "./promptEnhancementToast";
 import {
   FileIcon,
   BotIcon,
@@ -1595,6 +1596,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isEnhancingPrompt, setIsEnhancingPrompt] = useState(false);
   const [isEnhancingSelection, setIsEnhancingSelection] = useState(false);
   const promptEnhancementRequestRef = useRef(false);
+  const promptEnhancementAbortControllerRef = useRef<AbortController | null>(null);
+  const promptEnhancementSelectionRef = useRef(false);
+  const promptEnhancementToastIdRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
   const [showPromptEnhancementHalo, setShowPromptEnhancementHalo] = useState(false);
   const promptEnhancementHaloTimerRef = useRef<number | null>(null);
   const composerImages = attachmentDraft.images;
@@ -3468,6 +3472,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ],
   );
 
+  const cancelPromptEnhancement = useCallback(() => {
+    const controller = promptEnhancementAbortControllerRef.current;
+    if (controller === null) return;
+
+    const toastId = promptEnhancementToastIdRef.current;
+    if (toastId !== null) {
+      toastManager.update(
+        toastId,
+        promptEnhancementLoadingToast(promptEnhancementSelectionRef.current, () => {}, true),
+      );
+    }
+    controller.abort();
+  }, []);
+
   const runPromptEnhancement = useCallback(async () => {
     const previousPrompt = promptRef.current;
     const previousTargetKey = composerDraftTargetKeyRef.current;
@@ -3483,28 +3501,46 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       : undefined;
     const prepared = preparePromptEnhancement(previousPrompt, selection);
     const enhancingSelection = prepared.originalSelection !== undefined;
+    const abortController = new AbortController();
     promptEnhancementRequestRef.current = true;
+    promptEnhancementAbortControllerRef.current = abortController;
+    promptEnhancementSelectionRef.current = enhancingSelection;
     setIsEnhancingPrompt(true);
     setIsEnhancingSelection(enhancingSelection);
-    const result = await enhancePrompt({
-      environmentId,
-      input: {
-        projectId,
-        prompt: prepared.prompt,
-        ...(supportsPromptEnhancementSelection && prepared.selection
-          ? { selection: prepared.selection }
-          : {}),
-        references: prepared.references,
-        attachments: [...composerImagesRef.current, ...composerFilesRef.current].map(
-          ({ name, mimeType }) => ({ name, mimeType }),
-        ),
+    const promptEnhancementToastId = toastManager.add(
+      promptEnhancementLoadingToast(enhancingSelection, cancelPromptEnhancement),
+    );
+    promptEnhancementToastIdRef.current = promptEnhancementToastId;
+    const result = await enhancePrompt(
+      {
+        environmentId,
+        input: {
+          projectId,
+          prompt: prepared.prompt,
+          ...(supportsPromptEnhancementSelection && prepared.selection
+            ? { selection: prepared.selection }
+            : {}),
+          references: prepared.references,
+          attachments: [...composerImagesRef.current, ...composerFilesRef.current].map(
+            ({ name, mimeType }) => ({ name, mimeType }),
+          ),
+        },
       },
-    });
+      { signal: abortController.signal },
+    );
     promptEnhancementRequestRef.current = false;
+    if (promptEnhancementAbortControllerRef.current === abortController) {
+      promptEnhancementAbortControllerRef.current = null;
+    }
+    promptEnhancementSelectionRef.current = false;
+    if (promptEnhancementToastIdRef.current === promptEnhancementToastId) {
+      promptEnhancementToastIdRef.current = null;
+    }
     setIsEnhancingPrompt(false);
     setIsEnhancingSelection(false);
 
     if (result._tag === "Failure") {
+      toastManager.close(promptEnhancementToastId);
       if (!isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         toastManager.add(
@@ -3521,11 +3557,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       promptRef.current !== previousPrompt ||
       composerDraftTargetKeyRef.current !== previousTargetKey
     ) {
+      toastManager.close(promptEnhancementToastId);
       return;
     }
 
     const restored = restoreEnhancedPrompt(prepared, result.value.prompt);
     if (restored === null || restored.trim().length === 0) {
+      toastManager.close(promptEnhancementToastId);
       toastManager.add({ type: "error", title: "Couldn't preserve prompt references" });
       return;
     }
@@ -3551,6 +3589,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       () => setShowPromptEnhancementHalo(false),
       220,
     );
+    toastManager.close(promptEnhancementToastId);
     toastManager.add(
       stackedThreadToast({
         type: "success",
@@ -3572,6 +3611,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }),
     );
   }, [
+    cancelPromptEnhancement,
     composerFilesRef,
     composerImagesRef,
     composerEditorRef,
@@ -3586,6 +3626,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   useEffect(
     () => () => {
+      promptEnhancementAbortControllerRef.current?.abort();
+      if (promptEnhancementToastIdRef.current !== null) {
+        toastManager.close(promptEnhancementToastIdRef.current);
+      }
       if (promptEnhancementHaloTimerRef.current !== null) {
         window.clearTimeout(promptEnhancementHaloTimerRef.current);
       }
@@ -7101,7 +7145,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
-                  {routeKind === "draft" && supportsPromptEnhancement ? (
+                  {supportsPromptEnhancement ? (
                     <Tooltip>
                       <TooltipTrigger
                         render={

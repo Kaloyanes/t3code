@@ -704,6 +704,25 @@ describe("executeAtomQuery", () => {
 });
 
 describe("runtime command runner", () => {
+  it("interrupts a generated command when its caller aborts", async () => {
+    const started = Latch.makeUnsafe();
+    const runtime = Atom.runtime(Layer.empty);
+    const command = createRuntimeCommand(runtime, {
+      label: "test.abortable",
+      execute: () => Effect.sync(() => started.openUnsafe()).pipe(Effect.andThen(Effect.never)),
+    });
+    const registry = AtomRegistry.make();
+    const controller = new AbortController();
+    const pending = command.run(registry, undefined, { signal: controller.signal });
+
+    await started.await;
+    controller.abort();
+
+    const result = await pending;
+    expect(isAtomCommandInterrupted(result)).toBe(true);
+    registry.dispose();
+  });
+
   it("encodes custom command rejections as defects", async () => {
     const defect = new Error("custom command rejected");
     const registry = AtomRegistry.make();
