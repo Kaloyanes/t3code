@@ -58,6 +58,8 @@ interface AutomationFormState {
   readonly model: string;
   readonly baseBranch: string;
   readonly runtimeMode: RuntimeMode;
+  readonly timeoutMinutes: string;
+  readonly inputTimeoutHours: string;
 }
 
 const WEEKDAYS: ReadonlyArray<{ readonly value: Weekday; readonly label: string }> = [
@@ -101,6 +103,8 @@ function defaultForm(projectId = ""): AutomationFormState {
     model: "gpt-5.6",
     baseBranch: "main",
     runtimeMode: "approval-required",
+    timeoutMinutes: "",
+    inputTimeoutHours: "",
   };
 }
 
@@ -119,6 +123,14 @@ function formFromAutomation(automation: Automation): AutomationFormState {
     model: automation.execution.modelSelection.model,
     baseBranch: automation.execution.baseBranch,
     runtimeMode: automation.execution.runtimeMode,
+    timeoutMinutes:
+      automation.execution.timeoutMs === undefined
+        ? ""
+        : String(Math.round(automation.execution.timeoutMs / 60_000)),
+    inputTimeoutHours:
+      automation.execution.inputTimeoutMs === undefined
+        ? ""
+        : String(Math.round(automation.execution.inputTimeoutMs / (60 * 60_000))),
   };
 }
 
@@ -133,6 +145,8 @@ function scheduleFromForm(form: AutomationFormState): AutomationSchedule {
 }
 
 function executionFromForm(form: AutomationFormState): AutomationExecution {
+  const timeoutMinutes = Number(form.timeoutMinutes);
+  const inputTimeoutHours = Number(form.inputTimeoutHours);
   return {
     modelSelection: {
       instanceId: ProviderInstanceId.make(form.modelInstance.trim()),
@@ -142,6 +156,12 @@ function executionFromForm(form: AutomationFormState): AutomationExecution {
     runtimeMode: form.runtimeMode,
     interactionMode: "default",
     worktreePolicy: "dedicated",
+    ...(form.timeoutMinutes.trim() === "" || !Number.isFinite(timeoutMinutes)
+      ? {}
+      : { timeoutMs: Math.max(0, Math.round(timeoutMinutes * 60_000)) }),
+    ...(form.inputTimeoutHours.trim() === "" || !Number.isFinite(inputTimeoutHours)
+      ? {}
+      : { inputTimeoutMs: Math.max(0, Math.round(inputTimeoutHours * 60 * 60_000)) }),
   };
 }
 
@@ -367,6 +387,26 @@ function AutomationEditor({
         <div className="flex items-end text-xs text-muted-foreground">
           Every run uses a dedicated worktree.
         </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <FormField label="Execution timeout (minutes)">
+          <Input
+            min="0"
+            type="number"
+            value={form.timeoutMinutes}
+            onChange={(event) => onChange({ timeoutMinutes: event.target.value })}
+            placeholder="No limit"
+          />
+        </FormField>
+        <FormField label="Input wait timeout (hours)">
+          <Input
+            min="0"
+            type="number"
+            value={form.inputTimeoutHours}
+            onChange={(event) => onChange({ inputTimeoutHours: event.target.value })}
+            placeholder="24 hour default"
+          />
+        </FormField>
       </div>
       <Button type="submit" disabled={saving || form.days.length === 0}>
         {saving ? (
