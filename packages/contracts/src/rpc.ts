@@ -334,6 +334,7 @@ import {
 import {
   AutomationCreateInput,
   AutomationIdInput,
+  AutomationOperationError,
   AutomationRunIdInput,
   AutomationSnapshot,
   AutomationUpdateInput,
@@ -575,7 +576,7 @@ const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError, EnvironmentAuthorizationError]),
 });
 
-const AutomationRpcError = EnvironmentAuthorizationError;
+const AutomationRpcError = Schema.Union([AutomationOperationError, EnvironmentAuthorizationError]);
 
 const WsAutomationsGetSnapshotRpc = Rpc.make(WS_METHODS.automationsGetSnapshot, {
   payload: Schema.Struct({}),

@@ -138,3 +138,15 @@ export type AutomationIdInput = typeof AutomationIdInput.Type;
 
 export const AutomationRunIdInput = Schema.Struct({ id: AutomationRunId });
 export type AutomationRunIdInput = typeof AutomationRunIdInput.Type;
+
+export class AutomationOperationError extends Schema.TaggedError<AutomationOperationError>()(
+  "AutomationOperationError",
+  {
+    operation: TrimmedNonEmptyString,
+    detail: TrimmedNonEmptyString,
+  },
+) {
+  override get message(): string {
+    return `Automation ${this.operation} failed: ${this.detail}`;
+  }
+}
