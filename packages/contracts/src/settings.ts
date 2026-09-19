@@ -1223,7 +1223,13 @@ export const ServerSettings = Schema.Struct({
     ),
   ),
   promptEnhancementModelSelection: Schema.NullOr(ModelSelection).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
+    Schema.withDecodingDefault(
+      Effect.succeed({
+        instanceId: ProviderInstanceId.make("codex"),
+        model: DEFAULT_TEXT_GENERATION_MODEL,
+        options: [{ id: "reasoningEffort", value: "medium" }],
+      }),
+    ),
   ),
   sourceControlWritingStyle: SourceControlWritingStyleSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed({})),

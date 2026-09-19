@@ -117,8 +117,12 @@ describe("ServerSettings prompt enhancement model", () => {
     options: [{ id: "reasoningEffort", value: "high" }],
   };
 
-  it("inherits text generation for legacy settings", () => {
-    expect(decodeServerSettings({}).promptEnhancementModelSelection).toBeNull();
+  it("defaults to Luna 5.6 with medium reasoning", () => {
+    expect(decodeServerSettings({}).promptEnhancementModelSelection).toEqual({
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5.6-luna",
+      options: [{ id: "reasoningEffort", value: "medium" }],
+    });
   });
 
   it("round-trips nullable server and project-scoped selections", () => {
