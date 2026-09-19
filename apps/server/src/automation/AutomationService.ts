@@ -91,6 +91,7 @@ export interface AutomationServiceShape {
     readonly worktreePath: string | null;
   }) => Effect.Effect<void, AutomationOperationError>;
   readonly markWaiting: (runId: AutomationRunId) => Effect.Effect<void, AutomationOperationError>;
+  readonly markRunning: (runId: AutomationRunId) => Effect.Effect<void, AutomationOperationError>;
   readonly finish: (input: {
     readonly runId: AutomationRunId;
     readonly status: "completed" | "failed" | "canceled";
@@ -524,6 +525,16 @@ const make = Effect.gen(function* () {
       `,
     ).pipe(Effect.asVoid);
 
+  const markRunning: AutomationServiceShape["markRunning"] = (runId) =>
+    failSql(
+      "resume",
+      sql`
+        UPDATE projection_automation_runs
+        SET status = 'running'
+        WHERE run_id = ${runId} AND status = 'waiting-for-input'
+      `,
+    ).pipe(Effect.asVoid);
+
   const finish: AutomationServiceShape["finish"] = (input) =>
     Effect.gen(function* () {
       const nowMs = yield* Clock.currentTimeMillis;
@@ -551,6 +562,7 @@ const make = Effect.gen(function* () {
     claimDue,
     attachThread,
     markWaiting,
+    markRunning,
     finish,
   });
 });
