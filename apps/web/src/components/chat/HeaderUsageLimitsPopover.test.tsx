@@ -40,7 +40,9 @@ vi.mock("../../state/use-atom-command", () => ({
 }));
 vi.mock("../ui/toast", () => ({ toastManager: { add: state.toast } }));
 vi.mock("../ui/button", () => ({ Button: "button" }));
-vi.mock("../ui/refresh-icon", () => ({ RefreshIcon: "span" }));
+vi.mock("../ui/refresh-icon", () => ({
+  RefreshIcon: (props: Record<string, unknown>) => <span {...props} />,
+}));
 vi.mock("../ui/tooltip", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => children,
   TooltipPopup: () => null,
@@ -328,6 +330,21 @@ it("refreshes connected environments on open and skips disconnected ones", async
   expect(state.popoverOpen).toBe(true);
   expect(state.refreshUsageLimits).toHaveBeenCalledTimes(1);
   expect(state.refreshUsageLimits).toHaveBeenCalledWith("connected", expect.any(Function), true);
+  expect(state.refreshProviders).toHaveBeenCalledWith({
+    environmentId: "connected",
+    input: {},
+  });
+});
+
+it("refreshes limits immediately when the refresh control is clicked", async () => {
+  state.presentations = new Map([[EnvironmentId.make("connected"), presentation("Connected", [])]]);
+  await render();
+
+  await act(async () => {
+    renderer.root.findByProps({ "aria-label": "Refresh usage limits" }).props.onClick();
+  });
+
+  expect(state.refreshUsageLimits).toHaveBeenCalledWith("connected", expect.any(Function), false);
   expect(state.refreshProviders).toHaveBeenCalledWith({
     environmentId: "connected",
     input: {},

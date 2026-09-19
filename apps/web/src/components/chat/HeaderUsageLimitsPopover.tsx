@@ -239,7 +239,7 @@ export function HeaderUsageLimitsPopover({
     [connectedPresentations],
   );
 
-  const refresh = async () => {
+  const refresh = async (automatic = true) => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     setRefreshing(true);
@@ -249,7 +249,7 @@ export function HeaderUsageLimitsPopover({
           return refreshUsageLimits(
             environmentId,
             () => refreshProviders({ environmentId, input: {} }),
-            true,
+            automatic,
           );
         }),
       );
@@ -351,11 +351,17 @@ export function HeaderUsageLimitsPopover({
                   All accounts across connected environments
                 </p>
               </div>
-              <RefreshIcon
-                className="size-3.5 shrink-0 text-muted-foreground"
-                refreshing={refreshing}
-              />
-              {refreshing ? <span className="sr-only">Refreshing limits</span> : null}
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Refresh usage limits"
+                aria-busy={refreshing}
+                disabled={refreshing}
+                onClick={() => void refresh(false)}
+              >
+                <RefreshIcon className="size-3.5 text-muted-foreground" refreshing={refreshing} />
+              </Button>
             </div>
             <div className="px-4 py-1">
               {groups.length === 0 ? (
