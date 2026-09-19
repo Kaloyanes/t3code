@@ -3886,10 +3886,17 @@ export default function Sidebar() {
   // whose position drifted for other reasons.
   const sidebarListOrderKey = useMemo(
     () =>
-      sidebarListItems
-        .map((item) => (item.kind === "thread" ? `${item.key}:${item.section}` : item.marker))
-        .join("\0"),
-    [sidebarListItems],
+      [
+        ...sidebarListItems.map((item) =>
+          item.kind === "thread" ? `${item.key}:${item.section}` : item.marker,
+        ),
+        ...(sidebarLayout === "grouped"
+          ? groupedVisibleThreads.map((thread) =>
+              scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+            )
+          : []),
+      ].join("\0"),
+    [groupedVisibleThreads, sidebarLayout, sidebarListItems],
   );
   const sidebarListHasRows = sidebarListItems.length + visibleDraftSessionCount > 0;
   useLayoutEffect(() => {
