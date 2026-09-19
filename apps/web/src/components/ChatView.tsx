@@ -344,8 +344,6 @@ import {
   serverEnvironment,
 } from "../state/server";
 import { terminalEnvironment } from "../state/terminal";
-import { worktreeRunEnvironment } from "../state/worktreeRun";
-import { useWorktreeRunConsoleStore } from "../worktreeRunConsoleStore";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import {
   requestOlderThreadTurns,
@@ -734,6 +732,15 @@ function formatOutgoingPrompt(params: {
 }
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
+
+interface ProjectScriptTerminalRun {
+  readonly threadId: ThreadId;
+  readonly scriptId: string;
+  readonly terminalId: string;
+  readonly initialVersion: number;
+  readonly launchComplete: boolean;
+  readonly observedRunning: boolean;
+}
 
 function isCompactCommandMessage(message: ChatMessage): boolean {
   const text = message.text.trim().toLowerCase();
@@ -1500,10 +1507,6 @@ export default function ChatView(props: ChatViewProps) {
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
-  const startWorktreeRun = useAtomCommand(worktreeRunEnvironment.start, {
-    reportFailure: false,
-  });
-  const openWorktreeRunConsole = useWorktreeRunConsoleStore((state) => state.open);
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
@@ -1976,6 +1979,86 @@ export default function ChatView(props: ChatViewProps) {
     () => [...new Set([...activeServerOrderedTerminalIds, ...terminalUiState.terminalIds])],
     [activeServerOrderedTerminalIds, terminalUiState.terminalIds],
   );
+  const [projectScriptTerminalRuns, setProjectScriptTerminalRuns] = useState<
+    ReadonlyArray<ProjectScriptTerminalRun>
+  >([]);
+  const runningProjectScriptIds = useMemo(
+    () =>
+      new Set(
+        projectScriptTerminalRuns
+          .filter((run) => run.threadId === activeThreadId)
+          .map((run) => run.scriptId),
+      ),
+    [activeThreadId, projectScriptTerminalRuns],
+  );
+  const trackProjectScriptRun = useCallback(
+    (scriptId: string, terminalId: string) => {
+      const session = activeThreadKnownSessions.find(
+        (candidate) => candidate.target.terminalId === terminalId,
+      );
+      setProjectScriptTerminalRuns((current) => [
+        ...current.filter((run) => !(run.threadId === activeThreadId && run.scriptId === scriptId)),
+        {
+          threadId: activeThreadId!,
+          scriptId,
+          terminalId,
+          initialVersion: session?.state.version ?? 0,
+          launchComplete: false,
+          observedRunning: false,
+        },
+      ]);
+    },
+    [activeThreadId, activeThreadKnownSessions],
+  );
+  const finishProjectScriptLaunch = useCallback((scriptId: string, terminalId: string) => {
+    setProjectScriptTerminalRuns((current) =>
+      current.map((run) =>
+        run.scriptId === scriptId && run.terminalId === terminalId
+          ? { ...run, launchComplete: true }
+          : run,
+      ),
+    );
+  }, []);
+  const clearProjectScriptRun = useCallback((scriptId: string, terminalId: string) => {
+    setProjectScriptTerminalRuns((current) =>
+      current.filter((run) => !(run.scriptId === scriptId && run.terminalId === terminalId)),
+    );
+  }, []);
+  useEffect(() => {
+    const sessionsByTerminalId = new Map(
+      activeThreadKnownSessions.map((session) => [session.target.terminalId, session] as const),
+    );
+    setProjectScriptTerminalRuns((current) => {
+      let changed = false;
+      const next = current.flatMap((run) => {
+        if (run.threadId !== activeThreadId) {
+          changed = true;
+          return [];
+        }
+        const session = sessionsByTerminalId.get(run.terminalId);
+        if (!session) return [run];
+        const observedRunning = run.observedRunning || session.state.hasRunningSubprocess;
+        const commandFinished =
+          run.launchComplete &&
+          !session.state.hasRunningSubprocess &&
+          (observedRunning ||
+            session.state.status === "closed" ||
+            session.state.status === "exited" ||
+            session.state.status === "error" ||
+            session.state.version > run.initialVersion);
+        if (commandFinished) {
+          changed = true;
+          return [];
+        }
+        if (observedRunning !== run.observedRunning) {
+          changed = true;
+          return [{ ...run, observedRunning }];
+        }
+        return [run];
+      });
+      return changed ? next : current;
+    });
+  }, [activeThreadId, activeThreadKnownSessions]);
   const activeTerminalLabelsById = useMemo(() => {
     const labels = new Map<string, string>();
     for (const session of activeThreadKnownSessions) {
@@ -4213,41 +4296,13 @@ export default function ChatView(props: ChatViewProps) {
           return { ...current, [activeProject.id]: script.id };
         });
       }
-      if (script.scope === "worktree") {
-        const workspacePath = activeThread.worktreePath ?? activeProject.workspaceRoot;
-        const capability =
-          environmentById.get(environmentId)?.serverConfig?.environment.capabilities.worktreeRuns;
-        if (capability !== true) {
-          toastManager.add({
-            type: "info",
-            title: "Worktree actions are unavailable",
-            description: "Update this T3 Code server to run worktree-scoped actions.",
-          });
-          return;
-        }
-        const target = { projectId: activeProject.id, workspacePath, scriptId: script.id };
-        const result = await startWorktreeRun({ environmentId, input: target });
-        if (result._tag === "Failure") {
-          if (!isAtomCommandInterrupted(result)) {
-            const error = squashAtomCommandFailure(result);
-            toastManager.add({
-              type: "error",
-              title: `Could not run ${script.name}`,
-              description: error instanceof Error ? error.message : String(error),
-            });
-          }
-          return;
-        }
-        openWorktreeRunConsole({ environmentId, target });
-        return;
-      }
-      const targetCwd = options?.cwd ?? gitCwd ?? activeProject.workspaceRoot;
+      const targetWorktreePath = options?.worktreePath ?? activeThread.worktreePath ?? null;
+      const targetCwd = options?.cwd ?? targetWorktreePath ?? gitCwd ?? activeProject.workspaceRoot;
       const baseTerminalId =
         terminalUiState.activeTerminalId || activeKnownTerminalIds[0] || DEFAULT_THREAD_TERMINAL_ID;
       const isBaseTerminalBusy = runningTerminalIds.includes(baseTerminalId);
       const wantsNewTerminal = Boolean(options?.preferNewTerminal) || isBaseTerminalBusy;
       const shouldCreateNewTerminal = wantsNewTerminal;
-      const targetWorktreePath = options?.worktreePath ?? activeThread.worktreePath ?? null;
 
       setTerminalUiLaunchContext({
         threadId: activeThreadId,
@@ -4270,6 +4325,7 @@ export default function ChatView(props: ChatViewProps) {
       const targetTerminalId = shouldCreateNewTerminal
         ? nextTerminalId(allocatableActiveTerminalIds)
         : baseTerminalId;
+      trackProjectScriptRun(script.id, targetTerminalId);
       const openTerminalInput: TerminalOpenInput = shouldCreateNewTerminal
         ? {
             threadId: activeThreadId,
@@ -4296,6 +4352,7 @@ export default function ChatView(props: ChatViewProps) {
 
       const openResult = await openTerminal({ environmentId, input: openTerminalInput });
       if (openResult._tag === "Failure") {
+        clearProjectScriptRun(script.id, targetTerminalId);
         if (!isAtomCommandInterrupted(openResult)) {
           const error = squashAtomCommandFailure(openResult);
           setThreadError(
@@ -4314,13 +4371,18 @@ export default function ChatView(props: ChatViewProps) {
           data: `${script.command}\r`,
         },
       });
-      if (writeResult._tag === "Failure" && !isAtomCommandInterrupted(writeResult)) {
-        const error = squashAtomCommandFailure(writeResult);
-        setThreadError(
-          activeThreadId,
-          error instanceof Error ? error.message : `Failed to run script "${script.name}".`,
-        );
+      if (writeResult._tag === "Failure") {
+        clearProjectScriptRun(script.id, targetTerminalId);
+        if (!isAtomCommandInterrupted(writeResult)) {
+          const error = squashAtomCommandFailure(writeResult);
+          setThreadError(
+            activeThreadId,
+            error instanceof Error ? error.message : `Failed to run script "${script.name}".`,
+          );
+        }
+        return;
       }
+      finishProjectScriptLaunch(script.id, targetTerminalId);
     },
     [
       activeProject,
@@ -4334,15 +4396,15 @@ export default function ChatView(props: ChatViewProps) {
       storeSetActiveTerminal,
       setLastInvokedScriptByProjectId,
       environmentId,
-      environmentById,
-      openWorktreeRunConsole,
+      clearProjectScriptRun,
+      finishProjectScriptLaunch,
+      trackProjectScriptRun,
       openTerminal,
       activeKnownTerminalIds,
       allocatableActiveTerminalIds,
       runningTerminalIds,
       terminalUiState.activeTerminalId,
       writeTerminal,
-      startWorktreeRun,
     ],
   );
 
@@ -9848,9 +9910,8 @@ export default function ChatView(props: ChatViewProps) {
             isServerThread={isServerThread}
             activeProject={activeProject}
             openInCwd={gitCwd}
-            activeProjectScripts={activeProjectScripts.filter(
-              (script) => (script.scope ?? "thread") === "thread",
-            )}
+            activeProjectScripts={activeProjectScripts}
+            runningProjectScriptIds={runningProjectScriptIds}
             supportsWorktreeRuns={
               environmentById.get(environmentId)?.serverConfig?.environment.capabilities
                 .worktreeRuns === true

@@ -407,7 +407,8 @@ export function ProjectScriptEditorDialog({
                       <option value="worktree">Worktree</option>
                     </select>
                     <p className="text-xs text-muted-foreground">
-                      Worktree actions keep running when their thread closes.
+                      Manual runs use the active thread terminal at its worktree path. Actions
+                      configured to run on worktree creation keep their independent setup lifecycle.
                     </p>
                   </div>
                 ) : null}
