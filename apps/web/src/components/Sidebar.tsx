@@ -230,6 +230,8 @@ import {
   type ProviderInstanceEntry,
 } from "../providerInstances";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
+import { useDiscoveredPortsState } from "../portDiscoveryState";
+import { resolveWorktreeServerPorts } from "../worktreeServerStatus";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Button } from "./ui/button";
 import {
@@ -1069,11 +1071,22 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
   readonly hasUnread: boolean;
   readonly label: string;
   readonly path: string;
+  readonly threadIds: readonly ThreadId[];
   readonly primary: boolean;
   readonly threadCount: number;
   readonly onCreateThread: () => void;
   readonly onToggle: () => void;
 }) {
+  const { servers } = useDiscoveredPortsState(props.environmentId);
+  const threadIds = useMemo(() => new Set(props.threadIds), [props.threadIds]);
+  const serverPorts = useMemo(
+    () => resolveWorktreeServerPorts({ servers, threadIds }),
+    [servers, threadIds],
+  );
+  const serverLabel =
+    serverPorts.length === 1
+      ? `Server running on port ${serverPorts[0]}`
+      : `Servers running on ports ${serverPorts.join(", ")}`;
   return (
     <li className="group flex h-8 list-none items-center gap-0.5 ps-3">
       <Tooltip>
@@ -1082,7 +1095,7 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
             <button
               type="button"
               aria-expanded={props.expanded}
-              aria-label={`${props.expanded ? "Collapse" : "Expand"} ${props.label}`}
+              aria-label={`${props.expanded ? "Collapse" : "Expand"} ${props.label}${serverPorts.length > 0 ? `, ${serverLabel.toLowerCase()}` : ""}`}
               onClick={props.onToggle}
               className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
             />
@@ -1102,6 +1115,13 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
               primary
             </span>
           ) : null}
+          {serverPorts.length > 0 ? (
+            <span
+              role="img"
+              aria-label={serverLabel}
+              className="size-1.5 shrink-0 rounded-full bg-emerald-500"
+            />
+          ) : null}
           {props.hasUnread ? (
             <span
               role="img"
@@ -1118,7 +1138,14 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
             {props.threadCount}
           </span>
         </TooltipTrigger>
-        <TooltipPopup side="top">{props.path}</TooltipPopup>
+        <TooltipPopup side="top">
+          <div className="flex flex-col gap-0.5">
+            <span>{props.path}</span>
+            {serverPorts.length > 0 ? (
+              <span className="font-mono tabular-nums text-foreground">{serverLabel}</span>
+            ) : null}
+          </div>
+        </TooltipPopup>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger
@@ -5132,6 +5159,7 @@ export default function Sidebar() {
                                 hasUnread={hasUnread}
                                 label={worktree.label}
                                 path={worktree.path}
+                                threadIds={worktree.threads.map((thread) => thread.id)}
                                 primary={worktree.primary}
                                 threadCount={worktree.threads.length}
                                 onCreateThread={() => {
