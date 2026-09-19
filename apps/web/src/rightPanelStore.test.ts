@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   migratePersistedRightPanelState,
+  issueSurface,
   pullRequestSurface,
   pullRequestSurfaceId,
   selectActiveRightPanel,
@@ -647,6 +648,95 @@ describe("rightPanelStore", () => {
       activeSurfaceId: "agents",
       surfaces: [{ id: "agents", kind: "agents" }],
     });
+  });
+
+  it("keeps issue tabs available while hidden and falls back when the active tab closes", () => {
+    const store = useRightPanelStore.getState();
+    const firstIssue = issueSurface({
+      projectId: "project-a",
+      repository: "owner/repo",
+      number: 1,
+    });
+    const secondIssue = issueSurface({
+      projectId: "project-a",
+      repository: "owner/repo",
+      number: 2,
+    });
+
+    store.openIssue(refA, firstIssue);
+    store.openIssue(refA, secondIssue);
+    store.close(refA);
+
+    expect(
+      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
+    ).toBeNull();
+    expect(
+      selectSelectedRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
+    ).toEqual(secondIssue);
+
+    store.show(refA);
+    store.closeSurface(refA, secondIssue.id);
+
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual(
+      firstIssue,
+    );
+  });
+
+  it("closes every issue tab and clears the selected surface", () => {
+    const store = useRightPanelStore.getState();
+    store.openIssue(refA, {
+      projectId: "project-a",
+      repository: "owner/repo",
+      number: 1,
+    });
+    store.openIssue(refA, {
+      projectId: "project-a",
+      repository: "owner/repo",
+      number: 2,
+    });
+
+    store.closeAllSurfaces(refA);
+
+    expect(
+      selectSelectedRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
+    ).toBeNull();
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: false,
+      activeSurfaceId: null,
+      surfaces: [],
+    });
+  });
+
+  it("keeps the requested issue selected when closing other tabs or tabs to the right", () => {
+    const store = useRightPanelStore.getState();
+    for (const number of [1, 2, 3]) {
+      store.openIssue(refA, {
+        projectId: "project-a",
+        repository: "owner/repo",
+        number,
+      });
+    }
+
+    const secondIssue = issueSurface({
+      projectId: "project-a",
+      repository: "owner/repo",
+      number: 2,
+    });
+    store.closeOtherSurfaces(refA, secondIssue.id);
+    expect(
+      selectSelectedRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
+    ).toEqual(secondIssue);
+
+    store.openIssue(refA, { ...secondIssue, number: 1 });
+    store.openIssue(refA, { ...secondIssue, number: 3 });
+    store.closeSurfacesToRight(refA, secondIssue.id);
+
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
+    ).toEqual([secondIssue]);
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual(
+      secondIssue,
+    );
   });
 
   it("toggles empty panel visibility without creating a surface", () => {

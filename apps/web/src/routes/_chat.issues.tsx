@@ -88,6 +88,7 @@ import { useAtomCommand } from "../state/use-atom-command";
 import {
   ISSUES_PANEL_REF,
   selectActiveRightPanelSurface,
+  selectSelectedRightPanelSurface,
   selectThreadRightPanelState,
   useRightPanelStore,
   type IssueSurface,
@@ -362,7 +363,7 @@ function IssuesRouteView() {
     selectThreadRightPanelState(state.byThreadKey, ISSUES_PANEL_REF),
   );
   const selectedSurface = useRightPanelStore((state) =>
-    selectActiveRightPanelSurface(state.byThreadKey, ISSUES_PANEL_REF),
+    selectSelectedRightPanelSurface(state.byThreadKey, ISSUES_PANEL_REF),
   );
   const selectedIssueSurface = selectedSurface?.kind === "issue" ? selectedSurface : null;
   const activeSurface = rightPanelState.isOpen ? selectedIssueSurface : null;
@@ -416,7 +417,7 @@ function IssuesRouteView() {
     useRightPanelStore.getState().openIssue(ISSUES_PANEL_REF, {
       environmentId: selectedProject.environmentId,
       projectId: selectedProject.id,
-      host: selection.host,
+      ...(selection.host ? { host: selection.host } : {}),
       repository: selection.repository,
       number: search.selectedIssue,
     });
@@ -586,7 +587,7 @@ function IssuesRouteView() {
       ) : null}
       <IssueRows
         entries={entries}
-        selectedNumber={selectedIssueSurface?.number ?? search.selectedIssue ?? null}
+        selectedNumber={activeSurface?.number ?? search.selectedIssue ?? null}
         onSelect={openIssue}
       />
     </>
@@ -748,7 +749,7 @@ function IssuesRouteView() {
             onActivate={(surface) => {
               if (surface.kind === "issue") {
                 useRightPanelStore.getState().activateSurface(ISSUES_PANEL_REF, surface.id);
-                updateSearch({ selectedIssue: surface.number });
+                selectSurfaceInUrl(surface);
               }
             }}
             onCloseSurface={(surface) => {
@@ -1049,7 +1050,6 @@ function IssueCreateDialog({
   const [assignees, setAssignees] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const labelQuery = labels.split(",").at(-1)?.trim().slice(0, 200) ?? "";
   const assigneeQuery = assignees.split(",").at(-1)?.trim().slice(0, 200) ?? "";
   const labelsCandidatesQuery = useIssueCandidates(
     open && selection && environmentId
@@ -1059,7 +1059,6 @@ function IssueCreateDialog({
             ...selection,
             kind: "labels",
             limit: 100,
-            ...(labelQuery ? { query: labelQuery } : {}),
           },
         }
       : null,
@@ -1472,10 +1471,10 @@ function IssueCandidateField({
                   disabled={isPending}
                 >
                   <span className="flex items-center justify-between gap-2">
-                    {candidate.color === undefined ? (
-                      <span className="truncate">{candidate.label}</span>
-                    ) : (
+                    {label === "Labels" ? (
                       <IssueLabelPill name={candidate.label} color={candidate.color} />
+                    ) : (
+                      <span className="truncate">{candidate.label}</span>
                     )}
                     {candidate.detail ? (
                       <span className="truncate text-xs text-muted-foreground">
