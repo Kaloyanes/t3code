@@ -15,6 +15,7 @@ import {
   resolveLockedWorkspaceLabel,
   resolveLocalCheckoutBranchMismatch,
   resolveExistingWorktreeOptions,
+  resolvePreviousWorktreeOption,
   sanitizeNewRefName,
   shouldIncludeBranchPickerItem,
   shouldShowComposerContextStrip,
@@ -72,6 +73,34 @@ describe("resolveExistingWorktreeOptions", () => {
         worktreePath: "C:\\worktrees\\email-feature\\apps\\dashboard",
       },
     ]);
+  });
+});
+
+describe("resolvePreviousWorktreeOption", () => {
+  it("picks the most recently used live worktree", () => {
+    expect(
+      resolvePreviousWorktreeOption({
+        currentWorktreePath: null,
+        options: [
+          { branch: "older", label: "older", worktreePath: "/repo/older" },
+          { branch: "newer", label: "newer", worktreePath: "/repo/newer" },
+        ],
+        threads: [
+          {
+            worktreePath: "/repo/older",
+            updatedAt: "2026-09-18T00:00:00.000Z",
+          },
+          {
+            worktreePath: "/repo/newer",
+            updatedAt: "2026-09-19T00:00:00.000Z",
+          },
+          {
+            worktreePath: "/repo/stale",
+            updatedAt: "2026-09-20T00:00:00.000Z",
+          },
+        ],
+      }),
+    ).toEqual({ branch: "newer", label: "newer", worktreePath: "/repo/newer" });
   });
 });
 
