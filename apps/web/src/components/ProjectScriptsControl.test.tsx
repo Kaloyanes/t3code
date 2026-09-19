@@ -13,6 +13,7 @@ vi.mock("lucide-react", () => {
     LoaderCircleIcon: (props: object) => <Icon data-icon="loader" {...props} />,
     PlusIcon: (props: object) => <Icon data-icon="plus" {...props} />,
     SettingsIcon: (props: object) => <Icon data-icon="settings" {...props} />,
+    SquareIcon: (props: object) => <Icon data-icon="square" {...props} />,
   };
 });
 
@@ -119,15 +120,22 @@ const scripts = [
 
 const action = async () => AsyncResult.success(undefined);
 
-function renderControl(runningScriptIds: ReadonlySet<string> = new Set()) {
+function renderControl(
+  input: {
+    startingScriptIds?: ReadonlySet<string>;
+    runningScriptIds?: ReadonlySet<string>;
+  } = {},
+) {
   let nextRenderer!: ReactTestRenderer;
   act(() => {
     nextRenderer = create(
       <ProjectScriptsControl
         scripts={scripts}
         keybindings={[]}
-        runningScriptIds={runningScriptIds}
+        {...(input.startingScriptIds ? { startingScriptIds: input.startingScriptIds } : {})}
+        {...(input.runningScriptIds ? { runningScriptIds: input.runningScriptIds } : {})}
         onRunScript={vi.fn()}
+        onStopScript={vi.fn()}
         onAddScript={action}
         onUpdateScript={action}
         onDeleteScript={action}
@@ -166,8 +174,8 @@ describe("ProjectScriptsControl", () => {
     expect(renderer.root.findByProps({ "data-testid": "editor-open" })).toBeDefined();
   });
 
-  it("marks a running action as busy and uses a reduced-motion-safe spinner", () => {
-    renderer = renderControl(new Set(["worktree-dev"]));
+  it("marks a starting action as busy and uses a reduced-motion-safe spinner", () => {
+    renderer = renderControl({ startingScriptIds: new Set(["worktree-dev"]) });
 
     const runningItem = renderer.root.findAllByProps({
       "data-slot": "menu-item",
@@ -177,5 +185,14 @@ describe("ProjectScriptsControl", () => {
     const spinner = renderer.root.findByProps({ "data-icon": "loader" });
     expect(spinner.props.className).toContain("motion-safe:animate-spin");
     expect(spinner.props.className).toContain("motion-reduce:animate-none");
+  });
+
+  it("shows the completed running state with a stop control", () => {
+    renderer = renderControl({ runningScriptIds: new Set(["build"]) });
+
+    const runButton = renderer.root.findByProps({ "aria-label": "Stop Build" });
+    expect(runButton.props.variant).toBe("destructive");
+    expect(renderer.root.findAllByProps({ "data-icon": "square" })).not.toHaveLength(0);
+    expect(runButton.props["aria-busy"]).toBe(false);
   });
 });

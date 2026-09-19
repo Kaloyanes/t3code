@@ -336,6 +336,7 @@ import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnectDelay";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
+import { useThreadDiscoveredPorts } from "../portDiscoveryState";
 import { useEnvironmentQuery } from "../state/query";
 import {
   environmentServerConfigsAtom,
@@ -344,6 +345,7 @@ import {
   serverEnvironment,
 } from "../state/server";
 import { terminalEnvironment } from "../state/terminal";
+import { resolveProjectScriptRunStates } from "../worktreeServerStatus";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import {
   requestOlderThreadTurns,
@@ -737,6 +739,7 @@ interface ProjectScriptTerminalRun {
   readonly threadId: ThreadId;
   readonly scriptId: string;
   readonly terminalId: string;
+  readonly scope: ProjectScript["scope"];
   readonly initialVersion: number;
   readonly launchComplete: boolean;
   readonly observedRunning: boolean;
@@ -1971,6 +1974,10 @@ export default function ChatView(props: ChatViewProps) {
       (session) => session.target.threadId === activeThreadId,
     );
   }, [activeThreadId, activeThreadKnownSessionsRaw]);
+  const activeThreadDiscoveredPorts = useThreadDiscoveredPorts({
+    environmentId: activeThread?.environmentId ?? null,
+    threadId: activeThreadId,
+  });
   const activeServerOrderedTerminalIds = useMemo(
     () => activeThreadKnownSessions.map((session) => session.target.terminalId),
     [activeThreadKnownSessions],
@@ -1982,17 +1989,24 @@ export default function ChatView(props: ChatViewProps) {
   const [projectScriptTerminalRuns, setProjectScriptTerminalRuns] = useState<
     ReadonlyArray<ProjectScriptTerminalRun>
   >([]);
-  const runningProjectScriptIds = useMemo(
+  const projectScriptRunStates = useMemo(
     () =>
-      new Set(
-        projectScriptTerminalRuns
-          .filter((run) => run.threadId === activeThreadId)
-          .map((run) => run.scriptId),
-      ),
-    [activeThreadId, projectScriptTerminalRuns],
+      resolveProjectScriptRunStates({
+        runs: projectScriptTerminalRuns.filter((run) => run.threadId === activeThreadId),
+        servers: activeThreadDiscoveredPorts,
+      }),
+    [activeThreadDiscoveredPorts, activeThreadId, projectScriptTerminalRuns],
+  );
+  const startingProjectScriptIds = useMemo(
+    () => new Set(projectScriptRunStates.startingScriptIds),
+    [projectScriptRunStates.startingScriptIds],
+  );
+  const runningProjectScriptIds = useMemo(
+    () => new Set(projectScriptRunStates.runningScriptIds),
+    [projectScriptRunStates.runningScriptIds],
   );
   const trackProjectScriptRun = useCallback(
-    (scriptId: string, terminalId: string) => {
+    (scriptId: string, terminalId: string, scope: ProjectScript["scope"]) => {
       const session = activeThreadKnownSessions.find(
         (candidate) => candidate.target.terminalId === terminalId,
       );
@@ -2002,6 +2016,7 @@ export default function ChatView(props: ChatViewProps) {
           threadId: activeThreadId!,
           scriptId,
           terminalId,
+          scope,
           initialVersion: session?.state.version ?? 0,
           launchComplete: false,
           observedRunning: false,
@@ -4325,7 +4340,7 @@ export default function ChatView(props: ChatViewProps) {
       const targetTerminalId = shouldCreateNewTerminal
         ? nextTerminalId(allocatableActiveTerminalIds)
         : baseTerminalId;
-      trackProjectScriptRun(script.id, targetTerminalId);
+      trackProjectScriptRun(script.id, targetTerminalId, script.scope);
       const openTerminalInput: TerminalOpenInput = shouldCreateNewTerminal
         ? {
             threadId: activeThreadId,
@@ -4411,6 +4426,23 @@ export default function ChatView(props: ChatViewProps) {
   const supportsProjectSettingsOverrides =
     environmentById.get(environmentId)?.serverConfig?.environment.capabilities
       .projectSettingsOverrides === true;
+  const stopProjectScript = useCallback(
+    (script: ProjectScript) => {
+      const run = projectScriptTerminalRuns.find(
+        (candidate) => candidate.threadId === activeThreadId && candidate.scriptId === script.id,
+      );
+      if (!run || activeThreadId === null) return;
+      void writeTerminal({
+        environmentId,
+        input: {
+          threadId: activeThreadId,
+          terminalId: run.terminalId,
+          data: "\u0003",
+        },
+      });
+    },
+    [activeThreadId, environmentId, projectScriptTerminalRuns, writeTerminal],
+  );
   const persistProjectScripts = useCallback(
     async (input: {
       projectId: ProjectId;
@@ -9911,6 +9943,7 @@ export default function ChatView(props: ChatViewProps) {
             activeProject={activeProject}
             openInCwd={gitCwd}
             activeProjectScripts={activeProjectScripts}
+            startingProjectScriptIds={startingProjectScriptIds}
             runningProjectScriptIds={runningProjectScriptIds}
             supportsWorktreeRuns={
               environmentById.get(environmentId)?.serverConfig?.environment.capabilities
@@ -9928,6 +9961,7 @@ export default function ChatView(props: ChatViewProps) {
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
               : {})}
             onRunProjectScript={runProjectScript}
+            onStopProjectScript={stopProjectScript}
             onAddProjectScript={saveProjectScript}
             onUpdateProjectScript={updateProjectScript}
             onDeleteProjectScript={deleteProjectScript}

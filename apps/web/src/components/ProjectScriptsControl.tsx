@@ -13,6 +13,7 @@ import {
   LoaderCircleIcon,
   PlusIcon,
   SettingsIcon,
+  SquareIcon,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
@@ -45,6 +46,7 @@ export type { NewProjectScriptInput, ProjectScriptActionResult };
 
 const NO_FILE_SCRIPTS: ReadonlyArray<T3ProjectFileScript> = [];
 const NO_RUNNING_SCRIPT_IDS: ReadonlySet<string> = new Set();
+const NO_STARTING_SCRIPT_IDS: ReadonlySet<string> = new Set();
 
 interface ProjectScriptsControlProps {
   scripts: ReadonlyArray<ProjectScript>;
@@ -52,8 +54,10 @@ interface ProjectScriptsControlProps {
   fileScripts?: ReadonlyArray<T3ProjectFileScript>;
   keybindings: ResolvedKeybindingsConfig;
   preferredScriptId?: string | null;
+  startingScriptIds?: ReadonlySet<string>;
   runningScriptIds?: ReadonlySet<string>;
   onRunScript: (script: ProjectScript) => void;
+  onStopScript: (script: ProjectScript) => void;
   onAddScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateScript: (
     scriptId: string,
@@ -68,8 +72,10 @@ export default function ProjectScriptsControl({
   fileScripts = NO_FILE_SCRIPTS,
   keybindings,
   preferredScriptId = null,
+  startingScriptIds = NO_STARTING_SCRIPT_IDS,
   runningScriptIds = NO_RUNNING_SCRIPT_IDS,
   onRunScript,
+  onStopScript,
   onAddScript,
   onUpdateScript,
   onDeleteScript,
@@ -166,6 +172,7 @@ export default function ProjectScriptsControl({
     </>
   );
   const primaryScriptIsRunning = primaryScript !== null && runningScriptIds.has(primaryScript.id);
+  const primaryScriptIsStarting = primaryScript !== null && startingScriptIds.has(primaryScript.id);
 
   return (
     <>
@@ -176,18 +183,24 @@ export default function ProjectScriptsControl({
               render={
                 <Button
                   size="xs"
-                  variant="outline"
+                  variant={primaryScriptIsRunning ? "destructive" : "outline"}
                   className="w-7 px-0 sm:w-6 @3xl/header-actions:w-auto! @3xl/header-actions:px-[calc(--spacing(2)-1px)]"
-                  aria-label={`${primaryScriptIsRunning ? "Running" : "Run"} ${primaryScript.name}`}
-                  aria-busy={primaryScriptIsRunning}
+                  aria-label={`${primaryScriptIsRunning ? "Stop" : primaryScriptIsStarting ? "Starting" : "Run"} ${primaryScript.name}`}
+                  aria-busy={primaryScriptIsStarting}
                   // The tooltip wrapper replaces data-slot="button", so themed
                   // toolbar styling needs its own hook.
                   data-toolbar-control=""
-                  onClick={() => onRunScript(primaryScript)}
+                  onClick={() =>
+                    primaryScriptIsRunning
+                      ? onStopScript(primaryScript)
+                      : onRunScript(primaryScript)
+                  }
                 />
               }
             >
               {primaryScriptIsRunning ? (
+                <SquareIcon aria-hidden className="size-3.5" />
+              ) : primaryScriptIsStarting ? (
                 <LoaderCircleIcon
                   aria-hidden
                   className="size-3.5 motion-safe:animate-spin motion-reduce:animate-none"
@@ -201,8 +214,10 @@ export default function ProjectScriptsControl({
             </TooltipTrigger>
             <TooltipPopup side="top">
               {primaryScriptIsRunning
-                ? `Running ${primaryScript.name}`
-                : `Run ${primaryScript.name}`}
+                ? `Stop ${primaryScript.name}`
+                : primaryScriptIsStarting
+                  ? `Starting ${primaryScript.name}`
+                  : `Run ${primaryScript.name}`}
             </TooltipPopup>
           </Tooltip>
           <GroupSeparator className="hidden @3xl/header-actions:block" />
@@ -226,10 +241,14 @@ export default function ProjectScriptsControl({
                   <MenuItem
                     key={script.id}
                     className={`group ${dropdownItemClassName}`}
-                    aria-busy={runningScriptIds.has(script.id)}
-                    onClick={() => onRunScript(script)}
+                    aria-busy={startingScriptIds.has(script.id)}
+                    onClick={() =>
+                      runningScriptIds.has(script.id) ? onStopScript(script) : onRunScript(script)
+                    }
                   >
                     {runningScriptIds.has(script.id) ? (
+                      <SquareIcon aria-hidden className="size-4" />
+                    ) : startingScriptIds.has(script.id) ? (
                       <LoaderCircleIcon
                         aria-hidden
                         className="size-4 motion-safe:animate-spin motion-reduce:animate-none"
@@ -240,7 +259,7 @@ export default function ProjectScriptsControl({
                     <span className="truncate">
                       {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
                     </span>
-                    {runningScriptIds.has(script.id) ? (
+                    {startingScriptIds.has(script.id) ? (
                       <span className="sr-only">Running</span>
                     ) : null}
                     <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
