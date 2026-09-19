@@ -379,6 +379,22 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                       disabled={disabledFor("newWorktreesStartFromOrigin")}
                       onValueChange={(value) => write({ newWorktreesStartFromOrigin: value })}
                     />
+                    <ChoiceRow
+                      label="Conventional branch prefixes"
+                      description="Use feature/, bug/, issue/, or maintenance/ based on the work."
+                      selected={uniform("worktreeBranchNamingMode") === "conventional"}
+                      separated
+                      disabled={disabledFor("worktreeBranchNamingMode")}
+                      onPress={() => write({ worktreeBranchNamingMode: "conventional" })}
+                    />
+                    <ChoiceRow
+                      label="T3 Code branch prefix"
+                      description="Keep using the configured T3 Code prefix for generated branches."
+                      selected={uniform("worktreeBranchNamingMode") === "prefix"}
+                      separated
+                      disabled={disabledFor("worktreeBranchNamingMode")}
+                      onPress={() => write({ worktreeBranchNamingMode: "prefix" })}
+                    />
                   </SettingsSection>
                 </>
               ) : null}
