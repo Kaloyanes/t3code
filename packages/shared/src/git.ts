@@ -133,9 +133,11 @@ export function resolveWorktreeBranchNaming(input: {
   readonly issue?: WorktreeBranchIssueContext;
 }): { readonly purpose: WorktreeBranchPurpose; readonly source: WorktreeBranchNamingSource } {
   if (input.issue !== undefined) {
-    const labeledPurpose = input.issue.labels
+    const labeledPurposes = input.issue.labels
       .map(purposeFromLabel)
-      .find((purpose) => purpose !== null);
+      .filter((purpose): purpose is WorktreeBranchPurpose => purpose !== null);
+    const uniqueLabeledPurposes = new Set(labeledPurposes);
+    const labeledPurpose = uniqueLabeledPurposes.size === 1 ? labeledPurposes[0] : undefined;
     const purpose =
       labeledPurpose ?? purposeFromText(`${input.issue.title}\n${input.issue.body}`) ?? "issue";
     return { purpose, source: "github-issue" };

@@ -197,6 +197,19 @@ describe("conventional worktree branch naming", () => {
     ).toEqual({ purpose: "issue", source: "github-issue" });
   });
 
+  it("resolves conflicting issue labels from the issue text", () => {
+    expect(
+      resolveWorktreeBranchNaming({
+        firstMessage: "Please investigate this",
+        issue: {
+          title: "Improve checkout recovery",
+          body: "This enhancement should handle failed checkouts.",
+          labels: ["bug", "enhancement"],
+        },
+      }),
+    ).toEqual({ purpose: "bug", source: "github-issue" });
+  });
+
   it("builds a sanitized conventional branch", () => {
     expect(buildConventionalWorktreeBranchName("feature", " Add / worktree option ")).toBe(
       "feature/add-worktree-option",
