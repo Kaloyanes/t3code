@@ -1240,7 +1240,7 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
                   aria-label={label}
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => handleIssueOpen(event, issue)}
-                  className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 whitespace-nowrap border-b border-transparent text-xs tabular-nums text-muted-foreground hover:border-current hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                  className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 whitespace-nowrap border-b border-transparent text-xs tabular-nums text-emerald-600 hover:border-current hover:text-emerald-700 focus-visible:outline-2 focus-visible:outline-ring dark:text-emerald-400 dark:hover:text-emerald-300"
                 />
               }
             >
