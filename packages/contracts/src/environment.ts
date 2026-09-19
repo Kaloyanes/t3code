@@ -111,6 +111,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   threadSettlement: Schema.optionalKey(Schema.Boolean),
   /** Server evaluates merge and inactivity settlement without a client. */
   threadAutoSettlement: Schema.optionalKey(Schema.Boolean),
+  /** Server owns durable scheduled agent automations and their run controls. */
+  scheduledAutomations: Schema.optionalKey(Schema.Boolean),
   storageCleanup: Schema.optionalKey(Schema.Boolean),
   projectWorktreeCleanup: Schema.optionalKey(Schema.Boolean),
   /** Server persists the opt-in for continuing interrupted threads after restarts. */
