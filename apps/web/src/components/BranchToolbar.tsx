@@ -21,7 +21,7 @@ import {
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
-import { useProject, useThreadShell } from "../state/entities";
+import { useProject, useThreadShell, useThreadShellsForProjectRefs } from "../state/entities";
 import { usePaginatedBranches } from "../state/queries";
 import {
   type EnvMode,
@@ -33,6 +33,7 @@ import {
   resolveEffectiveEnvMode,
   resolveExistingWorktreeOptions,
   resolveLockedWorkspaceLabel,
+  resolvePreviousWorktreeOption,
   shouldShowEnvironmentIndicator,
 } from "./BranchToolbar.logic";
 import {
@@ -580,6 +581,20 @@ export const BranchToolbar = memo(function BranchToolbar({
             repositoryRoot,
           }),
     [projectWorkspaceRoot, repositoryRoot, worktreeRefs],
+  );
+  const projectRefsForPreviousWorktree = useMemo(
+    () => (canSelectExistingWorktree && activeProjectRef ? [activeProjectRef] : []),
+    [activeProjectRef, canSelectExistingWorktree],
+  );
+  const projectThreads = useThreadShellsForProjectRefs(projectRefsForPreviousWorktree);
+  const previousWorktree = useMemo(
+    () =>
+      resolvePreviousWorktreeOption({
+        currentWorktreePath: activeWorktreePath,
+        options: existingWorktrees,
+        threads: projectThreads,
+      }),
+    [activeWorktreePath, existingWorktrees, projectThreads],
   );
   const onSelectExistingWorktree = useCallback(
     (worktreePath: string) => {

@@ -155,6 +155,7 @@ function resetComposerDraftStore() {
     draftThreadsByThreadKey: {},
     logicalProjectDraftThreadKeyByLogicalProjectKey: {},
     stickyModelSelectionByProvider: {},
+    stickyModelOptionsByProviderAndModel: {},
     stickyActiveProvider: null,
   });
 }
@@ -789,6 +790,7 @@ describe("composerDraftStore syncPersistedAttachments", () => {
       draftThreadsByThreadKey: {},
       logicalProjectDraftThreadKeyByLogicalProjectKey: {},
       stickyModelSelectionByProvider: {},
+      stickyModelOptionsByProviderAndModel: {},
       stickyActiveProvider: null,
     });
   });
@@ -844,6 +846,7 @@ describe("composerDraftStore terminal contexts", () => {
       draftThreadsByThreadKey: {},
       logicalProjectDraftThreadKeyByLogicalProjectKey: {},
       stickyModelSelectionByProvider: {},
+      stickyModelOptionsByProviderAndModel: {},
       stickyActiveProvider: null,
     });
   });
@@ -2176,7 +2179,7 @@ describe("composerDraftStore modelSelection", () => {
     );
   });
 
-  it("preserves other provider options when switching the active model selection", () => {
+  it("does not carry options across models while preserving other providers", () => {
     const store = useComposerDraftStore.getState();
 
     store.setModelOptions(
@@ -2191,7 +2194,7 @@ describe("composerDraftStore modelSelection", () => {
 
     const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
     expect(draft?.modelSelectionByProvider[CLAUDE_AGENT_INSTANCE]).toEqual(
-      modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-4-6", { effort: "max" }),
+      modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-4-6"),
     );
     expect(draft?.modelSelectionByProvider[CODEX_INSTANCE]?.options).toEqual(
       createModelSelection(CODEX_INSTANCE, "gpt-5.4", toSelections({ fastMode: true })).options,
@@ -2357,7 +2360,7 @@ describe("composerDraftStore sticky composer settings", () => {
     expect(useComposerDraftStore.getState().stickyActiveProvider).toBe("cursor");
   });
 
-  it("preserves sticky provider options when model selection omits options", () => {
+  it("does not carry sticky options across models", () => {
     const store = useComposerDraftStore.getState();
 
     store.setStickyModelSelection(
@@ -2369,11 +2372,7 @@ describe("composerDraftStore sticky composer settings", () => {
 
     expect(
       useComposerDraftStore.getState().stickyModelSelectionByProvider[CURSOR_INSTANCE],
-    ).toEqual(
-      modelSelection(CURSOR_DRIVER, "composer-2.5", {
-        fastMode: false,
-      }),
-    );
+    ).toEqual(modelSelection(CURSOR_DRIVER, "composer-2.5"));
   });
 
   it("applies sticky activeProvider to new drafts", () => {
@@ -2490,6 +2489,11 @@ describe("composerDraftStore model seed migration", () => {
 
         expect(useComposerDraftStore.getState()).toMatchObject({
           stickyModelSelectionByProvider: { [CODEX_INSTANCE]: stickySelection },
+          stickyModelOptionsByProviderAndModel: {
+            [CODEX_INSTANCE]: {
+              [stickySelection.model]: stickySelection.options,
+            },
+          },
           stickyActiveProvider: null,
         });
       } finally {
@@ -2639,6 +2643,7 @@ describe("composerDraftStore model seed migration", () => {
           },
           logicalProjectDraftThreadKeyByLogicalProjectKey: {},
           stickyModelSelectionByProvider: {},
+          stickyModelOptionsByProviderAndModel: {},
           stickyActiveProvider: null,
         },
       } as never);
@@ -2706,6 +2711,169 @@ describe("composerDraftStore provider-scoped option updates", () => {
       ).options,
     );
     expect(draft?.activeProvider).toBe("codex");
+  });
+});
+
+describe("composerDraftStore per-model option memory", () => {
+  const threadId = ThreadId.make("thread-model-option-memory");
+  const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
+
+  beforeEach(resetComposerDraftStore);
+
+  it("does not carry the outgoing model's options to an unseen model", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.6-luna"), {
+      explicit: true,
+    });
+    store.setProviderModelOptions(
+      threadRef,
+      CODEX_DRIVER,
+      toSelections({ reasoningEffort: "xhigh" }),
+    );
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.6-sol"), {
+      explicit: true,
+    });
+
+    expect(
+      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CODEX_INSTANCE],
+    ).toEqual(modelSelection(CODEX_DRIVER, "gpt-5.6-sol"));
+  });
+
+  it("restores each model's options independently", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.6-luna"));
+    store.setProviderModelOptions(
+      threadRef,
+      CODEX_DRIVER,
+      toSelections({ reasoningEffort: "xhigh" }),
+    );
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.6-sol"));
+    store.setProviderModelOptions(
+      threadRef,
+      CODEX_DRIVER,
+      toSelections({ reasoningEffort: "low" }),
+    );
+
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.6-luna"));
+    expect(
+      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CODEX_INSTANCE]?.options,
+    ).toEqual(toSelections({ reasoningEffort: "xhigh" }));
+
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.6-sol"));
+    expect(
+      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CODEX_INSTANCE]?.options,
+    ).toEqual(toSelections({ reasoningEffort: "low" }));
+  });
+
+  it("clears only the active model's remembered options", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.6-luna"));
+    store.setProviderModelOptions(
+      threadRef,
+      CODEX_DRIVER,
+      toSelections({ reasoningEffort: "xhigh" }),
+    );
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.6-sol"));
+    store.setProviderModelOptions(
+      threadRef,
+      CODEX_DRIVER,
+      toSelections({ reasoningEffort: "low" }),
+    );
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.6-luna"));
+    store.setProviderModelOptions(threadRef, CODEX_DRIVER, undefined);
+
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.6-sol"));
+    expect(
+      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CODEX_INSTANCE]?.options,
+    ).toEqual(toSelections({ reasoningEffort: "low" }));
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.6-luna"));
+    expect(
+      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CODEX_INSTANCE]?.options,
+    ).toBeUndefined();
+  });
+
+  it("keeps identical model slugs isolated across provider instances", () => {
+    const store = useComposerDraftStore.getState();
+    const model = "shared-model";
+
+    store.setModelSelection(threadRef, createModelSelection(CODEX_INSTANCE, model));
+    store.setProviderModelOptions(
+      threadRef,
+      CODEX_DRIVER,
+      toSelections({ reasoningEffort: "xhigh" }),
+      { instanceId: CODEX_INSTANCE, model },
+    );
+    store.setModelSelection(threadRef, createModelSelection(CODEX_SECONDARY_INSTANCE, model));
+    store.setProviderModelOptions(
+      threadRef,
+      CODEX_DRIVER,
+      toSelections({ reasoningEffort: "low" }),
+      { instanceId: CODEX_SECONDARY_INSTANCE, model },
+    );
+
+    store.setModelSelection(threadRef, createModelSelection(CODEX_INSTANCE, model));
+    expect(
+      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CODEX_INSTANCE]?.options,
+    ).toEqual(toSelections({ reasoningEffort: "xhigh" }));
+    store.setModelSelection(threadRef, createModelSelection(CODEX_SECONDARY_INSTANCE, model));
+    expect(
+      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CODEX_SECONDARY_INSTANCE]
+        ?.options,
+    ).toEqual(toSelections({ reasoningEffort: "low" }));
+  });
+
+  it("carries per-model options through sticky state and storage hydration", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setStickyModelSelection(modelSelection(CODEX_DRIVER, "gpt-5.6-luna"));
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.6-luna"));
+    store.setProviderModelOptions(
+      threadRef,
+      CODEX_DRIVER,
+      toSelections({ reasoningEffort: "xhigh" }),
+      { persistSticky: true },
+    );
+    store.setStickyModelSelection(modelSelection(CODEX_DRIVER, "gpt-5.6-sol"));
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.6-sol"));
+    store.setProviderModelOptions(
+      threadRef,
+      CODEX_DRIVER,
+      toSelections({ reasoningEffort: "low" }),
+      { persistSticky: true },
+    );
+
+    const newDraftId = DraftId.make("draft-model-option-memory");
+    store.applyStickyState(newDraftId);
+    expect(
+      useComposerDraftStore.getState().getComposerDraft(newDraftId)?.modelSelectionByProvider[
+        CODEX_INSTANCE
+      ],
+    ).toEqual(modelSelection(CODEX_DRIVER, "gpt-5.6-sol", { reasoningEffort: "low" }));
+
+    const merge = useComposerDraftStore.persist.getOptions().merge!;
+    const hydrated = merge(
+      JSON.parse(
+        JSON.stringify(partializeComposerDraftStoreState(useComposerDraftStore.getState())),
+      ),
+      useComposerDraftStore.getInitialState(),
+    );
+    expect(hydrated.stickyModelSelectionByProvider[CODEX_INSTANCE]?.options).toEqual(
+      toSelections({ reasoningEffort: "low" }),
+    );
+    expect(hydrated.stickyModelOptionsByProviderAndModel[CODEX_INSTANCE]?.["gpt-5.6-luna"]).toEqual(
+      toSelections({ reasoningEffort: "xhigh" }),
+    );
+    expect(
+      hydrated.draftsByThreadKey[threadKeyFor(threadId, TEST_ENVIRONMENT_ID)]
+        ?.modelSelectionByProvider[CODEX_INSTANCE]?.options,
+    ).toEqual(toSelections({ reasoningEffort: "low" }));
+    expect(
+      hydrated.draftsByThreadKey[threadKeyFor(threadId, TEST_ENVIRONMENT_ID)]
+        ?.modelOptionsByProviderAndModel[CODEX_INSTANCE]?.["gpt-5.6-luna"],
+    ).toEqual(toSelections({ reasoningEffort: "xhigh" }));
   });
 });
 

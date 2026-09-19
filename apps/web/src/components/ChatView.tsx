@@ -210,7 +210,6 @@ import {
   selectThreadPreviewMiniPlayer,
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
-import { isThreadOwnPullRequest } from "./pullRequest/pullRequestDetail.logic";
 import { IssueDetailPanel } from "./issue/IssueDetailPanel";
 import { useOpenIssueLink } from "~/lib/openIssueLink";
 import { pullRequestPanelContext } from "./pullRequest/pullRequestDetail.logic";
@@ -9843,6 +9842,7 @@ export default function ChatView(props: ChatViewProps) {
               : { onOpenPullRequest: openProjectPullRequest })}
             activeThreadEnvironmentId={activeThread.environmentId}
             activeThreadId={activeThread.id}
+            activeProviderInstanceId={activeProviderInstanceId}
             {...(routeKind === "draft" && draftId ? { draftId } : {})}
             activeThreadTitle={activeThread.title}
             isServerThread={isServerThread}
