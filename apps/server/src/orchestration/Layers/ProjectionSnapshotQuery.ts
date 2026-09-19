@@ -34,6 +34,7 @@ import {
   ThreadPullRequestSnapshot,
   ThreadPullRequestStack,
   type ThreadPullRequestLink,
+  type WorktreePullRequestLink,
 } from "@t3tools/contracts";
 import { legacyLinkedPullRequestOf } from "@t3tools/shared/threadPullRequests";
 import * as Arr from "effect/Array";
@@ -61,6 +62,7 @@ import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionT
 import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionThreadMessages.ts";
 import { ProjectionThreadProposedPlan } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
 import { ProjectionThreadPullRequest } from "../../persistence/ProjectionThreadPullRequests.ts";
+import { ProjectionProjectWorktreePullRequest } from "../../persistence/ProjectionProjectWorktreePullRequests.ts";
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
 import {
@@ -126,6 +128,13 @@ const ProjectionThreadPullRequestDbRowSchema = ProjectionThreadPullRequest.mapFi
     stack: Schema.NullOr(Schema.fromJsonString(ThreadPullRequestStack)),
   }),
 );
+const ProjectionProjectWorktreePullRequestDbRowSchema =
+  ProjectionProjectWorktreePullRequest.mapFields(
+    Struct.assign({
+      snapshot: Schema.NullOr(Schema.fromJsonString(ThreadPullRequestSnapshot)),
+      stack: Schema.NullOr(Schema.fromJsonString(ThreadPullRequestStack)),
+    }),
+  );
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
@@ -389,6 +398,7 @@ function mapSessionRow(
 function mapProjectShellRow(
   row: Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>,
   repositoryIdentity: OrchestrationProject["repositoryIdentity"],
+  worktreePullRequests: ReadonlyArray<WorktreePullRequestLink> = [],
 ): OrchestrationProjectShell {
   return {
     id: row.projectId,
@@ -401,9 +411,39 @@ function mapProjectShellRow(
     faviconPath: row.faviconPath ?? null,
     projectIcon: row.projectIcon ?? null,
     scripts: row.scripts,
+    worktreePullRequests,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+function mapWorktreePullRequestRow(
+  row: Schema.Schema.Type<typeof ProjectionProjectWorktreePullRequestDbRowSchema>,
+): WorktreePullRequestLink {
+  return {
+    projectId: row.projectId,
+    worktreePath: row.worktreePath,
+    host: row.host,
+    repository: row.repository,
+    number: row.number,
+    url: row.url,
+    source: row.source,
+    linkedAt: row.linkedAt,
+    snapshot: row.snapshot,
+    stack: row.stack,
+  };
+}
+
+function groupWorktreePullRequestRowsByProject(
+  rows: ReadonlyArray<Schema.Schema.Type<typeof ProjectionProjectWorktreePullRequestDbRowSchema>>,
+): Map<string, Array<WorktreePullRequestLink>> {
+  const byProject = new Map<string, Array<WorktreePullRequestLink>>();
+  for (const row of rows) {
+    const links = byProject.get(row.projectId) ?? [];
+    links.push(mapWorktreePullRequestRow(row));
+    byProject.set(row.projectId, links);
+  }
+  return byProject;
 }
 
 function mapProposedPlanRow(
@@ -767,6 +807,49 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           stack_json AS "stack"
         FROM projection_thread_pull_requests
         ORDER BY thread_id ASC, linked_at ASC, number ASC
+      `,
+  });
+
+  const listProjectWorktreePullRequestRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionProjectWorktreePullRequestDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          project_id AS "projectId",
+          NULLIF(worktree_path, '') AS "worktreePath",
+          host,
+          repository,
+          number,
+          url,
+          source,
+          linked_at AS "linkedAt",
+          snapshot_json AS "snapshot",
+          stack_json AS "stack"
+        FROM projection_project_worktree_pull_requests
+        ORDER BY project_id ASC, linked_at ASC, number ASC
+      `,
+  });
+
+  const listProjectWorktreePullRequestRowsByProject = SqlSchema.findAll({
+    Request: ProjectIdLookupInput,
+    Result: ProjectionProjectWorktreePullRequestDbRowSchema,
+    execute: ({ projectId }) =>
+      sql`
+        SELECT
+          project_id AS "projectId",
+          NULLIF(worktree_path, '') AS "worktreePath",
+          host,
+          repository,
+          number,
+          url,
+          source,
+          linked_at AS "linkedAt",
+          snapshot_json AS "snapshot",
+          stack_json AS "stack"
+        FROM projection_project_worktree_pull_requests
+        WHERE project_id = ${projectId}
+        ORDER BY linked_at ASC, number ASC
       `,
   });
 
@@ -2064,6 +2147,14 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listProjectWorktreePullRequestRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getSnapshot:listProjectWorktreePullRequests:query",
+                "ProjectionSnapshotQuery.getSnapshot:listProjectWorktreePullRequests:decodeRows",
+              ),
+            ),
+          ),
           listThreadRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -2142,6 +2233,7 @@ pending_approval_requests AS (
         Effect.flatMap(
           ([
             projectRows,
+            worktreePullRequestRows,
             threadRows,
             messageRows,
             proposedPlanRows,
@@ -2156,6 +2248,8 @@ pending_approval_requests AS (
               const messagesByThread = new Map<string, Array<OrchestrationMessage>>();
               const proposedPlansByThread = new Map<string, Array<OrchestrationProposedPlan>>();
               const pullRequestsByThread = groupPullRequestRowsByThread(pullRequestRows);
+              const worktreePullRequestsByProject =
+                groupWorktreePullRequestRowsByProject(worktreePullRequestRows);
               const activitiesByThread = new Map<string, Array<OrchestrationThreadActivity>>();
               const checkpointsByThread = new Map<string, Array<OrchestrationCheckpointSummary>>();
               const sessionsByThread = new Map<string, OrchestrationSession>();
@@ -2304,6 +2398,7 @@ pending_approval_requests AS (
                 faviconPath: row.faviconPath ?? null,
                 projectIcon: row.projectIcon ?? null,
                 scripts: row.scripts,
+                worktreePullRequests: worktreePullRequestsByProject.get(row.projectId) ?? [],
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
                 deletedAt: row.deletedAt,
@@ -2380,6 +2475,14 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listProjectWorktreePullRequestRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listProjectWorktreePullRequests:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listProjectWorktreePullRequests:decodeRows",
+              ),
+            ),
+          ),
           listThreadRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -2434,6 +2537,7 @@ pending_approval_requests AS (
         Effect.flatMap(
           ([
             projectRows,
+            worktreePullRequestRows,
             threadRows,
             proposedPlanRows,
             pullRequestRows,
@@ -2443,11 +2547,16 @@ pending_approval_requests AS (
           ]) =>
             Effect.gen(function* () {
               const linkedThreadIds = new Set(pullRequestRows.map((row) => row.threadId));
-              const linkedProjectIds = new Set(
+              const worktreePullRequestsByProject =
+                groupWorktreePullRequestRowsByProject(worktreePullRequestRows);
+              const linkedProjectIds = new Set<string>(
                 threadRows
                   .filter((row) => linkedThreadIds.has(row.threadId))
                   .map((row) => row.projectId),
               );
+              for (const projectId of worktreePullRequestsByProject.keys()) {
+                linkedProjectIds.add(projectId);
+              }
               const repositoryIdentities = yield* resolveRepositoryIdentitiesForProjects(
                 projectRows.filter((row) => linkedProjectIds.has(row.projectId)),
               );
@@ -2472,6 +2581,7 @@ pending_approval_requests AS (
                   faviconPath: row.faviconPath ?? null,
                   projectIcon: row.projectIcon ?? null,
                   scripts: row.scripts,
+                  worktreePullRequests: worktreePullRequestsByProject.get(row.projectId) ?? [],
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   deletedAt: row.deletedAt,
@@ -2620,6 +2730,14 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listProjectWorktreePullRequestRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getShellSnapshot:listProjectWorktreePullRequests:query",
+                "ProjectionSnapshotQuery.getShellSnapshot:listProjectWorktreePullRequests:decodeRows",
+              ),
+            ),
+          ),
           listActiveThreadRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -2664,7 +2782,15 @@ pending_approval_requests AS (
       )
       .pipe(
         Effect.flatMap(
-          ([projectRows, threadRows, sessionRows, pullRequestRows, latestTurnRows, stateRows]) =>
+          ([
+            projectRows,
+            worktreePullRequestRows,
+            threadRows,
+            sessionRows,
+            pullRequestRows,
+            latestTurnRows,
+            stateRows,
+          ]) =>
             Effect.gen(function* () {
               let updatedAt: string | null = null;
               for (const row of projectRows) {
@@ -2698,13 +2824,19 @@ pending_approval_requests AS (
                 sessionRows.map((row) => [row.threadId, mapSessionRow(row)] as const),
               );
               const pullRequestsByThread = groupPullRequestRowsByThread(pullRequestRows);
+              const worktreePullRequestsByProject =
+                groupWorktreePullRequestRowsByProject(worktreePullRequestRows);
 
               const snapshot = {
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects: Arr.filterMap(projectRows, (row) =>
                   row.deletedAt === null
                     ? Result.succeed(
-                        mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
+                        mapProjectShellRow(
+                          row,
+                          repositoryIdentities.get(row.projectId) ?? null,
+                          worktreePullRequestsByProject.get(row.projectId) ?? [],
+                        ),
                       )
                     : Result.failVoid,
                 ),
@@ -2783,6 +2915,14 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listProjectWorktreePullRequestRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getArchivedShellSnapshot:listProjectWorktreePullRequests:query",
+                "ProjectionSnapshotQuery.getArchivedShellSnapshot:listProjectWorktreePullRequests:decodeRows",
+              ),
+            ),
+          ),
           listArchivedThreadRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -2827,7 +2967,15 @@ pending_approval_requests AS (
       )
       .pipe(
         Effect.flatMap(
-          ([projectRows, threadRows, sessionRows, pullRequestRows, latestTurnRows, stateRows]) =>
+          ([
+            projectRows,
+            worktreePullRequestRows,
+            threadRows,
+            sessionRows,
+            pullRequestRows,
+            latestTurnRows,
+            stateRows,
+          ]) =>
             Effect.gen(function* () {
               let updatedAt: string | null = null;
               for (const row of projectRows) {
@@ -2853,6 +3001,8 @@ pending_approval_requests AS (
               }
 
               const pullRequestsByThread = groupPullRequestRowsByThread(pullRequestRows);
+              const worktreePullRequestsByProject =
+                groupWorktreePullRequestRowsByProject(worktreePullRequestRows);
               const activeProjectIds = new Set(threadRows.map((row) => row.projectId));
               const repositoryIdentities = yield* resolveRepositoryIdentitiesForProjects(
                 projectRows.filter((row) => activeProjectIds.has(row.projectId)),
@@ -2869,7 +3019,11 @@ pending_approval_requests AS (
                 projects: Arr.filterMap(projectRows, (row) =>
                   row.deletedAt === null && activeProjectIds.has(row.projectId)
                     ? Result.succeed(
-                        mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
+                        mapProjectShellRow(
+                          row,
+                          repositoryIdentities.get(row.projectId) ?? null,
+                          worktreePullRequestsByProject.get(row.projectId) ?? [],
+                        ),
                       )
                     : Result.failVoid,
                 ),
@@ -3013,8 +3167,20 @@ pending_approval_requests AS (
         Effect.flatMap((option) =>
           Option.isNone(option)
             ? Effect.succeed(Option.none<OrchestrationProject>())
-            : repositoryIdentityResolver.resolve(option.value.workspaceRoot).pipe(
-                Effect.map((repositoryIdentity) =>
+            : Effect.all({
+                repositoryIdentity: repositoryIdentityResolver.resolve(option.value.workspaceRoot),
+                worktreeRows: listProjectWorktreePullRequestRowsByProject({
+                  projectId: option.value.projectId,
+                }).pipe(
+                  Effect.mapError(
+                    toPersistenceSqlOrDecodeError(
+                      "ProjectionSnapshotQuery.getActiveProjectByWorkspaceRoot:listWorktreePullRequests:query",
+                      "ProjectionSnapshotQuery.getActiveProjectByWorkspaceRoot:listWorktreePullRequests:decodeRows",
+                    ),
+                  ),
+                ),
+              }).pipe(
+                Effect.map(({ repositoryIdentity, worktreeRows }) =>
                   Option.some({
                     id: option.value.projectId,
                     title: option.value.title,
@@ -3026,6 +3192,7 @@ pending_approval_requests AS (
                     faviconPath: option.value.faviconPath ?? null,
                     projectIcon: option.value.projectIcon ?? null,
                     scripts: option.value.scripts,
+                    worktreePullRequests: worktreeRows.map(mapWorktreePullRequestRow),
                     createdAt: option.value.createdAt,
                     updatedAt: option.value.updatedAt,
                     deletedAt: option.value.deletedAt,
@@ -3045,10 +3212,27 @@ pending_approval_requests AS (
         ),
       ),
       Effect.flatMap((projects) =>
-        resolveRepositoryIdentitiesForProjects(projects).pipe(
-          Effect.map((identities) =>
-            projects.map((row) => mapProjectShellRow(row, identities.get(row.projectId) ?? null)),
+        Effect.all({
+          identities: resolveRepositoryIdentitiesForProjects(projects),
+          worktreeRows: listProjectWorktreePullRequestRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getProjectShells:listWorktreePullRequests:query",
+                "ProjectionSnapshotQuery.getProjectShells:listWorktreePullRequests:decodeRows",
+              ),
+            ),
           ),
+        }).pipe(
+          Effect.map(({ identities, worktreeRows }) => {
+            const byProject = groupWorktreePullRequestRowsByProject(worktreeRows);
+            return projects.map((row) =>
+              mapProjectShellRow(
+                row,
+                identities.get(row.projectId) ?? null,
+                byProject.get(row.projectId) ?? [],
+              ),
+            );
+          }),
         ),
       ),
     );
@@ -3065,13 +3249,27 @@ pending_approval_requests AS (
       Effect.flatMap((option) =>
         Option.isNone(option)
           ? Effect.succeed(Option.none<OrchestrationProjectShell>())
-          : repositoryIdentityResolver
-              .resolve(option.value.workspaceRoot)
-              .pipe(
-                Effect.map((repositoryIdentity) =>
-                  Option.some(mapProjectShellRow(option.value, repositoryIdentity)),
+          : Effect.all({
+              repositoryIdentity: repositoryIdentityResolver.resolve(option.value.workspaceRoot),
+              worktreeRows: listProjectWorktreePullRequestRowsByProject({ projectId }).pipe(
+                Effect.mapError(
+                  toPersistenceSqlOrDecodeError(
+                    "ProjectionSnapshotQuery.getProjectShellById:listWorktreePullRequests:query",
+                    "ProjectionSnapshotQuery.getProjectShellById:listWorktreePullRequests:decodeRows",
+                  ),
                 ),
               ),
+            }).pipe(
+              Effect.map(({ repositoryIdentity, worktreeRows }) =>
+                Option.some(
+                  mapProjectShellRow(
+                    option.value,
+                    repositoryIdentity,
+                    worktreeRows.map(mapWorktreePullRequestRow),
+                  ),
+                ),
+              ),
+            ),
       ),
     );
 

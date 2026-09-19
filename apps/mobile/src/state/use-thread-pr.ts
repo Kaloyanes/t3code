@@ -9,6 +9,7 @@ import { Atom } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo } from "react";
 
 import { connectionAtomRuntime } from "../connection/runtime";
+import { useProject } from "./entities";
 import { appAtomRegistry } from "./atom-registry";
 import { serverEnvironment } from "./server";
 import { useEnvironmentQuery } from "./query";
@@ -44,6 +45,7 @@ export {
  * a live summary request across visible rows in the same environment.
  */
 export function useThreadPr(thread: EnvironmentThreadShell): ThreadPrPresentation | null {
+  const project = useProject({ environmentId: thread.environmentId, projectId: thread.projectId });
   const supportsLinks = useAtomValue(
     serverEnvironment.configValueAtom(thread.environmentId),
     (config) => config?.environment.capabilities.threadPullRequests === true,
@@ -53,12 +55,21 @@ export function useThreadPr(thread: EnvironmentThreadShell): ThreadPrPresentatio
       resolveThreadPrSource(
         {
           pullRequests: thread.pullRequests,
+          worktreePath: thread.worktreePath,
+          worktreePullRequests: project?.worktreePullRequests,
           linkedPullRequest: thread.linkedPullRequest,
           branchPullRequest: thread.branchPullRequest,
         },
         { threadPullRequests: supportsLinks },
       ),
-    [thread.pullRequests, thread.linkedPullRequest, thread.branchPullRequest, supportsLinks],
+    [
+      project?.worktreePullRequests,
+      thread.pullRequests,
+      thread.worktreePath,
+      thread.linkedPullRequest,
+      thread.branchPullRequest,
+      supportsLinks,
+    ],
   );
   const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
   const snapshotIdentity = JSON.stringify(pullRequestRef);

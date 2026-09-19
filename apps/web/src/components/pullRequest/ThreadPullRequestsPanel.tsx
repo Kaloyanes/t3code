@@ -1,5 +1,6 @@
 import type { ScopedThreadRef, ThreadPullRequestLink } from "@t3tools/contracts";
 import {
+  effectiveThreadPullRequests,
   resolveThreadPullRequestChains,
   visibleThreadPullRequests,
 } from "@t3tools/shared/threadPullRequests";
@@ -9,7 +10,7 @@ import { useCallback, useMemo } from "react";
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
 import { cn } from "~/lib/utils";
-import { useServerConfigs, useThreadShell } from "~/state/entities";
+import { useProject, useServerConfigs, useThreadShell } from "~/state/entities";
 import { PullRequestsUnavailableState } from "./PullRequestsUnavailableState";
 import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -62,10 +63,12 @@ function LinkRow({
   line,
   threadRef,
   onUnlink,
+  worktreeScoped,
 }: {
   line: PullRequestListLine;
   threadRef: ScopedThreadRef;
   onUnlink: (link: ThreadPullRequestLink) => void;
+  worktreeScoped: boolean;
 }) {
   const openPrLink = useOpenPrLink(threadRef);
   const { link, depth, stack } = line;
@@ -197,7 +200,11 @@ function LinkRow({
           </MenuItem>
           <MenuItem onClick={() => onUnlink(link)}>
             <PullRequestGlyph.unlink className="size-3.5" />
-            {link.source === "stack" ? "Dismiss from thread" : "Unlink from thread"}
+            {worktreeScoped
+              ? "Unlink from worktree"
+              : link.source === "stack"
+                ? "Dismiss from thread"
+                : "Unlink from thread"}
           </MenuItem>
         </MenuPopup>
       </Menu>
@@ -220,23 +227,68 @@ export function ThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
 
 function EnabledThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const thread = useThreadShell(threadRef);
+  const project = useProject(
+    thread === null
+      ? null
+      : {
+          environmentId: threadRef.environmentId,
+          projectId: thread.projectId,
+        },
+  );
   const openLinkDialog = useCallback(() => openLinkPullRequestDialog(threadRef), [threadRef]);
   const unlink = useAtomCommand(threadEnvironment.unlinkPullRequest, { reportFailure: true });
-  const links = useMemo(() => visibleThreadPullRequests(thread?.pullRequests ?? []), [thread]);
+  const unlinkWorktree = useAtomCommand(threadEnvironment.unlinkWorktreePullRequest, {
+    reportFailure: true,
+  });
+  const worktreeLinks = useMemo(
+    () =>
+      (project?.worktreePullRequests ?? []).filter(
+        (link) => link.worktreePath === (thread?.worktreePath ?? null),
+      ),
+    [project?.worktreePullRequests, thread?.worktreePath],
+  );
+  const worktreeKeys = useMemo(
+    () => new Set(worktreeLinks.map((link) => `${link.host}/${link.repository}#${link.number}`)),
+    [worktreeLinks],
+  );
+  const links = useMemo(
+    () =>
+      visibleThreadPullRequests(
+        effectiveThreadPullRequests(
+          thread?.pullRequests ?? [],
+          project?.worktreePullRequests,
+          thread?.worktreePath ?? null,
+        ),
+      ),
+    [project?.worktreePullRequests, thread?.pullRequests, thread?.worktreePath],
+  );
   const lines = useMemo(() => pullRequestListLines(resolveThreadPullRequestChains(links)), [links]);
   const handleUnlink = useCallback(
     (link: ThreadPullRequestLink) => {
-      void unlink({
-        environmentId: threadRef.environmentId,
-        input: {
-          threadId: threadRef.threadId,
-          host: link.host,
-          repository: link.repository,
-          number: link.number,
-        },
-      });
+      if (worktreeKeys.has(`${link.host}/${link.repository}#${link.number}`) && project) {
+        void unlinkWorktree({
+          environmentId: threadRef.environmentId,
+          input: {
+            projectId: project.id,
+            worktreePath: thread?.worktreePath ?? null,
+            host: link.host,
+            repository: link.repository,
+            number: link.number,
+          },
+        });
+      } else {
+        void unlink({
+          environmentId: threadRef.environmentId,
+          input: {
+            threadId: threadRef.threadId,
+            host: link.host,
+            repository: link.repository,
+            number: link.number,
+          },
+        });
+      }
     },
-    [threadRef, unlink],
+    [project, thread, threadRef, unlink, unlinkWorktree, worktreeKeys],
   );
   const openCount = useMemo(
     () => links.filter((link) => link.snapshot === null || link.snapshot.state === "open").length,
@@ -278,6 +330,9 @@ function EnabledThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
               line={line}
               threadRef={threadRef}
               onUnlink={handleUnlink}
+              worktreeScoped={worktreeKeys.has(
+                `${line.link.host}/${line.link.repository}#${line.link.number}`,
+              )}
             />
           ))}
         </div>

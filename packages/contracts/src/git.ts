@@ -121,6 +121,8 @@ export const GitRunStackedActionInput = Schema.Struct({
   ),
   /** The thread the action runs beside; a pull request it creates is linked to it. */
   threadId: Schema.optional(ThreadId),
+  /** New clients may ask the server to associate created PRs with the worktree. */
+  createdPullRequestScope: Schema.optional(Schema.Literals(["thread", "worktree"])),
 });
 export type GitRunStackedActionInput = typeof GitRunStackedActionInput.Type;
 

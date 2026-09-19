@@ -2,7 +2,11 @@ import { ThreadId, type ThreadPullRequestLink } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import { ThreadWorktreeIndicator, linkedPullRequestSnapshotStatus } from "./ThreadStatusIndicators";
+import {
+  ThreadPullRequestBadgeControl,
+  ThreadWorktreeIndicator,
+  linkedPullRequestSnapshotStatus,
+} from "./ThreadStatusIndicators";
 
 describe("ThreadWorktreeIndicator", () => {
   it("renders the worktree folder and branch in an accessible label", () => {
@@ -78,5 +82,26 @@ describe("linked pull request snapshots", () => {
       },
       sourceControlProvider: { kind: "gitlab", name: "gitlab", baseUrl: "" },
     });
+  });
+});
+
+describe("linked pull request badges", () => {
+  it("renders an aggregate badge as an in-app control", () => {
+    const markup = renderToStaticMarkup(
+      <ThreadPullRequestBadgeControl
+        variant="underline"
+        badge={{ kind: "pull-request", others: 1, state: "open" }}
+        number={42}
+        url="https://github.com/acme/repo/pull/42"
+        status={null}
+        onOpenStack={() => {}}
+        onOpenPullRequest={() => {}}
+        openAggregate
+      />,
+    );
+
+    expect(markup).toContain("<button");
+    expect(markup).not.toContain("href=");
+    expect(markup).toContain("and 1 more linked");
   });
 });

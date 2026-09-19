@@ -35,6 +35,7 @@ import {
   type StopThreadSessionInput,
   type UnarchiveThreadInput,
   type UnlinkThreadPullRequestInput,
+  type UnlinkWorktreePullRequestInput,
   type UnpinThreadInput,
   type UnsettleThreadInput,
   type UnsnoozeThreadInput,
@@ -59,6 +60,7 @@ import {
   stopThreadSession,
   unarchiveThread,
   unlinkThreadPullRequest,
+  unlinkWorktreePullRequest,
   unpinThread,
   unsettleThread,
   unsnoozeThread,
@@ -87,6 +89,7 @@ export type {
   StopThreadSessionInput,
   UnarchiveThreadInput,
   UnlinkThreadPullRequestInput,
+  UnlinkWorktreePullRequestInput,
   UnpinThreadInput,
   UnsettleThreadInput,
   UnsnoozeThreadInput,
@@ -100,8 +103,13 @@ export function createThreadEnvironmentAtoms<R, E>(
   const scheduler = createAtomCommandScheduler();
   const concurrency = {
     mode: "serial" as const,
-    key: ({ environmentId, input }: { environmentId: string; input: { threadId: string } }) =>
-      JSON.stringify([environmentId, input.threadId]),
+    key: ({
+      environmentId,
+      input,
+    }: {
+      environmentId: string;
+      input: { threadId?: string; projectId?: string };
+    }) => JSON.stringify([environmentId, input.threadId ?? input.projectId]),
   };
   const commands = {
     create: createEnvironmentCommand(runtime, {
@@ -191,6 +199,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     unlinkPullRequest: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:unlink-pull-request",
       execute: (input: UnlinkThreadPullRequestInput) => unlinkThreadPullRequest(input),
+      scheduler,
+      concurrency,
+    }),
+    unlinkWorktreePullRequest: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:unlink-worktree-pull-request",
+      execute: (input: UnlinkWorktreePullRequestInput) => unlinkWorktreePullRequest(input),
       scheduler,
       concurrency,
     }),

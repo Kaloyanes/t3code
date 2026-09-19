@@ -1,4 +1,9 @@
-import { ProjectId, type ThreadPullRequestLink, type VcsStatusResult } from "@t3tools/contracts";
+import {
+  ProjectId,
+  type ThreadPullRequestLink,
+  type VcsStatusResult,
+  type WorktreePullRequestLink,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -218,5 +223,26 @@ describe("resolveThreadPrSource compatibility", () => {
         { threadPullRequests: true },
       ),
     ).toMatchObject({ linkedPresentation: { number: 3, state: null }, pullRequestRef: null });
+  });
+
+  it("uses a matching worktree link while retaining legacy capability fallback", () => {
+    const worktreeLink: WorktreePullRequestLink = {
+      ...linkedPr(3, { source: "created" }),
+      projectId: ProjectId.make("project"),
+      worktreePath: "/tmp/worktree",
+      source: "created",
+    };
+    expect(
+      resolveThreadPrSource(
+        {
+          pullRequests: [linkedPr(3, { source: "created" })],
+          worktreePath: "/tmp/worktree",
+          worktreePullRequests: [worktreeLink],
+          linkedPullRequest: legacyRef,
+          branchPullRequest: branchRef,
+        },
+        { threadPullRequests: true },
+      ),
+    ).toMatchObject({ linkedPresentation: { number: 3 }, pullRequestRef: null });
   });
 });

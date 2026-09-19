@@ -5,6 +5,7 @@ import {
   requiresDefaultBranchConfirmation,
 } from "@t3tools/client-runtime/state/vcs";
 import {
+  effectiveThreadPullRequests,
   resolveThreadPullRequestChains,
   threadPullRequestKeyOf,
 } from "@t3tools/shared/threadPullRequests";
@@ -35,6 +36,7 @@ import {
 } from "../../../native/StackHeader";
 import { tryOpenExternalUrl } from "../../../lib/openExternalUrl";
 import { useEnvironmentQuery } from "../../../state/query";
+import { useProject } from "../../../state/entities";
 import { useThreadSelection } from "../../../state/use-thread-selection";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
@@ -62,15 +64,31 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
   const environmentId = EnvironmentId.make(props.route.params.environmentId);
   const threadId = ThreadId.make(props.route.params.threadId);
   const { selectedThread, selectedEnvironmentRuntime } = useThreadSelection();
+  const selectedProject = useProject(
+    selectedThread === null
+      ? null
+      : { environmentId: selectedThread.environmentId, projectId: selectedThread.projectId },
+  );
   const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
   const supportsLinkedPrSnapshots =
     selectedEnvironmentRuntime?.serverConfig?.environment.capabilities.threadPullRequests === true;
   const linkedPrChains = useMemo(
     () =>
       resolveThreadPullRequestChains(
-        supportsLinkedPrSnapshots ? (selectedThread?.pullRequests ?? []) : [],
+        supportsLinkedPrSnapshots
+          ? effectiveThreadPullRequests(
+              selectedThread?.pullRequests ?? [],
+              selectedProject?.worktreePullRequests,
+              selectedThread?.worktreePath ?? null,
+            )
+          : [],
       ),
-    [selectedThread?.pullRequests, supportsLinkedPrSnapshots],
+    [
+      selectedProject?.worktreePullRequests,
+      selectedThread?.pullRequests,
+      selectedThread?.worktreePath,
+      supportsLinkedPrSnapshots,
+    ],
   );
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();

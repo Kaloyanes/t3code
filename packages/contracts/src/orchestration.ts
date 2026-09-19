@@ -533,6 +533,9 @@ export const OrchestrationProject = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.Array(ProjectScript),
+  worktreePullRequests: Schema.optional(
+    Schema.Array(Schema.suspend(() => WorktreePullRequestLink)),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -769,6 +772,21 @@ export const ThreadPullRequestLink = Schema.Struct({
 });
 export type ThreadPullRequestLink = typeof ThreadPullRequestLink.Type;
 
+export const WorktreePullRequestLinkSource = Schema.Literals(["created", "stack"]);
+export type WorktreePullRequestLinkSource = typeof WorktreePullRequestLinkSource.Type;
+
+export const WorktreePullRequestLink = Schema.Struct({
+  projectId: ProjectId,
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  ...ThreadPullRequestKey.fields,
+  url: TrimmedNonEmptyString,
+  source: WorktreePullRequestLinkSource,
+  linkedAt: IsoDateTime,
+  snapshot: Schema.NullOr(ThreadPullRequestSnapshot),
+  stack: Schema.NullOr(ThreadPullRequestStack),
+});
+export type WorktreePullRequestLink = typeof WorktreePullRequestLink.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -851,6 +869,9 @@ export const OrchestrationProjectShell = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.Array(ProjectScript),
+  worktreePullRequests: Schema.optional(
+    Schema.Array(Schema.suspend(() => WorktreePullRequestLink)),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1081,6 +1102,34 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+});
+
+const ProjectWorktreePullRequestUnlinkCommand = Schema.Struct({
+  type: Schema.Literal("project.worktree-pull-request.unlink"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  ...ThreadPullRequestKey.fields,
+});
+
+const ProjectWorktreePullRequestLinkCommand = Schema.Struct({
+  type: Schema.Literal("project.worktree-pull-request.link"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  ...ThreadPullRequestKey.fields,
+  url: TrimmedNonEmptyString,
+  source: WorktreePullRequestLinkSource,
+});
+
+const ProjectWorktreePullRequestLinkSyncCommand = Schema.Struct({
+  type: Schema.Literal("project.worktree-pull-request-link.sync"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  ...ThreadPullRequestKey.fields,
+  snapshot: ThreadPullRequestSnapshot,
+  stack: Schema.NullOr(ThreadPullRequestStack),
 });
 
 const ProjectDeleteCommand = Schema.Struct({
@@ -1393,6 +1442,7 @@ const ThreadSessionStopCommand = Schema.Struct({
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
+  ProjectWorktreePullRequestUnlinkCommand,
   ProjectDeleteCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
@@ -1426,6 +1476,7 @@ export type DispatchableClientOrchestrationCommand =
 export const ClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
+  ProjectWorktreePullRequestUnlinkCommand,
   ProjectDeleteCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
@@ -1623,6 +1674,8 @@ const ThreadPullRequestLinkSyncCommand = Schema.Struct({
 });
 
 const InternalOrchestrationCommand = Schema.Union([
+  ProjectWorktreePullRequestLinkCommand,
+  ProjectWorktreePullRequestLinkSyncCommand,
   ThreadAutoSettleCommand,
   ThreadPullRequestSyncCommand,
   ThreadPullRequestLinkSyncCommand,
@@ -1716,6 +1769,7 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  worktreePullRequests: Schema.optional(Schema.Array(WorktreePullRequestLink)),
   updatedAt: IsoDateTime,
 });
 

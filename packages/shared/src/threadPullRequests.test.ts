@@ -2,6 +2,7 @@ import {
   ProjectId,
   type ThreadPullRequestLink,
   type ThreadPullRequestSnapshot,
+  type WorktreePullRequestLink,
 } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
@@ -13,6 +14,8 @@ import {
   resolveThreadPullRequestChains,
   resolveThreadPullRequestBadge,
   threadPullRequestKeysEqual,
+  effectiveThreadPullRequests,
+  threadPullRequestsWithoutWorktreeShadows,
 } from "./threadPullRequests.ts";
 
 // Match Hermes: these ES2023 array methods are absent on mobile, and this module runs in
@@ -60,6 +63,48 @@ function link(
     ...input,
   };
 }
+
+function worktreeLink(
+  number: number,
+  input: Partial<Omit<WorktreePullRequestLink, "number" | "projectId" | "worktreePath">> = {},
+): WorktreePullRequestLink {
+  return {
+    ...link(number, input),
+    projectId: ProjectId.make("project-1"),
+    worktreePath: "/tmp/worktree",
+    source: "created",
+    ...input,
+  };
+}
+
+describe("effectiveThreadPullRequests", () => {
+  it("replaces created and stack shadows while retaining manual links", () => {
+    const threadLinks = [
+      link(1, { source: "created" }),
+      link(2, { source: "manual" }),
+      link(3, { source: "stack" }),
+    ];
+    const worktreeLinks = [worktreeLink(1), worktreeLink(3, { source: "stack" })];
+
+    expect(
+      effectiveThreadPullRequests(threadLinks, worktreeLinks, "/tmp/worktree").map(
+        (entry) => `${entry.source}:${entry.number}`,
+      ),
+    ).toEqual(["manual:2", "created:1", "stack:3"]);
+    expect(
+      threadPullRequestsWithoutWorktreeShadows(threadLinks, worktreeLinks, "/tmp/worktree").map(
+        (entry) => `${entry.source}:${entry.number}`,
+      ),
+    ).toEqual(["manual:2"]);
+  });
+
+  it("does not apply a link from another worktree", () => {
+    const threadLinks = [link(1, { source: "created" })];
+    expect(effectiveThreadPullRequests(threadLinks, [worktreeLink(1)], "/tmp/other")).toBe(
+      threadLinks,
+    );
+  });
+});
 
 describe("threadPullRequestKeysEqual", () => {
   it("recovers Forgejo ports from old stored URLs and keeps separate servers distinct", () => {

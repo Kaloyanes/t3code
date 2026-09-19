@@ -98,6 +98,10 @@ export const make = Effect.gen(function* () {
     const snapshot = yield* snapshots.getShellSnapshot();
     const now = DateTime.formatIso(yield* DateTime.now);
     const projects = new Map(snapshot.projects.map((project) => [project.id, project]));
+    const worktreePullRequestFor = (thread: (typeof snapshot.threads)[number]) =>
+      projects
+        .get(thread.projectId)
+        ?.worktreePullRequests?.find((link) => link.worktreePath === thread.worktreePath) ?? null;
     // A merge rechecks all candidates, including branches that discovery has
     // not linked yet. Those lookups can still have cached the PR as open.
     const candidates = snapshot.threads.filter(
@@ -158,7 +162,11 @@ export const make = Effect.gen(function* () {
       },
     ))
       .filter((thread) => thread !== null)
-      .filter((thread) => !thread.pullRequests.some((link) => link.source !== "stack-dismissed"));
+      .filter(
+        (thread) =>
+          worktreePullRequestFor(thread) !== null ||
+          !thread.pullRequests.some((link) => link.source !== "stack-dismissed"),
+      );
 
     // Use the same cwd as PR discovery so both paths share GitManager's cache.
     const lookupCwdByThreadId = new Map<string, string>();
@@ -190,7 +198,8 @@ export const make = Effect.gen(function* () {
       });
     }
     const lookupKey = (thread: (typeof candidates)[number]) => {
-      const reference = thread.linkedPullRequest ?? thread.branchPullRequest;
+      const reference =
+        worktreePullRequestFor(thread) ?? thread.linkedPullRequest ?? thread.branchPullRequest;
       if (reference != null) {
         return JSON.stringify([
           "linked",
@@ -212,7 +221,8 @@ export const make = Effect.gen(function* () {
     const pullRequestFor = Effect.fn("ThreadSettlementReactor.pullRequestFor")(function* (
       thread: (typeof candidates)[number],
     ) {
-      const reference = thread.linkedPullRequest ?? thread.branchPullRequest;
+      const reference =
+        worktreePullRequestFor(thread) ?? thread.linkedPullRequest ?? thread.branchPullRequest;
       if (reference != null) {
         const matchesMerge =
           mergedPullRequest !== null &&
