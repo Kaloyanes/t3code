@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   resolveThreadActionProjectRef,
   resolveScopedThreadActionProjectRef,
+  resolveThreadActionWorkspaceOptions,
   hasExplicitComposerModelSelection,
   resolveNewDraftStartFromOrigin,
   resolveNewThreadModelSelectionOverride,
@@ -167,6 +168,78 @@ describe("chatThreadActions", () => {
     );
 
     expect(projectRef).toEqual(activeProjectRef);
+  });
+
+  it("inherits the active thread worktree for the same project", () => {
+    const targetProjectRef = scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID);
+
+    expect(
+      resolveThreadActionWorkspaceOptions(
+        createContext({
+          activeThread: {
+            environmentId: ENVIRONMENT_ID,
+            projectId: PROJECT_ID,
+            branch: "feature/thread-a",
+            worktreePath: "/repo/.t3/worktrees/thread-a",
+          },
+        }),
+        targetProjectRef,
+      ),
+    ).toEqual({
+      branch: "feature/thread-a",
+      worktreePath: "/repo/.t3/worktrees/thread-a",
+      envMode: "worktree",
+    });
+  });
+
+  it("inherits the active draft worktree for the same project", () => {
+    const targetProjectRef = scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID);
+
+    expect(
+      resolveThreadActionWorkspaceOptions(
+        createContext({
+          activeDraftThread: {
+            environmentId: ENVIRONMENT_ID,
+            projectId: PROJECT_ID,
+            branch: "feature/draft-a",
+            worktreePath: "/repo/.t3/worktrees/draft-a",
+          },
+        }),
+        targetProjectRef,
+      ),
+    ).toEqual({
+      branch: "feature/draft-a",
+      worktreePath: "/repo/.t3/worktrees/draft-a",
+      envMode: "worktree",
+    });
+  });
+
+  it("preserves project defaults for the main checkout and other projects", () => {
+    const activeProjectRef = scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID);
+    const otherProjectRef = scopeProjectRef(ENVIRONMENT_ID, FALLBACK_PROJECT_ID);
+    const context = createContext({
+      activeThread: {
+        environmentId: ENVIRONMENT_ID,
+        projectId: PROJECT_ID,
+        branch: "main",
+        worktreePath: null,
+      },
+    });
+
+    expect(resolveThreadActionWorkspaceOptions(context, activeProjectRef)).toBeNull();
+    expect(
+      resolveThreadActionWorkspaceOptions(
+        createContext({
+          activeThread: {
+            environmentId: ENVIRONMENT_ID,
+            projectId: PROJECT_ID,
+            branch: "feature/thread-a",
+            worktreePath: "/repo/.t3/worktrees/thread-a",
+          },
+        }),
+        otherProjectRef,
+      ),
+    ).toBeNull();
   });
 
   it("inherits only the project from context, never branch or worktree state", async () => {

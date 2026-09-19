@@ -15,6 +15,14 @@ type ComposerModelSelectionState = Pick<
 interface ThreadContextLike {
   environmentId: EnvironmentId;
   projectId: ProjectId;
+  branch?: string | null;
+  worktreePath?: string | null;
+}
+
+export interface ThreadActionWorkspaceOptions {
+  readonly branch: string | null;
+  readonly worktreePath: string;
+  readonly envMode: "worktree";
 }
 
 interface NewThreadHandler {
@@ -100,6 +108,28 @@ export function resolveScopedThreadActionProjectRef(
     return contextualProjectRef;
   }
   return scopedProjectRefs[0] ?? contextualProjectRef;
+}
+
+export function resolveThreadActionWorkspaceOptions(
+  context: ChatThreadActionContext,
+  targetProjectRef: ScopedProjectRef | null,
+): ThreadActionWorkspaceOptions | null {
+  const source = context.activeThread ?? context.activeDraftThread;
+  if (
+    !source ||
+    !targetProjectRef ||
+    source.environmentId !== targetProjectRef.environmentId ||
+    source.projectId !== targetProjectRef.projectId ||
+    source.worktreePath == null
+  ) {
+    return null;
+  }
+
+  return {
+    branch: source.branch ?? null,
+    worktreePath: source.worktreePath,
+    envMode: "worktree",
+  };
 }
 
 // New threads inherit only the *project* from the current context. Branch,

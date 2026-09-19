@@ -8,7 +8,10 @@ import { resolveThreadRouteTarget } from "../threadRoutes";
 import { openCommandPalette } from "../commandPaletteBus";
 import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { selectProjectGroupingSettings } from "../logicalProject";
-import { resolveScopedThreadActionProjectRef } from "../lib/chatThreadActions";
+import {
+  resolveScopedThreadActionProjectRef,
+  resolveThreadActionWorkspaceOptions,
+} from "../lib/chatThreadActions";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { useProjects } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
@@ -68,6 +71,19 @@ function ChatRouteGlobalShortcuts() {
     projects,
     sidebarProjectScopeKey,
   ]);
+  const shortcutWorkspaceOptions = useMemo(
+    () =>
+      resolveThreadActionWorkspaceOptions(
+        {
+          activeDraftThread,
+          activeThread: activeThread ?? undefined,
+          defaultProjectRef,
+          handleNewThread,
+        },
+        shortcutProjectRef,
+      ),
+    [activeDraftThread, activeThread, defaultProjectRef, handleNewThread, shortcutProjectRef],
+  );
 
   const terminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
@@ -108,7 +124,7 @@ function ChatRouteGlobalShortcuts() {
         event.preventDefault();
         event.stopPropagation();
         if (shortcutProjectRef) {
-          void handleNewThread(shortcutProjectRef);
+          void handleNewThread(shortcutProjectRef, shortcutWorkspaceOptions ?? undefined);
         } else {
           openCommandPalette({ open: "new-thread-in" });
         }
@@ -188,6 +204,7 @@ function ChatRouteGlobalShortcuts() {
     routeThreadRef,
     selectedThreadKeysSize,
     shortcutProjectRef,
+    shortcutWorkspaceOptions,
     terminalOpen,
   ]);
 
