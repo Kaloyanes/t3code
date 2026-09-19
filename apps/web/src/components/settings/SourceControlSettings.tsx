@@ -1,7 +1,9 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import {
+  DEFAULT_WORKTREE_BRANCH_NAMING_MODE,
   DEFAULT_WORKTREE_BRANCH_PREFIX,
   WorktreeBranchPrefix,
+  type WorktreeBranchNamingMode,
   type BackgroundActivitySettings,
   type SourceControlProviderKind,
   type SourceControlDiscoveryResult,
@@ -52,6 +54,7 @@ import {
 } from "../ui/number-field";
 import { Switch } from "../ui/switch";
 import { Input } from "../ui/input";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 import {
@@ -436,15 +439,21 @@ function GitFetchIntervalSettings() {
 function WorktreeBranchPrefixSettings() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
-  const mixed = useScopedSettingsMixed(["worktreeBranchPrefix"]);
+  const prefixMixed = useScopedSettingsMixed(["worktreeBranchPrefix"]);
+  const modeMixed = useScopedSettingsMixed(["worktreeBranchNamingMode"]);
+  const mixed = prefixMixed || modeMixed;
   const [draft, setDraft] = useState(mixed ? "" : settings.worktreeBranchPrefix);
+  const [modeDraft, setModeDraft] = useState<WorktreeBranchNamingMode | "">(
+    modeMixed ? "" : settings.worktreeBranchNamingMode,
+  );
   const [invalid, setInvalid] = useState(false);
   const setting = searchableSetting("worktree-branch-prefix");
 
   useEffect(() => {
-    setDraft(mixed ? "" : settings.worktreeBranchPrefix);
+    setDraft(prefixMixed ? "" : settings.worktreeBranchPrefix);
+    setModeDraft(modeMixed ? "" : settings.worktreeBranchNamingMode);
     setInvalid(false);
-  }, [mixed, settings.worktreeBranchPrefix]);
+  }, [modeMixed, prefixMixed, settings.worktreeBranchNamingMode, settings.worktreeBranchPrefix]);
 
   const commit = () => {
     const next = draft.trim();
@@ -461,11 +470,50 @@ function WorktreeBranchPrefixSettings() {
     <SettingsSection title="Worktrees">
       <SettingsRow
         serverScoped
+        settingKeys={["worktreeBranchNamingMode"]}
+        title="branch naming"
+        description={
+          modeMixed || modeDraft === ""
+            ? "Choose how T3 Code names branches created for worktrees."
+            : modeDraft === "conventional"
+              ? "Use prefixes such as feature/, bug/, issue/, or maintenance/ based on the work."
+              : "Keep using the configured T3 Code prefix for generated worktree branches."
+        }
+        control={
+          <div className="w-full sm:w-52">
+            <Select
+              value={modeMixed ? "__mixed__" : modeDraft || DEFAULT_WORKTREE_BRANCH_NAMING_MODE}
+              onValueChange={(value) => {
+                if (value !== "prefix" && value !== "conventional") return;
+                const next = value as WorktreeBranchNamingMode;
+                setModeDraft(next);
+                updateSettings({ worktreeBranchNamingMode: next });
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="Worktree branch naming">
+                <SelectValue>
+                  {modeMixed
+                    ? "Mixed"
+                    : modeDraft === "conventional"
+                      ? "Conventional prefixes"
+                      : "T3 Code prefix"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem value="prefix">T3 Code prefix</SelectItem>
+                <SelectItem value="conventional">Conventional prefixes</SelectItem>
+              </SelectPopup>
+            </Select>
+          </div>
+        }
+      />
+      <SettingsRow
+        serverScoped
         settingKeys={["worktreeBranchPrefix"]}
         {...setting}
-        description={`Prefix for branches created by T3 Code, such as ${mixed ? "custom" : settings.worktreeBranchPrefix}/a1b2c3d4. Existing branches are unchanged.`}
+        description={`Prefix for branches created by T3 Code, such as ${prefixMixed ? "custom" : settings.worktreeBranchPrefix}/a1b2c3d4. Existing branches are unchanged.`}
         resetAction={
-          !mixed && settings.worktreeBranchPrefix !== DEFAULT_WORKTREE_BRANCH_PREFIX ? (
+          !prefixMixed && settings.worktreeBranchPrefix !== DEFAULT_WORKTREE_BRANCH_PREFIX ? (
             <SettingResetButton
               label="worktree branch prefix"
               onClick={() =>
@@ -488,7 +536,7 @@ function WorktreeBranchPrefixSettings() {
                 if (event.key === "Enter") event.currentTarget.blur();
               }}
               maxLength={64}
-              placeholder={mixed ? "Mixed" : DEFAULT_WORKTREE_BRANCH_PREFIX}
+              placeholder={prefixMixed ? "Mixed" : DEFAULT_WORKTREE_BRANCH_PREFIX}
               spellCheck={false}
               autoCapitalize="none"
               aria-label="Worktree branch prefix"
