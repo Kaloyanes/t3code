@@ -481,7 +481,7 @@ function WorktreeBranchPrefixSettings() {
         control={
           <div className="w-full sm:w-52">
             <Select
-              value={modeMixed ? "__mixed__" : modeDraft || DEFAULT_WORKTREE_BRANCH_NAMING_MODE}
+              value={modeMixed ? null : modeDraft || DEFAULT_WORKTREE_BRANCH_NAMING_MODE}
               onValueChange={(value) => {
                 if (value !== "prefix" && value !== "conventional") return;
                 const next = value as WorktreeBranchNamingMode;
