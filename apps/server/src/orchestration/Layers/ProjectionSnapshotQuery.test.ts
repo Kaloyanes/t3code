@@ -81,7 +81,7 @@ it.effect("reads project shells without loading threads or resolving excluded pr
     const counter = makeSqlStatementCounter();
     const projects = yield* query.getProjectShells().pipe(Effect.withTracer(counter.tracer));
     assert.deepStrictEqual(projects, expected);
-    assert.strictEqual(counter.count(), 1);
+    assert.strictEqual(counter.count(), 3);
     assert.deepStrictEqual(resolved.toSorted(), ["/first", "/second"]);
     resolved.length = 0;
     yield* sql`UPDATE projection_projects SET scripts_json = 'invalid-json' WHERE project_id IN ('p1', 'p3')`;
@@ -125,6 +125,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_state`;
       yield* sql`DELETE FROM projection_thread_proposed_plans`;
       yield* sql`DELETE FROM projection_thread_pull_requests`;
+      yield* sql`DELETE FROM projection_issue_links`;
       yield* sql`DELETE FROM projection_turns`;
 
       yield* sql`
@@ -146,6 +147,33 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           '[{"id":"script-1","name":"Build","command":"bun run build","icon":"build","runOnWorktreeCreate":false}]',
           '2026-02-24T00:00:00.000Z',
           '2026-02-24T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_issue_links (
+          thread_id,
+          project_id,
+          host,
+          repository,
+          number,
+          source,
+          linked_at,
+          branch,
+          worktree_path,
+          detached_at
+        )
+        VALUES (
+          'thread-1',
+          'project-1',
+          'github.com',
+          'pingdotgg/t3code',
+          17,
+          'created',
+          '2026-02-24T00:00:02.250Z',
+          'feat/issue-17',
+          '/tmp/project-1-worktree',
           NULL
         )
       `;
@@ -441,6 +469,23 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               runOnWorktreeCreate: false,
             },
           ],
+          worktreePullRequests: [],
+          worktreeIssues: [
+            {
+              issue: {
+                provider: "github",
+                host: "github.com",
+                repository: "pingdotgg/t3code",
+                number: 17,
+              },
+              threadId: ThreadId.make("thread-1"),
+              projectId: asProjectId("project-1"),
+              branch: "feat/issue-17",
+              worktreePath: "/tmp/project-1-worktree",
+              linkedAt: "2026-02-24T00:00:02.250Z",
+              source: "created",
+            },
+          ],
           defaultThreadEnvMode: null,
           createdAt: "2026-02-24T00:00:00.000Z",
           updatedAt: "2026-02-24T00:00:01.000Z",
@@ -566,6 +611,23 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               command: "bun run build",
               icon: "build",
               runOnWorktreeCreate: false,
+            },
+          ],
+          worktreePullRequests: [],
+          worktreeIssues: [
+            {
+              issue: {
+                provider: "github",
+                host: "github.com",
+                repository: "pingdotgg/t3code",
+                number: 17,
+              },
+              threadId: ThreadId.make("thread-1"),
+              projectId: asProjectId("project-1"),
+              branch: "feat/issue-17",
+              worktreePath: "/tmp/project-1-worktree",
+              linkedAt: "2026-02-24T00:00:02.250Z",
+              source: "created",
             },
           ],
           defaultThreadEnvMode: null,
