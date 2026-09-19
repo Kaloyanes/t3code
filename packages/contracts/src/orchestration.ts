@@ -31,6 +31,7 @@ import {
   PullRequestReviewDecision,
   PullRequestState,
 } from "./pullRequest.ts";
+import { IssueLinkedWork } from "./issue.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -551,6 +552,7 @@ export const OrchestrationProject = Schema.Struct({
   worktreePullRequests: Schema.optional(
     Schema.Array(Schema.suspend(() => WorktreePullRequestLink)),
   ),
+  worktreeIssues: Schema.optional(Schema.Array(IssueLinkedWork)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -887,6 +889,7 @@ export const OrchestrationProjectShell = Schema.Struct({
   worktreePullRequests: Schema.optional(
     Schema.Array(Schema.suspend(() => WorktreePullRequestLink)),
   ),
+  worktreeIssues: Schema.optional(Schema.Array(IssueLinkedWork)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
