@@ -72,6 +72,11 @@ const thread: OrchestrationThreadShell = {
   hasActionableProposedPlan: false,
 };
 
+const worktreeThread: OrchestrationThreadShell = {
+  ...thread,
+  worktreePath: "/workspace/project/.worktrees/feature",
+};
+
 function prResult(pr: GitRunStackedActionResult["pr"]): Pick<GitRunStackedActionResult, "pr"> {
   return { pr };
 }
@@ -171,6 +176,46 @@ describe("linkCreatedPullRequest", () => {
         {
           type: "thread.pull-request.link",
           commandId: "server:pr-created-link:test",
+          threadId: THREAD_ID,
+          host: "github.com",
+          repository: "t3tools/t3code",
+          number: 42,
+          url: "https://github.com/t3tools/t3code/pull/42",
+          source: "created",
+        },
+      ]);
+    }),
+  );
+
+  it.effect("links a worktree-scoped PR and keeps a compatibility shadow", () =>
+    Effect.gen(function* () {
+      const { commands, dispatch } = yield* recordingDispatch();
+      yield* linkCreatedPullRequest({
+        threadId: THREAD_ID,
+        result: prResult({
+          status: "created",
+          number: 42,
+          url: "https://github.com/t3tools/t3code/pull/42",
+        }),
+        commandId,
+        createdPullRequestScope: "worktree",
+      }).pipe(Effect.provide(makeDependencies(dispatch, worktreeThread)));
+
+      expect(yield* Ref.get(commands)).toEqual([
+        {
+          type: "project.worktree-pull-request.link",
+          commandId: "server:pr-created-link:test:worktree",
+          projectId: PROJECT_ID,
+          worktreePath: worktreeThread.worktreePath,
+          host: "github.com",
+          repository: "t3tools/t3code",
+          number: 42,
+          url: "https://github.com/t3tools/t3code/pull/42",
+          source: "created",
+        },
+        {
+          type: "thread.pull-request.link",
+          commandId: "server:pr-created-link:test:shadow",
           threadId: THREAD_ID,
           host: "github.com",
           repository: "t3tools/t3code",

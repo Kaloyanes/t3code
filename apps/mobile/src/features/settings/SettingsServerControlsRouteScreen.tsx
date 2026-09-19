@@ -51,7 +51,11 @@ const PAGE_TITLES: Record<SettingsPage, string> = {
 
 const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettingKey[]> = {
   "new-threads": ["defaultThreadEnvMode", "defaultRuntimeMode", "promptEnhancementModelSelection"],
-  "source-control": ["defaultAutoPull", "newWorktreesStartFromOrigin"],
+  "source-control": [
+    "defaultAutoPull",
+    "newWorktreesStartFromOrigin",
+    "completeLinkedIssueOnMerge",
+  ],
   "agent-behavior": ["responseStreamingMode", "enableAgentBrowserAccess"],
   maintenance: ["continueThreadsAfterServerUpdate"],
 };
@@ -180,6 +184,10 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
   const supportsContinuation = targets.every(
     (target) =>
       target.environment.serverConfig.environment.capabilities.threadRestartContinuation === true,
+  );
+  const supportsIssueCompletion = targets.every(
+    (target) =>
+      target.environment.serverConfig.environment.capabilities.issueCompletionOnMerge === true,
   );
   const disabledFor = (key: string) =>
     disabled ||
@@ -396,6 +404,18 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                       onPress={() => write({ worktreeBranchNamingMode: "prefix" })}
                     />
                   </SettingsSection>
+                  {supportsIssueCompletion ? (
+                    <SettingsSection title="Automation">
+                      <FanoutSwitchRow
+                        icon="checkmark.circle"
+                        label="Complete linked issue on merge"
+                        subtitle="Mark the linked issue completed once every pull request for its worktree has merged."
+                        value={uniform("completeLinkedIssueOnMerge")}
+                        disabled={disabledFor("completeLinkedIssueOnMerge")}
+                        onValueChange={(value) => write({ completeLinkedIssueOnMerge: value })}
+                      />
+                    </SettingsSection>
+                  ) : null}
                 </>
               ) : null}
 

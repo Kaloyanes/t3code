@@ -1490,16 +1490,16 @@ export const make = Effect.gen(function* () {
       if (thread === undefined || thread.projectId !== input.projectId) {
         return yield* operationError("link", "Thread does not belong to this project.");
       }
-      return {
-        linkedWork: yield* persistLink(
-          input,
-          repo,
-          input.threadId,
-          thread.branch,
-          thread.worktreePath,
-          input.source ?? "manual",
-        ),
-      };
+      const linkedWork = yield* persistLink(
+        input,
+        repo,
+        input.threadId,
+        thread.branch,
+        thread.worktreePath,
+        input.source ?? "manual",
+      );
+      detailCache.clear();
+      return { linkedWork };
     });
 
   const resolveBaseBranch = (

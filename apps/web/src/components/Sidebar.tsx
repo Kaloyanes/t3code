@@ -1,6 +1,10 @@
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
-import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
+import {
+  effectiveThreadPullRequests,
+  resolveThreadCurrentPullRequestLink,
+  threadPullRequestsWithoutWorktreeShadows,
+} from "@t3tools/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as Schema from "effect/Schema";
@@ -37,11 +41,13 @@ import {
   resolveEnvironmentMachineKind,
   type EnvironmentMachineKind,
   type EnvironmentId,
+  type IssueLinkedWork,
   type ProjectId,
   type ProjectIconOverride,
   type ProjectScript,
   type ScopedThreadRef,
   type ThreadId,
+  type WorktreePullRequestLink,
 } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
@@ -52,6 +58,7 @@ import {
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
+  CircleDotIcon,
   ClockIcon,
   EyeIcon,
   FolderIcon,
@@ -105,6 +112,7 @@ import { isModelPickerOpen } from "../modelPickerVisibility";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { isMacPlatform } from "~/lib/utils";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
+import { issueLinkExternalUrl, useOpenIssueLink } from "../lib/openIssueLink";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { readLocalApi } from "../localApi";
 import {
@@ -232,6 +240,9 @@ import {
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useDiscoveredPortsState } from "../portDiscoveryState";
 import { resolveWorktreeServerPorts } from "../worktreeServerStatus";
+import { worktreeRunEnvironment } from "../state/worktreeRun";
+import { useWorktreeRunConsoleStore } from "../worktreeRunConsoleStore";
+import { resolveProjectScripts } from "@t3tools/shared/projectScripts";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Button } from "./ui/button";
 import {
@@ -248,6 +259,7 @@ import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import {
   composerDraftHasUserContent,
@@ -272,6 +284,8 @@ interface SidebarWorktreeGroup {
   readonly label: string;
   readonly primary: boolean;
   readonly threads: readonly EnvironmentThreadShell[];
+  readonly pullRequests: readonly WorktreePullRequestLink[];
+  readonly issues: readonly IssueLinkedWork[];
 }
 
 interface SidebarRepositoryGroup {
@@ -320,6 +334,20 @@ export function buildSidebarRepositoryGroups(input: {
           )[0]!;
           const member = memberByProjectId.get(newestThread.projectId)!;
           const path = newestThread.worktreePath ?? member.workspaceRoot;
+          const pullRequests = members.flatMap((project) =>
+            (project.worktreePullRequests ?? []).filter(
+              (link) =>
+                normalizeProjectPathForComparison(link.worktreePath ?? project.workspaceRoot) ===
+                normalizedPath,
+            ),
+          );
+          const issues = members.flatMap((project) =>
+            (project.worktreeIssues ?? []).filter(
+              (link) =>
+                normalizeProjectPathForComparison(link.worktreePath ?? project.workspaceRoot) ===
+                normalizedPath,
+            ),
+          );
           const primary = newestThread.worktreePath === null;
           const branches = new Set(
             threads.flatMap((thread) => (thread.branch ? [thread.branch] : [])),
@@ -339,6 +367,8 @@ export function buildSidebarRepositoryGroups(input: {
                 : (branch ?? (primary ? "Current checkout" : fallbackLabel)),
             primary,
             threads,
+            pullRequests,
+            issues,
           };
         })
         .toSorted((left, right) => {
@@ -433,6 +463,7 @@ function SidebarThreadTooltip({
   environmentLabel,
   environmentMachine,
   providerEntry,
+  worktreePullRequests,
   showInstanceBadge,
   modelInstanceId,
   modelLabel,
@@ -446,6 +477,7 @@ function SidebarThreadTooltip({
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
   providerEntry: ProviderInstanceEntry | null;
+  worktreePullRequests: readonly WorktreePullRequestLink[] | undefined;
   showInstanceBadge: boolean;
   modelInstanceId: string;
   modelLabel: string;
@@ -458,6 +490,11 @@ function SidebarThreadTooltip({
 }) {
   const driverKind = providerEntry?.driverKind ?? null;
   const supportsMultiplePullRequests = useSupportsMultiplePullRequests(thread.environmentId);
+  const effectivePullRequests = threadPullRequestsWithoutWorktreeShadows(
+    thread.pullRequests,
+    worktreePullRequests,
+    thread.worktreePath,
+  );
   return (
     <TooltipPopup
       side="right"
@@ -539,9 +576,9 @@ function SidebarThreadTooltip({
             </div>
           ) : null}
         </div>
-        {supportsMultiplePullRequests && thread.pullRequests.length > 0 ? (
+        {supportsMultiplePullRequests && effectivePullRequests.length > 0 ? (
           <div className="border-t border-border/60 pt-2 pl-0.5 text-xs text-muted-foreground">
-            <ThreadPullRequestsMiniList pullRequests={thread.pullRequests} />
+            <ThreadPullRequestsMiniList pullRequests={effectivePullRequests} />
           </div>
         ) : null}
       </div>
@@ -1074,6 +1111,14 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
   readonly threadIds: readonly ThreadId[];
   readonly primary: boolean;
   readonly threadCount: number;
+  readonly pullRequests: readonly WorktreePullRequestLink[];
+  readonly issues: readonly IssueLinkedWork[];
+  readonly threadRef: ScopedThreadRef;
+  readonly isActive: boolean;
+  readonly onThreadActivate: (threadRef: ScopedThreadRef) => void;
+  readonly worktreeRunsSupported: boolean;
+  readonly scripts: readonly ProjectScript[];
+  readonly onRunScript: (script: ProjectScript) => void;
   readonly onCreateThread: () => void;
   readonly onToggle: () => void;
 }) {
@@ -1087,6 +1132,55 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
     serverPorts.length === 1
       ? `Server running on port ${serverPorts[0]}`
       : `Servers running on ports ${serverPorts.join(", ")}`;
+  const openPrLink = useOpenPrLink();
+  const openIssueLink = useOpenIssueLink(props.threadRef);
+  const links = useMemo(
+    () =>
+      props.pullRequests.map(
+        ({ projectId: _projectId, worktreePath: _worktreePath, ...link }) => link,
+      ),
+    [props.pullRequests],
+  );
+  const badge = resolveThreadPullRequestBadge(links);
+  const current = resolveThreadCurrentPullRequestLink(links);
+  const handleAggregateOpen = useCallback(() => {
+    useRightPanelStore.getState().open(props.threadRef, "pull-requests");
+    if (!props.isActive) props.onThreadActivate(props.threadRef);
+  }, [props.isActive, props.onThreadActivate, props.threadRef]);
+  const handleSingleOpen = useCallback(
+    (event: ReactMouseEvent<HTMLAnchorElement>) => {
+      if (current === null) return;
+      const openedInRightPanel = openPrLink(event, current.url, props.threadRef);
+      if (openedInRightPanel && !props.isActive) props.onThreadActivate(props.threadRef);
+    },
+    [current, openPrLink, props.isActive, props.onThreadActivate, props.threadRef],
+  );
+  const handleIssueOpen = useCallback(
+    (event: ReactMouseEvent<HTMLAnchorElement>, issue: IssueLinkedWork) => {
+      const openedInRightPanel = openIssueLink(
+        event,
+        issueLinkExternalUrl(issue.issue),
+        props.environmentId,
+      );
+      if (openedInRightPanel && !props.isActive) props.onThreadActivate(props.threadRef);
+    },
+    [openIssueLink, props.environmentId, props.isActive, props.onThreadActivate, props.threadRef],
+  );
+  const metadata = useEnvironmentQuery(
+    props.worktreeRunsSupported
+      ? worktreeRunEnvironment.metadata({ environmentId: props.environmentId, input: null })
+      : null,
+  );
+  const runningScriptIds = new Set(
+    (metadata.data ?? [])
+      .filter(
+        (run) =>
+          run.target.projectId === props.projectId &&
+          run.target.workspacePath === props.path &&
+          (run.status === "running" || run.status === "starting"),
+      )
+      .map((run) => run.target.scriptId),
+  );
   return (
     <li className="group flex h-8 list-none items-center gap-0.5 ps-3">
       <Tooltip>
@@ -1147,6 +1241,70 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
           </div>
         </TooltipPopup>
       </Tooltip>
+      {badge !== null && current !== null ? (
+        <ThreadPullRequestBadgeControl
+          variant="underline"
+          badge={badge}
+          number={current.number}
+          url={current.url}
+          status={null}
+          onOpenStack={handleAggregateOpen}
+          onOpenPullRequest={handleSingleOpen}
+          openAggregate={links.length > 1}
+        />
+      ) : null}
+      {props.issues.map((issue) => {
+        const url = issueLinkExternalUrl(issue.issue);
+        const label = `GitHub issue #${issue.issue.number} · ${issue.issue.repository}`;
+        return (
+          <Tooltip key={`${issue.issue.host}/${issue.issue.repository}#${issue.issue.number}`}>
+            <TooltipTrigger
+              render={
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={label}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => handleIssueOpen(event, issue)}
+                  className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 whitespace-nowrap border-b border-transparent text-xs tabular-nums text-emerald-600 hover:border-current hover:text-emerald-700 focus-visible:outline-2 focus-visible:outline-ring dark:text-emerald-400 dark:hover:text-emerald-300"
+                />
+              }
+            >
+              <CircleDotIcon aria-hidden className="size-3 shrink-0" />#{issue.issue.number}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{label}</TooltipPopup>
+          </Tooltip>
+        );
+      })}
+      {props.scripts.length > 0 ? (
+        <Menu>
+          <MenuTrigger
+            render={
+              <button
+                type="button"
+                aria-label={`Run action in ${props.label}`}
+                className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+              />
+            }
+          >
+            <TerminalIcon aria-hidden className="size-3.5" />
+            {runningScriptIds.size > 0 ? (
+              <span className="absolute size-1.5 translate-x-2 -translate-y-2 rounded-full bg-emerald-500" />
+            ) : null}
+          </MenuTrigger>
+          <MenuPopup align="end">
+            {props.scripts.map((script) => (
+              <MenuItem key={script.id} onClick={() => props.onRunScript(script)}>
+                <TerminalIcon
+                  className={cn("size-3.5", runningScriptIds.has(script.id) && "text-emerald-500")}
+                />
+                {script.name}
+              </MenuItem>
+            ))}
+          </MenuPopup>
+        </Menu>
+      ) : null}
       <Tooltip>
         <TooltipTrigger
           render={
@@ -1318,11 +1476,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   );
 
   const gitCwd = thread.worktreePath ?? props.project?.workspaceRoot ?? null;
+  const effectivePullRequests = useMemo(
+    () =>
+      threadPullRequestsWithoutWorktreeShadows(
+        thread.pullRequests,
+        props.project?.worktreePullRequests,
+        thread.worktreePath,
+      ),
+    [props.project?.worktreePullRequests, thread.pullRequests, thread.worktreePath],
+  );
   const linkedPullRequestStatus = useLinkedThreadPullRequest(
     thread.environmentId,
     thread.linkedPullRequest,
     leaseLiveStatus,
-    thread.pullRequests,
+    effectivePullRequests,
     thread.branchPullRequest,
   );
   const gitStatus = useEnvironmentQuery(
@@ -1340,7 +1507,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const pr = linkedPullRequestStatus?.pr ?? null;
   const supportsMultiplePullRequests = useSupportsMultiplePullRequests(thread.environmentId);
   const currentLinkedPr = supportsMultiplePullRequests
-    ? resolveThreadCurrentPullRequestLink(thread.pullRequests)
+    ? resolveThreadCurrentPullRequestLink(effectivePullRequests)
     : null;
 
   // Same semantics as the legacy sidebar (never-visited counts as read):
@@ -1458,6 +1625,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       environmentLabel={props.environmentLabel}
       environmentMachine={props.environmentMachine}
       providerEntry={providerEntry}
+      worktreePullRequests={props.project?.worktreePullRequests}
       showInstanceBadge={showInstanceBadge}
       modelInstanceId={modelInstanceId}
       modelLabel={modelLabel}
@@ -1739,7 +1907,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // Stacks show their layer count; multiple unrelated links show their total count.
   // Plain clicks open T3; individual PR links also support opening the host in a new tab.
   const prBadgeShape = supportsMultiplePullRequests
-    ? resolveThreadPullRequestBadge(thread.pullRequests)
+    ? resolveThreadPullRequestBadge(effectivePullRequests)
     : null;
   const handlePrStackClick = useCallback(() => {
     useRightPanelStore.getState().open(threadRef, "pull-requests");
@@ -2389,6 +2557,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
           environmentLabel={props.environmentLabel}
           environmentMachine={props.environmentMachine}
           providerEntry={providerEntry}
+          worktreePullRequests={props.project?.worktreePullRequests}
           showInstanceBadge={showInstanceBadge}
           modelInstanceId={modelInstanceId}
           modelLabel={modelLabel}
@@ -2433,6 +2602,10 @@ export default function Sidebar() {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
+  const startWorktreeRun = useAtomCommand(worktreeRunEnvironment.start, {
+    reportFailure: false,
+  });
+  const openWorktreeRunConsole = useWorktreeRunConsoleStore((state) => state.open);
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) => {
       toastManager.add({
@@ -5133,7 +5306,21 @@ export default function Sidebar() {
                             />,
                           );
                           for (const worktree of repository.worktrees) {
-                            const contextThread = worktree.threads[0]!;
+                            const worktreeThread = worktree.threads[0]!;
+                            const project = projects.find(
+                              (candidate) =>
+                                candidate.environmentId === worktreeThread.environmentId &&
+                                candidate.id === worktreeThread.projectId,
+                            );
+                            const config = serverConfigs.get(worktreeThread.environmentId);
+                            const worktreeRunsSupported =
+                              config?.environment.capabilities.worktreeRuns === true;
+                            const worktreeScripts =
+                              project && worktreeRunsSupported
+                                ? resolveProjectScripts(config.settings, project).filter(
+                                    (script) => script.scope === "worktree",
+                                  )
+                                : [];
                             const containsRoute = worktree.threads.some(
                               (thread) =>
                                 scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) ===
@@ -5150,6 +5337,21 @@ export default function Sidebar() {
                                 lastVisitedAt: threadLastVisitedAtById[key],
                               });
                             });
+                            const contextThread =
+                              worktree.threads.find(
+                                (thread) =>
+                                  scopedThreadKey(
+                                    scopeThreadRef(thread.environmentId, thread.id),
+                                  ) === routeThreadKey,
+                              ) ??
+                              worktree.threads.toSorted(
+                                (left, right) =>
+                                  firstValidTimestampMs(
+                                    right.latestUserMessageAt,
+                                    right.updatedAt,
+                                  ) -
+                                  firstValidTimestampMs(left.latestUserMessageAt, left.updatedAt),
+                              )[0]!;
                             items.push(
                               <SidebarWorktreeHeader
                                 key={`worktree:${worktree.key}`}
@@ -5162,6 +5364,55 @@ export default function Sidebar() {
                                 threadIds={worktree.threads.map((thread) => thread.id)}
                                 primary={worktree.primary}
                                 threadCount={worktree.threads.length}
+                                pullRequests={worktree.pullRequests}
+                                issues={worktree.issues}
+                                threadRef={scopeThreadRef(
+                                  contextThread.environmentId,
+                                  contextThread.id,
+                                )}
+                                isActive={
+                                  routeThreadKey ===
+                                  scopedThreadKey(
+                                    scopeThreadRef(contextThread.environmentId, contextThread.id),
+                                  )
+                                }
+                                onThreadActivate={navigateToThread}
+                                worktreeRunsSupported={worktreeRunsSupported}
+                                scripts={worktreeScripts}
+                                onRunScript={(script) => {
+                                  void startWorktreeRun({
+                                    environmentId: contextThread.environmentId,
+                                    input: {
+                                      projectId: contextThread.projectId,
+                                      workspacePath: worktree.path,
+                                      scriptId: script.id,
+                                    },
+                                  }).then((result) => {
+                                    if (
+                                      result._tag === "Failure" &&
+                                      !isAtomCommandInterrupted(result)
+                                    ) {
+                                      const error = squashAtomCommandFailure(result);
+                                      toastManager.add({
+                                        type: "error",
+                                        title: `Could not run ${script.name}`,
+                                        description:
+                                          error instanceof Error ? error.message : String(error),
+                                      });
+                                      return;
+                                    }
+                                    if (result._tag === "Success") {
+                                      openWorktreeRunConsole({
+                                        environmentId: contextThread.environmentId,
+                                        target: {
+                                          projectId: contextThread.projectId,
+                                          workspacePath: worktree.path,
+                                          scriptId: script.id,
+                                        },
+                                      });
+                                    }
+                                  });
+                                }}
                                 onCreateThread={() => {
                                   void handleNewThreadRef.current(
                                     scopeProjectRef(

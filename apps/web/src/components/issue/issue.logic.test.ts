@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   issueDeletePreflightSummary,
   issueLabelForeground,
+  issueWorktreeIsLinked,
   normalizeIssueLabelColor,
   selectIssueWorktreeAction,
 } from "./issue.logic";
@@ -50,6 +51,44 @@ describe("selectIssueWorktreeAction", () => {
       "replace",
     );
     expect(selectIssueWorktreeAction({ linkedWork: null })).toBe("create");
+  });
+});
+
+describe("issueWorktreeIsLinked", () => {
+  const linkedWork = {
+    issue: {
+      provider: "github" as const,
+      host: "github.com",
+      repository: "t3tools/t3code",
+      number: 42,
+    },
+    threadId: ThreadId.make("linked-thread"),
+    projectId: ProjectId.make("project-1"),
+    branch: "feature/issue-42",
+    worktreePath: "/worktrees/issue-42/",
+    linkedAt: "2026-09-19T00:00:00.000Z",
+    source: "created" as const,
+  };
+
+  it("recognizes the linked thread and other threads in the same worktree", () => {
+    expect(
+      issueWorktreeIsLinked({ id: "linked-thread", worktreePath: "/stale/path" }, linkedWork),
+    ).toBe(true);
+    expect(
+      issueWorktreeIsLinked(
+        { id: "newer-thread", worktreePath: "/worktrees/issue-42" },
+        linkedWork,
+      ),
+    ).toBe(true);
+  });
+
+  it("does not mark a different or detached worktree as linked", () => {
+    expect(
+      issueWorktreeIsLinked({ id: "other-thread", worktreePath: "/worktrees/other" }, linkedWork),
+    ).toBe(false);
+    expect(issueWorktreeIsLinked({ id: "other-thread", worktreePath: null }, linkedWork)).toBe(
+      false,
+    );
   });
 });
 

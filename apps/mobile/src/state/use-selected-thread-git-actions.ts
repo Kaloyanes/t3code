@@ -16,6 +16,7 @@ import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 
 import { useBranches } from "../state/queries";
+import { useServerConfigs } from "../state/entities";
 import { threadEnvironment } from "../state/threads";
 import { vcsActionManager, vcsEnvironment } from "../state/vcs";
 import { uuidv4 } from "../lib/uuid";
@@ -36,6 +37,7 @@ export function useSelectedThreadGitActions() {
   const createWorktree = useAtomCommand(vcsEnvironment.createWorktree, { reportFailure: false });
   const pull = useAtomCommand(vcsEnvironment.pull, { reportFailure: false });
   const { selectedThread, selectedThreadProject } = useThreadSelection();
+  const serverConfigs = useServerConfigs();
   const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
   const runStackedAction = useAtomCommand(
     vcsActionManager.runStackedAction({
@@ -332,6 +334,10 @@ export function useSelectedThreadGitActions() {
             ...(input.filePaths?.length ? { filePaths: [...input.filePaths] } : {}),
             // A pull request the action opens is linked to the thread it ran beside.
             threadId: thread.id,
+            ...(serverConfigs.get(thread.environmentId)?.environment.capabilities
+              .worktreePullRequests === true
+              ? { createdPullRequestScope: "worktree" as const }
+              : {}),
           });
           if (AsyncResult.isFailure(result)) {
             return result;
@@ -369,6 +375,7 @@ export function useSelectedThreadGitActions() {
       runStackedAction,
       refreshSelectedThreadGitStatus,
       runSelectedThreadGitMutation,
+      serverConfigs,
       selectedThreadWorktreePath,
       syncSelectedThreadBranchState,
     ],

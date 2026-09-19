@@ -1657,3 +1657,49 @@ it.effect("encodes compatible icons inside snapshots and client commands", () =>
     assert.deepEqual(yield* decodeNightlyIcon(command.projectIcon), fallback);
   }),
 );
+
+it.effect("decodes optional worktree issue links for shell compatibility", () =>
+  Effect.gen(function* () {
+    const issue = {
+      issue: {
+        provider: "github" as const,
+        host: "github.com",
+        repository: "acme/repo",
+        number: 42,
+      },
+      threadId: ThreadId.make("thread-1"),
+      projectId: ProjectId.make("project-1"),
+      branch: "t3code/42-fix",
+      worktreePath: "/tmp/worktrees/42-fix",
+      linkedAt: "2026-01-01T00:00:00.000Z",
+      source: "created" as const,
+    };
+    const encoded = yield* encodeProjectShell({
+      id: ProjectId.make("project-1"),
+      title: "Repo",
+      workspaceRoot: "/tmp/repo",
+      defaultModelSelection: null,
+      scripts: [],
+      worktreeIssues: [issue],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.deepEqual(
+      (yield* Schema.decodeUnknownEffect(OrchestrationProjectShell)(encoded)).worktreeIssues,
+      [issue],
+    );
+    assert.deepEqual(
+      (yield* Schema.decodeUnknownEffect(OrchestrationProjectShell)({
+        id: "project-1",
+        title: "Repo",
+        workspaceRoot: "/tmp/repo",
+        defaultModelSelection: null,
+        scripts: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      })).worktreeIssues,
+      undefined,
+    );
+  }),
+);

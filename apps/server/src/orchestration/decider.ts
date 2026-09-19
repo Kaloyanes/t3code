@@ -13,6 +13,7 @@ import {
   type ThreadPullRequestKey,
   type ThreadPullRequestLink,
   type OrchestrationThreadActivity,
+  type WorktreePullRequestLink,
 } from "@t3tools/contracts";
 import {
   legacyLinkedPullRequestOf,
@@ -136,6 +137,24 @@ function findPullRequestLink(
   key: ThreadPullRequestKey,
 ): ThreadPullRequestLink | undefined {
   return thread.pullRequests.find((link) => threadPullRequestKeysEqual(link, key));
+}
+
+function findWorktreePullRequestLink(
+  project: Pick<OrchestrationReadModel["projects"][number], "worktreePullRequests">,
+  worktreePath: string | null,
+  key: ThreadPullRequestKey,
+): WorktreePullRequestLink | undefined {
+  return (project.worktreePullRequests ?? []).find(
+    (link) => link.worktreePath === worktreePath && threadPullRequestKeysEqual(link, key),
+  );
+}
+
+function worktreePullRequestKeyMatches(
+  link: WorktreePullRequestLink,
+  worktreePath: string | null,
+  key: ThreadPullRequestKey,
+): boolean {
+  return link.worktreePath === worktreePath && threadPullRequestKeysEqual(link, key);
 }
 
 function withEventBase(
@@ -322,6 +341,164 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: occurredAt,
         },
       };
+    }
+
+    case "project.worktree-pull-request.link": {
+      const project = yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      const key = normalizeThreadPullRequestKey(command);
+      if (findWorktreePullRequestLink(project, command.worktreePath, key) !== undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `pull request ${key.host}/${key.repository}#${key.number} is already linked to worktree`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      const link: WorktreePullRequestLink = {
+        projectId: command.projectId,
+        worktreePath: command.worktreePath,
+        ...key,
+        url: command.url,
+        source: command.source,
+        linkedAt: occurredAt,
+        snapshot: null,
+        stack: null,
+      };
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "project.meta-updated",
+        payload: {
+          projectId: command.projectId,
+          worktreePullRequests: [...(project.worktreePullRequests ?? []), link],
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "project.worktree-pull-request-link.sync": {
+      const project = yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      const key = normalizeThreadPullRequestKey(command);
+      const existing = findWorktreePullRequestLink(project, command.worktreePath, key);
+      if (existing === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `pull request ${key.host}/${key.repository}#${key.number} is not linked to worktree`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      const worktreePullRequests = (project.worktreePullRequests ?? []).map((link) =>
+        worktreePullRequestKeyMatches(link, command.worktreePath, key)
+          ? { ...link, snapshot: command.snapshot, stack: command.stack }
+          : link,
+      );
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "project.meta-updated",
+        payload: {
+          projectId: command.projectId,
+          worktreePullRequests,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "project.worktree-pull-request.unlink": {
+      const project = yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      const key = normalizeThreadPullRequestKey(command);
+      if (findWorktreePullRequestLink(project, command.worktreePath, key) === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `pull request ${key.host}/${key.repository} is not linked to worktree`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      const projectEvent: PlannedOrchestrationEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "project.meta-updated",
+        payload: {
+          projectId: command.projectId,
+          worktreePullRequests: (project.worktreePullRequests ?? []).filter(
+            (link) => !worktreePullRequestKeyMatches(link, command.worktreePath, key),
+          ),
+          updatedAt: occurredAt,
+        },
+      };
+      const compatibilityEvents: PlannedOrchestrationEvent[] = [];
+      for (const thread of listThreadsByProjectId(readModel, command.projectId)) {
+        if (thread.deletedAt !== null || thread.worktreePath !== command.worktreePath) continue;
+        for (const existing of thread.pullRequests) {
+          if (
+            (existing.source !== "created" && existing.source !== "stack") ||
+            !threadPullRequestKeysEqual(existing, key)
+          ) {
+            continue;
+          }
+          const belongsToStack =
+            existing.source === "stack" ||
+            existing.stack !== null ||
+            thread.pullRequests.some(
+              (link) =>
+                threadPullRequestKeysEqual(link, key) &&
+                link.stack?.layers.some((layer) => layer.number === key.number),
+            );
+          const eventBase = yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: thread.id,
+            occurredAt,
+            commandId: command.commandId,
+          });
+          compatibilityEvents.push(
+            belongsToStack
+              ? {
+                  ...eventBase,
+                  type: "thread.pull-request-linked",
+                  payload: {
+                    threadId: thread.id,
+                    link: { ...existing, source: "stack-dismissed" },
+                    updatedAt: occurredAt,
+                  },
+                }
+              : {
+                  ...eventBase,
+                  type: "thread.pull-request-unlinked",
+                  payload: {
+                    threadId: thread.id,
+                    ...key,
+                    updatedAt: occurredAt,
+                  },
+                },
+          );
+        }
+      }
+      return compatibilityEvents.length === 0
+        ? projectEvent
+        : [projectEvent, ...compatibilityEvents];
     }
 
     case "project.delete": {

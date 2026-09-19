@@ -211,7 +211,8 @@ import {
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
 import { IssueDetailPanel } from "./issue/IssueDetailPanel";
-import { useOpenIssueLink } from "~/lib/openIssueLink";
+import { issueLinkExternalUrl } from "~/lib/openIssueLink";
+import { findWorktreeIssue } from "~/lib/worktreeIssues";
 import { pullRequestPanelContext } from "./pullRequest/pullRequestDetail.logic";
 import { PullRequestDetailPanel } from "./pullRequest/PullRequestDetailPanel";
 import { PullRequestDetailGhost } from "./pullRequest/PullRequestGhosts";
@@ -3822,6 +3823,17 @@ export default function ChatView(props: ChatViewProps) {
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
+  const linkedWorktreeIssue = useMemo(
+    () =>
+      activeProject && activeWorkspaceRoot
+        ? findWorktreeIssue({
+            issues: activeProject.worktreeIssues ?? [],
+            workspacePath: activeWorkspaceRoot,
+            projectRoot: activeProject.workspaceRoot,
+          })
+        : null,
+    [activeProject, activeWorkspaceRoot],
+  );
   useLayoutEffect(() => {
     if (
       threadDetailLoading ||
@@ -4705,6 +4717,17 @@ export default function ChatView(props: ChatViewProps) {
     if (!activeThreadRef || !pullRequestsSurfaceAvailable) return;
     useRightPanelStore.getState().open(activeThreadRef, "pull-requests");
   }, [activeThreadRef, pullRequestsSurfaceAvailable]);
+  const linkedIssueSurfaceAvailable = isServerThread && linkedWorktreeIssue !== null;
+  const addLinkedIssueSurface = useCallback(() => {
+    if (!activeThreadRef || !linkedWorktreeIssue) return;
+    useRightPanelStore.getState().openIssue(activeThreadRef, {
+      projectId: linkedWorktreeIssue.projectId,
+      host: linkedWorktreeIssue.issue.host,
+      repository: linkedWorktreeIssue.issue.repository,
+      number: linkedWorktreeIssue.issue.number,
+      url: issueLinkExternalUrl(linkedWorktreeIssue.issue),
+    });
+  }, [activeThreadRef, linkedWorktreeIssue]);
   const { state: deviceState, loaded: deviceStateLoaded } = useDeviceState(
     activeThreadRef?.environmentId ?? null,
   );
@@ -10486,6 +10509,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddFiles={addFilesSurface}
           onAddPullRequest={addPullRequestSurface}
           onAddPullRequests={addPullRequestsSurface}
+          onAddIssue={addLinkedIssueSurface}
           onAddAgents={addAgentsSurface}
           onAddDevice={addDeviceSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
@@ -10494,6 +10518,7 @@ export default function ChatView(props: ChatViewProps) {
           filesAvailable={activeProject !== null}
           pullRequestAvailable={pullRequestSurfaceAvailable}
           pullRequestsAvailable={pullRequestsSurfaceAvailable}
+          issueAvailable={linkedIssueSurfaceAvailable}
           agentsAvailable
           deviceAvailable={activeThreadRef !== null}
           liveAgentCount={agentPanelModel.liveCount}
@@ -10544,6 +10569,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddFiles={addFilesSurface}
             onAddPullRequest={addPullRequestSurface}
             onAddPullRequests={addPullRequestsSurface}
+            onAddIssue={addLinkedIssueSurface}
             onAddAgents={addAgentsSurface}
             onAddDevice={addDeviceSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
@@ -10552,6 +10578,7 @@ export default function ChatView(props: ChatViewProps) {
             filesAvailable={activeProject !== null}
             pullRequestAvailable={pullRequestSurfaceAvailable}
             pullRequestsAvailable={pullRequestsSurfaceAvailable}
+            issueAvailable={linkedIssueSurfaceAvailable}
             agentsAvailable
             deviceAvailable={activeThreadRef !== null}
             liveAgentCount={agentPanelModel.liveCount}

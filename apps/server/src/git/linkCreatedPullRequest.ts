@@ -1,6 +1,6 @@
 import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import {
-  type CommandId,
+  CommandId,
   pullRequestHostOf,
   type GitRunStackedActionResult,
   type OrchestrationProjectShell,
@@ -61,6 +61,7 @@ export const linkCreatedPullRequest = <E>(input: {
   readonly threadId: ThreadId;
   readonly result: Pick<GitRunStackedActionResult, "pr">;
   readonly commandId: Effect.Effect<CommandId, E>;
+  readonly createdPullRequestScope?: "thread" | "worktree";
 }): Effect.Effect<
   void,
   never,
@@ -77,15 +78,38 @@ export const linkCreatedPullRequest = <E>(input: {
     const key = createdPullRequestKey(input.result, project);
     if (key === null) return;
     const commandId = yield* input.commandId;
-    yield* engine
-      .dispatch({
-        type: "thread.pull-request.link",
-        commandId,
-        threadId: input.threadId,
-        ...key,
-        source: "created",
-      })
-      .pipe(Effect.catchTags({ OrchestrationCommandInvariantError: () => Effect.void }));
+    if (input.createdPullRequestScope === "worktree") {
+      yield* engine
+        .dispatch({
+          type: "project.worktree-pull-request.link",
+          commandId: CommandId.make(`${commandId}:worktree`),
+          projectId: thread.value.projectId,
+          worktreePath: thread.value.worktreePath,
+          ...key,
+          source: "created",
+        })
+        .pipe(Effect.catchTags({ OrchestrationCommandInvariantError: () => Effect.void }));
+      // Keep the originating thread row as a compatibility shadow for older clients.
+      yield* engine
+        .dispatch({
+          type: "thread.pull-request.link",
+          commandId: CommandId.make(`${commandId}:shadow`),
+          threadId: input.threadId,
+          ...key,
+          source: "created",
+        })
+        .pipe(Effect.catchTags({ OrchestrationCommandInvariantError: () => Effect.void }));
+    } else {
+      yield* engine
+        .dispatch({
+          type: "thread.pull-request.link",
+          commandId,
+          threadId: input.threadId,
+          ...key,
+          source: "created",
+        })
+        .pipe(Effect.catchTags({ OrchestrationCommandInvariantError: () => Effect.void }));
+    }
   }).pipe(
     Effect.withSpan("linkCreatedPullRequest"),
     Effect.catchCause((cause) =>

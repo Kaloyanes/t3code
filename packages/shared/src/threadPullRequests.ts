@@ -4,6 +4,7 @@ import type {
   ThreadLinkedPullRequest,
   ThreadPullRequestKey,
   ThreadPullRequestLink,
+  WorktreePullRequestLink,
 } from "@t3tools/contracts";
 
 import { pullRequestHostOf } from "@t3tools/contracts";
@@ -82,6 +83,49 @@ export function visibleThreadPullRequests(
   links: ReadonlyArray<ThreadPullRequestLink>,
 ): ReadonlyArray<ThreadPullRequestLink> {
   return links.filter((link) => link.source !== "stack-dismissed");
+}
+
+/** Merge a thread's manual/agent links with the created links owned by its worktree. */
+export function effectiveThreadPullRequests(
+  threadLinks: ReadonlyArray<ThreadPullRequestLink>,
+  worktreeLinks: ReadonlyArray<WorktreePullRequestLink> | undefined,
+  worktreePath: string | null,
+): ReadonlyArray<ThreadPullRequestLink> {
+  const matchingWorktreeLinks = (worktreeLinks ?? []).filter(
+    (link) => link.worktreePath === worktreePath,
+  );
+  if (matchingWorktreeLinks.length === 0) return threadLinks;
+  const threadLinksWithoutShadows = threadPullRequestsWithoutWorktreeShadows(
+    threadLinks,
+    worktreeLinks,
+    worktreePath,
+  );
+  return [
+    ...threadLinksWithoutShadows,
+    ...matchingWorktreeLinks.map(
+      ({ projectId: _projectId, worktreePath: _worktreePath, ...link }) => link,
+    ),
+  ];
+}
+
+/** Thread-row views keep manual and agent links without rendering worktree shadows twice. */
+export function threadPullRequestsWithoutWorktreeShadows(
+  threadLinks: ReadonlyArray<ThreadPullRequestLink>,
+  worktreeLinks: ReadonlyArray<WorktreePullRequestLink> | undefined,
+  worktreePath: string | null,
+): ReadonlyArray<ThreadPullRequestLink> {
+  const worktreeKeys = new Set(
+    (worktreeLinks ?? [])
+      .filter((link) => link.worktreePath === worktreePath)
+      .map(threadPullRequestKeyOf),
+  );
+  return threadLinks.filter(
+    (link) =>
+      !(
+        (link.source === "created" || link.source === "stack") &&
+        worktreeKeys.has(threadPullRequestKeyOf(link))
+      ),
+  );
 }
 
 function isOpen(link: ThreadPullRequestLink): boolean {

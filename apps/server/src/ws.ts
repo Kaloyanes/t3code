@@ -3452,6 +3452,9 @@ const makeWsRpcLayer = (
                             threadId: input.threadId,
                             result,
                             commandId: serverCommandId("pr-created-link"),
+                            ...(input.createdPullRequestScope === undefined
+                              ? {}
+                              : { createdPullRequestScope: input.createdPullRequestScope }),
                           }).pipe(
                             Effect.provideService(
                               OrchestrationEngine.OrchestrationEngineService,

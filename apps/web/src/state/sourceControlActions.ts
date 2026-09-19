@@ -28,6 +28,7 @@ import { useEnvironmentQuery } from "./query";
 import { sourceControlEnvironment } from "./sourceControl";
 import { useAtomCommand } from "./use-atom-command";
 import { vcsActionManager, vcsEnvironment } from "./vcs";
+import { useServerConfigs } from "./entities";
 
 export type SourceControlActionKind =
   | "init"
@@ -210,6 +211,12 @@ export function useGitStackedAction(scope: SourceControlActionScope) {
         })
       : null,
   );
+  const serverConfigs = useServerConfigs();
+  const createdPullRequestScope =
+    scope.environmentId !== null &&
+    serverConfigs.get(scope.environmentId)?.environment.capabilities.worktreePullRequests === true
+      ? ("worktree" as const)
+      : undefined;
 
   const action = useCallback(
     async (input: {
@@ -219,6 +226,7 @@ export function useGitStackedAction(scope: SourceControlActionScope) {
       featureBranch?: boolean;
       filePaths?: string[];
       threadId?: ThreadId;
+      createdPullRequestScope?: "thread" | "worktree";
       onProgress?: (event: GitActionProgressEvent) => void;
     }) => {
       if (resolveScope(scope) === null) {
@@ -239,10 +247,15 @@ export function useGitStackedAction(scope: SourceControlActionScope) {
         ...(input.featureBranch ? { featureBranch: true } : {}),
         ...(input.filePaths?.length ? { filePaths: input.filePaths } : {}),
         ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
+        ...(input.createdPullRequestScope !== undefined
+          ? { createdPullRequestScope: input.createdPullRequestScope }
+          : createdPullRequestScope !== undefined
+            ? { createdPullRequestScope }
+            : {}),
         ...(input.onProgress ? { onProgress: input.onProgress } : {}),
       });
     },
-    [runStackedAction, scope],
+    [createdPullRequestScope, runStackedAction, scope],
   );
 
   return useAction({

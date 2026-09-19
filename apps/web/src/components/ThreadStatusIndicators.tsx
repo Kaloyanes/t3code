@@ -191,6 +191,7 @@ export function ThreadPullRequestBadgeControl({
   status,
   onOpenStack,
   onOpenPullRequest,
+  openAggregate = false,
 }: {
   variant: "underline" | "ghost";
   badge: ThreadPullRequestBadge | null;
@@ -199,10 +200,11 @@ export function ThreadPullRequestBadgeControl({
   status: PrStatusIndicator | null;
   onOpenStack: () => void;
   onOpenPullRequest: (event: MouseEvent<HTMLAnchorElement>) => void;
+  openAggregate?: boolean;
 }) {
   const presentation = resolveThreadPullRequestBadgePresentation({ badge, number, url, status });
   if (presentation === null) return null;
-  const isStack = badge?.kind === "stack";
+  const isStack = badge?.kind === "stack" || openAggregate;
   const className = cn(
     variant === "ghost"
       ? buttonVariants({ variant: "ghost", size: "xs" })

@@ -14,6 +14,7 @@ import {
   type PullRequestSummary,
   type ServerSettings,
   type ServerSettingsPatch,
+  type WorktreePullRequestLink,
 } from "@t3tools/contracts";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import { assert, describe, it } from "@effect/vitest";
@@ -69,6 +70,7 @@ const testCrypto = Crypto.make({
 function makeProject(
   id: ProjectId = PROJECT_ID,
   workspaceRoot = "/workspace/project",
+  overrides: Partial<OrchestrationProjectShell> = {},
 ): OrchestrationProjectShell {
   return {
     id,
@@ -78,6 +80,7 @@ function makeProject(
     scripts: [],
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: NOW,
+    ...overrides,
   };
 }
 
@@ -474,6 +477,72 @@ describe("ThreadSettlementReactor", () => {
           }).pipe(Effect.provide(fixture.layer));
         }),
       ),
+  );
+  it.effect("settles every inactive thread sharing a worktree PR", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const worktreePullRequest: WorktreePullRequestLink = {
+          projectId: PROJECT_ID,
+          worktreePath: "/tmp/worktree",
+          host: "github.com",
+          repository: "owner/repository",
+          number: 42,
+          url: "https://github.com/owner/repository/pull/42",
+          source: "created",
+          linkedAt: NOW,
+          snapshot: null,
+          stack: null,
+        };
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot(
+            [
+              makeThread("first", {
+                worktreePath: "/tmp/worktree",
+                latestUserMessageAt: "2026-08-27T00:00:00.000Z",
+              }),
+              makeThread("second", {
+                worktreePath: "/tmp/worktree",
+                latestUserMessageAt: "2026-08-27T00:00:00.000Z",
+              }),
+            ],
+            [
+              makeProject(PROJECT_ID, "/workspace/project", {
+                worktreePullRequests: [worktreePullRequest],
+              }),
+            ],
+          ),
+          settings: {
+            ...DEFAULT_SERVER_SETTINGS,
+            sidebarAutoSettleAfterDays: 4,
+            sidebarAutoSettleOnMerge: true,
+          },
+          pullRequestSummary: () =>
+            Effect.succeed(
+              makePullRequestSummary({
+                projectId: PROJECT_ID,
+                repository: "owner/repository",
+                number: 42,
+                state: "merged",
+                updatedAt: NOW,
+              }),
+            ),
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* ThreadSettlementReactor.ThreadSettlementReactor;
+          yield* startHarness(reactor, fixture.activation, fixture.snapshotReads);
+          const settled = (yield* Ref.get(fixture.commands)).map((command) => command.threadId);
+          assert.deepStrictEqual(settled.sort(), [ThreadId.make("first"), ThreadId.make("second")]);
+          assert.deepStrictEqual(yield* Ref.get(fixture.summaryCalls), [
+            {
+              projectId: PROJECT_ID,
+              repository: "owner/repository",
+              number: 42,
+            },
+          ]);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
   );
   it.effect("uses saved PRs without settling resumed threads or branches with newer PRs", () =>
     Effect.scoped(

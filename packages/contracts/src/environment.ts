@@ -97,6 +97,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   pullRequests: Schema.optionalKey(Schema.Boolean),
   /** Server exposes the GitHub Issues list, detail, comments, mutation, auth, and worktree APIs. */
   issues: Schema.optionalKey(Schema.Boolean),
+  /** Server can complete a worktree-linked issue after every linked pull request merges. */
+  issueCompletionOnMerge: Schema.optionalKey(Schema.Boolean),
   /** Server understands canonical inline context links plus their message context records.
       Absent on servers from before inline context shipped, which drop the records and forward
       the links as literal text -- so a client must serialize context the legacy way for them. */
@@ -151,6 +153,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       threads, and routes PullRequestRef.host across projects on the same host. Same
       version-skew contract as threadSettlement. */
   threadPullRequests: Schema.optionalKey(Schema.Boolean),
+  /** Server persists and exposes created pull requests at worktree scope. */
+  worktreePullRequests: Schema.optionalKey(Schema.Boolean),
   pullRequestStackActions: Schema.optionalKey(Schema.Boolean),
   /** The update path clients should offer for this server. Absent on
       servers that must be relaunched manually (dev checkouts, Windows
