@@ -21,7 +21,7 @@ import {
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
-import { useProject, useThreadShell } from "../state/entities";
+import { useProject, useThreadShell, useThreadShellsForProjectRefs } from "../state/entities";
 import { usePaginatedBranches } from "../state/queries";
 import {
   type EnvMode,
@@ -33,6 +33,7 @@ import {
   resolveEffectiveEnvMode,
   resolveExistingWorktreeOptions,
   resolveLockedWorkspaceLabel,
+  resolvePreviousWorktreeOption,
   shouldShowEnvironmentIndicator,
 } from "./BranchToolbar.logic";
 import {
@@ -582,6 +583,20 @@ export const BranchToolbar = memo(function BranchToolbar({
           }),
     [projectWorkspaceRoot, repositoryRoot, worktreeRefs],
   );
+  const projectRefsForPreviousWorktree = useMemo(
+    () => (canSelectExistingWorktree && activeProjectRef ? [activeProjectRef] : []),
+    [activeProjectRef, canSelectExistingWorktree],
+  );
+  const projectThreads = useThreadShellsForProjectRefs(projectRefsForPreviousWorktree);
+  const previousWorktree = useMemo(
+    () =>
+      resolvePreviousWorktreeOption({
+        currentWorktreePath: activeWorktreePath,
+        options: existingWorktrees,
+        threads: projectThreads,
+      }),
+    [activeWorktreePath, existingWorktrees, projectThreads],
+  );
   const onSelectExistingWorktree = useCallback(
     (worktreePath: string) => {
       const option = existingWorktrees.find((candidate) => candidate.worktreePath === worktreePath);
@@ -610,18 +625,11 @@ export const BranchToolbar = memo(function BranchToolbar({
     () => ({
       openBranchPicker: () => branchSelectorRef.current?.open(),
       usePreviousWorktree: () => {
-        if (!showGitControls || !canUsePreviousWorktree || !previousWorktreeSeed) return;
-        onUsePreviousWorktree();
-        onComposerFocusRequest?.();
+        if (!showGitControls || !previousWorktree) return;
+        onSelectExistingWorktree(previousWorktree.worktreePath);
       },
     }),
-    [
-      canUsePreviousWorktree,
-      onComposerFocusRequest,
-      onUsePreviousWorktree,
-      previousWorktreeSeed,
-      showGitControls,
-    ],
+    [onSelectExistingWorktree, previousWorktree, showGitControls],
   );
 
   const showEnvironmentPicker = Boolean(
