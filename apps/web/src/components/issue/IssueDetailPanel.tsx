@@ -34,6 +34,7 @@ import {
   useIssueComments,
   useIssueDetail,
 } from "~/state/issues";
+import { refreshEnvironmentShell } from "~/state/shell";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useThreadShells } from "~/state/entities";
 import { Button } from "../ui/button";
@@ -261,6 +262,7 @@ export function IssueDetailPanel({
 
   const refreshIssue = () => {
     detailQuery.refresh();
+    refreshEnvironmentShell(environmentId);
     onActed?.();
   };
 
