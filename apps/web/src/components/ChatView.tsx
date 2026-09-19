@@ -210,7 +210,6 @@ import {
   selectThreadPreviewMiniPlayer,
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
-import { isThreadOwnPullRequest } from "./pullRequest/pullRequestDetail.logic";
 import { IssueDetailPanel } from "./issue/IssueDetailPanel";
 import { useOpenIssueLink } from "~/lib/openIssueLink";
 import { pullRequestPanelContext } from "./pullRequest/pullRequestDetail.logic";
