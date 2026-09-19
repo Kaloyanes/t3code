@@ -192,6 +192,9 @@ describe("ProjectScriptsControl", () => {
 
     const runButton = renderer.root.findByProps({ "aria-label": "Stop Build" });
     expect(runButton.props.variant).toBe("destructive");
+    expect(renderer.root.findByProps({ "aria-label": "Script actions" }).props.variant).toBe(
+      "destructive",
+    );
     expect(renderer.root.findAllByProps({ "data-icon": "square" })).not.toHaveLength(0);
     expect(runButton.props["aria-busy"]).toBe(false);
   });
