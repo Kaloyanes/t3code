@@ -139,6 +139,33 @@ export function resolveExistingWorktreeOptions(input: {
   );
 }
 
+export function resolvePreviousWorktreeOption(input: {
+  readonly currentWorktreePath: string | null;
+  readonly options: ReadonlyArray<ExistingWorktreeOption>;
+  readonly threads: ReadonlyArray<{
+    readonly worktreePath: string | null;
+    readonly updatedAt: string;
+    readonly archivedAt?: string | null;
+  }>;
+}): ExistingWorktreeOption | null {
+  const optionsByPath = new Map(input.options.map((option) => [option.worktreePath, option]));
+  let latest: { option: ExistingWorktreeOption; updatedAt: number } | null = null;
+  for (const thread of input.threads) {
+    if (
+      !thread.worktreePath ||
+      thread.worktreePath === input.currentWorktreePath ||
+      thread.archivedAt
+    ) {
+      continue;
+    }
+    const option = optionsByPath.get(thread.worktreePath);
+    const updatedAt = Date.parse(thread.updatedAt);
+    if (!option || !Number.isFinite(updatedAt)) continue;
+    if (!latest || updatedAt > latest.updatedAt) latest = { option, updatedAt };
+  }
+  return latest?.option ?? null;
+}
+
 export function resolveEffectiveEnvMode(input: {
   activeWorktreePath: string | null;
   hasServerThread: boolean;
