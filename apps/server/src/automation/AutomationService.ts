@@ -22,7 +22,6 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as SqlError from "effect/unstable/sql/SqlError";
 import * as Schema from "effect/Schema";
 
 import { nextAutomationRun } from "./schedule.ts";
@@ -83,6 +82,20 @@ export interface AutomationServiceShape {
   readonly stopRun: (
     input: AutomationRunIdInput,
   ) => Effect.Effect<AutomationSnapshot, AutomationOperationError>;
+  readonly claimDue: (
+    nowMs: number,
+  ) => Effect.Effect<ReadonlyArray<AutomationRun>, AutomationOperationError>;
+  readonly attachThread: (input: {
+    readonly runId: AutomationRunId;
+    readonly threadId: string;
+    readonly worktreePath: string | null;
+  }) => Effect.Effect<void, AutomationOperationError>;
+  readonly markWaiting: (runId: AutomationRunId) => Effect.Effect<void, AutomationOperationError>;
+  readonly finish: (input: {
+    readonly runId: AutomationRunId;
+    readonly status: "completed" | "failed" | "canceled";
+    readonly reason?: string;
+  }) => Effect.Effect<void, AutomationOperationError>;
 }
 
 export class AutomationService extends Context.Service<AutomationService, AutomationServiceShape>()(
@@ -134,7 +147,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const crypto = yield* Crypto.Crypto;
 
-  const failSql = <A>(operation: string, effect: Effect.Effect<A, SqlError.SqlError>) =>
+  const failSql = <A, E>(operation: string, effect: Effect.Effect<A, E>) =>
     effect.pipe(
       Effect.mapError(() => operationError(operation, "The automation store is unavailable.")),
     );
@@ -394,6 +407,137 @@ const make = Effect.gen(function* () {
       return yield* getSnapshot();
     });
 
+  const claimDue: AutomationServiceShape["claimDue"] = (nowMs) =>
+    Effect.gen(function* () {
+      const now = nowIso(nowMs);
+      return yield* failSql(
+        "claim",
+        sql.withTransaction(
+          Effect.gen(function* () {
+            const dueAutomations = yield* sql<AutomationRow>`
+              SELECT
+                automation_id AS "automationId", project_id AS "projectId", name, prompt,
+                schedule_json AS "scheduleJson", execution_json AS "executionJson", status,
+                next_run_at AS "nextRunAt", last_run_id AS "lastRunId",
+                created_at AS "createdAt", updated_at AS "updatedAt"
+              FROM projection_automations
+              WHERE status = 'active' AND next_run_at IS NOT NULL AND next_run_at <= ${now}
+              ORDER BY next_run_at ASC
+            `;
+
+            for (const row of dueAutomations) {
+              const automation = yield* decodeAutomationRow(row);
+              const scheduledAt = row.nextRunAt;
+              if (scheduledAt === null) continue;
+              const activeRows = yield* sql<{ readonly count: number }>`
+                SELECT COUNT(*) AS count
+                FROM projection_automation_runs
+                WHERE automation_id = ${row.automationId}
+                  AND status IN ('scheduled', 'running', 'waiting-for-input')
+              `;
+              const runId = AutomationRunId.make(yield* nextId("claim"));
+              const next = yield* nextRunAt(automation.schedule, nowMs);
+              const skipped = (activeRows[0]?.count ?? 0) > 0;
+              yield* sql`
+                INSERT INTO projection_automation_runs (
+                  run_id, automation_id, project_id, thread_id, trigger, prompt,
+                  execution_json, scheduled_at, status, started_at, completed_at,
+                  late_by_ms, reason, worktree_path
+                ) VALUES (
+                  ${runId}, ${automation.id}, ${automation.projectId}, NULL, 'schedule',
+                  ${automation.prompt}, ${JSON.stringify(automation.execution)}, ${scheduledAt},
+                  ${skipped ? "skipped" : "scheduled"}, NULL,
+                  ${skipped ? now : null}, ${Math.max(0, nowMs - Date.parse(scheduledAt))},
+                  ${skipped ? "Previous run is still active" : null}, NULL
+                )
+              `;
+              yield* sql`
+                UPDATE projection_automations
+                SET next_run_at = ${next}, last_run_id = ${runId}, updated_at = ${now}
+                WHERE automation_id = ${automation.id}
+              `;
+            }
+
+            const dueRuns = yield* sql<AutomationRunRow>`
+              SELECT
+                run_id AS "runId", automation_id AS "automationId", project_id AS "projectId",
+                thread_id AS "threadId", trigger, prompt, execution_json AS "executionJson",
+                scheduled_at AS "scheduledAt", status, started_at AS "startedAt",
+                completed_at AS "completedAt", late_by_ms AS "lateByMs", reason
+              FROM projection_automation_runs
+              WHERE status = 'scheduled' AND scheduled_at <= ${now}
+              ORDER BY scheduled_at ASC
+            `;
+            const claimedRuns: AutomationRun[] = [];
+            for (const row of dueRuns) {
+              const activeRows = yield* sql<{ readonly count: number }>`
+                SELECT COUNT(*) AS count
+                FROM projection_automation_runs
+                WHERE automation_id = ${row.automationId}
+                  AND status IN ('running', 'waiting-for-input')
+                  AND run_id <> ${row.runId}
+              `;
+              if ((activeRows[0]?.count ?? 0) > 0) {
+                yield* sql`
+                  UPDATE projection_automation_runs
+                  SET status = 'skipped', completed_at = ${now}, reason = 'Previous run is still active'
+                  WHERE run_id = ${row.runId}
+                `;
+                continue;
+              }
+              const lateByMs = Math.max(0, nowMs - Date.parse(row.scheduledAt));
+              yield* sql`
+                UPDATE projection_automation_runs
+                SET status = 'running', started_at = ${now}, late_by_ms = ${lateByMs}
+                WHERE run_id = ${row.runId} AND status = 'scheduled'
+              `;
+              claimedRuns.push({
+                ...decodeRun(row),
+                status: "running",
+                startedAt: now,
+                lateByMs,
+              });
+            }
+            return claimedRuns;
+          }),
+        ),
+      );
+    });
+
+  const attachThread: AutomationServiceShape["attachThread"] = (input) =>
+    failSql(
+      "attach",
+      sql`
+        UPDATE projection_automation_runs
+        SET thread_id = ${input.threadId}, worktree_path = ${input.worktreePath}
+        WHERE run_id = ${input.runId} AND status = 'running'
+      `,
+    ).pipe(Effect.asVoid);
+
+  const markWaiting: AutomationServiceShape["markWaiting"] = (runId) =>
+    failSql(
+      "wait",
+      sql`
+        UPDATE projection_automation_runs
+        SET status = 'waiting-for-input'
+        WHERE run_id = ${runId} AND status = 'running'
+      `,
+    ).pipe(Effect.asVoid);
+
+  const finish: AutomationServiceShape["finish"] = (input) =>
+    Effect.gen(function* () {
+      const nowMs = yield* Clock.currentTimeMillis;
+      yield* failSql(
+        "finish",
+        sql`
+          UPDATE projection_automation_runs
+          SET status = ${input.status}, completed_at = ${nowIso(nowMs)},
+              reason = ${input.reason ?? null}
+          WHERE run_id = ${input.runId}
+        `,
+      );
+    });
+
   return AutomationService.of({
     getSnapshot,
     create,
@@ -404,6 +548,10 @@ const make = Effect.gen(function* () {
     runNow,
     retryRun,
     stopRun,
+    claimDue,
+    attachThread,
+    markWaiting,
+    finish,
   });
 });
 

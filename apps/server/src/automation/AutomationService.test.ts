@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -54,10 +55,14 @@ layer("AutomationService", (it) => {
       const manual = yield* service.runNow({ id: id! });
       assert.strictEqual(manual.runs[0]?.trigger, "manual");
       assert.strictEqual(manual.runs[0]?.status, "scheduled");
+      const claimed = yield* service.claimDue(yield* Clock.currentTimeMillis);
+      assert.lengthOf(claimed, 1);
+      assert.strictEqual(claimed[0]?.status, "running");
+      yield* service.stopRun({ id: claimed[0]!.id });
 
       const canceled = yield* service.cancel({ id: id! });
       assert.strictEqual(canceled.automations[0]?.status, "canceled");
-      assert.strictEqual(canceled.runs[0]?.status, "scheduled");
+      assert.strictEqual(canceled.runs[0]?.status, "canceled");
     }),
   );
 });
