@@ -10,6 +10,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderSetupError,
+  type ServerSettings,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import {
@@ -74,6 +75,7 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { ServerActivation } from "../../serverActivation.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "../../git/GitWorkflowService.ts";
+import type { DeepPartial } from "@t3tools/shared/Struct";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId => ApprovalRequestId.make(value);
@@ -187,6 +189,7 @@ describe("ProviderCommandReactor", () => {
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderServiceError>;
     readonly tryHandlePromptCommandEffect?: ProviderAuthService["Service"]["tryHandlePromptCommand"];
+    readonly settings?: DeepPartial<ServerSettings>;
   }) {
     const now = "2026-01-01T00:00:00.000Z";
     const baseDir =
@@ -490,7 +493,7 @@ describe("ProviderCommandReactor", () => {
           generateThreadTitle,
         }),
       ),
-      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(ServerSettingsService.layerTest(input?.settings)),
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
       Layer.provideMerge(NodeServices.layer),
@@ -2601,6 +2604,64 @@ describe("ProviderCommandReactor", () => {
         .find((entry) => entry.id === ThreadId.make("thread-1"))
         ?.messages.find((entry) => entry.id === asMessageId("user-message-branch-model"))?.text,
     ).toBe(prompt);
+  });
+
+  it("uses a conventional purpose from the first message when enabled", async () => {
+    const harness = await createHarness({
+      settings: { worktreeBranchNamingMode: "conventional" },
+    });
+    const statusRefreshed = await harness.runEffect(Deferred.make<void>());
+    const refreshStatus = harness.refreshStatus.getMockImplementation()!;
+    harness.refreshStatus.mockImplementation((cwd) =>
+      refreshStatus(cwd).pipe(Effect.tap(() => Deferred.succeed(statusRefreshed, undefined))),
+    );
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("cmd-thread-conventional-branch"),
+        threadId: ThreadId.make("thread-1"),
+        branch: "t3code/1234abcd",
+        worktreePath: "/tmp/provider-project-worktree",
+      }),
+    );
+    await harness.runEffect(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`
+          INSERT INTO projection_issue_links
+            (thread_id, project_id, host, repository, number, source, linked_at)
+          VALUES
+            ('thread-1', 'project-1', 'github.com', 'owner/repo', 42, 'manual', '2026-01-01T00:00:00.000Z')
+        `;
+      }),
+    );
+    harness.generateBranchName.mockReturnValue(Effect.succeed({ branch: "feature/generated" }));
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-conventional-branch"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-conventional-branch"),
+          role: "user",
+          text: "Fix the reconnect backoff",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    await harness.runEffect(Deferred.await(statusRefreshed));
+    await harness.drain();
+    expect(harness.renameBranch).toHaveBeenCalledWith({
+      cwd: "/tmp/provider-project-worktree",
+      oldBranch: "t3code/1234abcd",
+      newBranch: "issue/generated",
+    });
   });
 
   it("recreates a missing worktree from the thread branch before starting a turn", async () => {

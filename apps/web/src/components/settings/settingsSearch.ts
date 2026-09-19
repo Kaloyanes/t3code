@@ -660,7 +660,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/source-control",
     environmentOnly: true,
     scope: "environment-defaults",
-    searchTerms: ["git branch namespace generated new worktree custom name"],
+    searchTerms: [
+      "git branch namespace generated new worktree custom name conventional feature bug issue chore maintenance",
+    ],
   },
   {
     id: "source-control",

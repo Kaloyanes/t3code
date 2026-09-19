@@ -441,8 +441,7 @@ function WorktreeBranchPrefixSettings() {
   const updateSettings = useUpdateScopedSettings();
   const prefixMixed = useScopedSettingsMixed(["worktreeBranchPrefix"]);
   const modeMixed = useScopedSettingsMixed(["worktreeBranchNamingMode"]);
-  const mixed = prefixMixed || modeMixed;
-  const [draft, setDraft] = useState(mixed ? "" : settings.worktreeBranchPrefix);
+  const [draft, setDraft] = useState(prefixMixed ? "" : settings.worktreeBranchPrefix);
   const [modeDraft, setModeDraft] = useState<WorktreeBranchNamingMode | "">(
     modeMixed ? "" : settings.worktreeBranchNamingMode,
   );

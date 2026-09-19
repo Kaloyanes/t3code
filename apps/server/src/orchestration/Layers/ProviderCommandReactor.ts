@@ -250,7 +250,7 @@ const make = Effect.gen(function* () {
       LIMIT 1
     `.pipe(
       Effect.map((rows) => rows.length > 0),
-      Effect.catchAll(() => Effect.succeed(false)),
+      Effect.orElseSucceed(() => false),
     );
   });
   const hasDetachedIssueWorkspace = (threadId: ThreadId) =>
