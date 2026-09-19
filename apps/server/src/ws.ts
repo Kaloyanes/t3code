@@ -127,6 +127,7 @@ import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as WorktreeRunManager from "./worktreeRun/Manager.ts";
+import { isProjectWorktreePath } from "./worktreeRun/validation.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
@@ -560,6 +561,7 @@ const makeWsRpcLayer = (
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
+      const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
@@ -3623,6 +3625,9 @@ const makeWsRpcLayer = (
               const workspacePath = path.resolve(input.workspacePath);
               const projectRoot = path.resolve(project.workspaceRoot);
               if (workspacePath !== projectRoot) {
+                const repositoryRoot =
+                  project.repositoryIdentity?.rootPath ??
+                  (yield* vcsRegistry.resolve({ cwd: project.workspaceRoot })).repository.rootPath;
                 let cursor: number | undefined;
                 let isProjectWorktree = false;
                 do {
@@ -3631,9 +3636,14 @@ const makeWsRpcLayer = (
                     limit: 200,
                     ...(cursor === undefined ? { refresh: true } : { cursor }),
                   });
-                  isProjectWorktree = refs.refs.some(
-                    (ref) =>
-                      ref.worktreePath !== null && path.resolve(ref.worktreePath) === workspacePath,
+                  isProjectWorktree = refs.refs.some((ref) =>
+                    isProjectWorktreePath({
+                      path,
+                      repositoryRoot,
+                      projectRoot,
+                      worktreeRoot: ref.worktreePath,
+                      workspacePath,
+                    }),
                   );
                   cursor = refs.nextCursor ?? undefined;
                 } while (!isProjectWorktree && cursor !== undefined);
