@@ -62,7 +62,6 @@ import { cn } from "~/lib/utils";
 
 export interface BranchToolbarHandle {
   openBranchPicker: () => void;
-  usePreviousWorktree: () => void;
 }
 
 interface BranchToolbarProps {
@@ -609,19 +608,8 @@ export const BranchToolbar = memo(function BranchToolbar({
     ref,
     () => ({
       openBranchPicker: () => branchSelectorRef.current?.open(),
-      usePreviousWorktree: () => {
-        if (!showGitControls || !canUsePreviousWorktree || !previousWorktreeSeed) return;
-        onUsePreviousWorktree();
-        onComposerFocusRequest?.();
-      },
     }),
-    [
-      canUsePreviousWorktree,
-      onComposerFocusRequest,
-      onUsePreviousWorktree,
-      previousWorktreeSeed,
-      showGitControls,
-    ],
+    [],
   );
 
   const showEnvironmentPicker = Boolean(

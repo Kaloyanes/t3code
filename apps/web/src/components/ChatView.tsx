@@ -6906,13 +6906,6 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
-      if (command === "composer.previousWorktree") {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!event.repeat) branchToolbarRef.current?.usePreviousWorktree();
-        return;
-      }
-
       if (command === "thread.steerQueuedMessage") {
         const message = activeThreadKey
           ? useQueuedMessageStore.getState().queuesByThreadKey[activeThreadKey]?.[0]

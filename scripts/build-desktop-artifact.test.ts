@@ -1686,43 +1686,26 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         const dmgDir = path.join(stageResourcesDir, "dmg");
         yield* fs.makeDirectory(dmgDir, { recursive: true });
         const sourcePath = path.join(dmgDir, "dmg-background-nightly.svg");
-        yield* fs.writeFileString(sourcePath, '<svg xmlns="http://www.w3.org/2000/svg"/>');
-        const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> =
-          [];
-
-        yield* stageDesktopDmgBackground(stageResourcesDir, "nightly", false).pipe(
-          Effect.provide(iconResizeSpawnerLayer(commands, [0, 0])),
+        yield* fs.writeFileString(
+          sourcePath,
+          '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="432"><rect width="640" height="432" fill="black"/></svg>',
         );
 
-        assert.deepStrictEqual(
-          commands.map((command) => [command.command, ...command.args]),
-          [
-            [
-              "sips",
-              "-s",
-              "format",
-              "png",
-              "-z",
-              "432",
-              "640",
-              sourcePath,
-              "--out",
-              path.join(dmgDir, "dmg-background-nightly.png"),
-            ],
-            [
-              "sips",
-              "-s",
-              "format",
-              "png",
-              "-z",
-              "864",
-              "1280",
-              sourcePath,
-              "--out",
-              path.join(dmgDir, "dmg-background-nightly@2x.png"),
-            ],
-          ],
-        );
+        yield* stageDesktopDmgBackground(stageResourcesDir, "nightly");
+
+        for (const [file, width, height] of [
+          ["dmg-background-nightly.png", 640, 432],
+          ["dmg-background-nightly@2x.png", 1280, 864],
+        ] as const) {
+          const bytes = yield* fs.readFile(path.join(dmgDir, file));
+          assert.deepStrictEqual(
+            Array.from(bytes.subarray(0, 8)),
+            [137, 80, 78, 71, 13, 10, 26, 10],
+          );
+          const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+          assert.equal(header.getUint32(16), width);
+          assert.equal(header.getUint32(20), height);
+        }
       }),
     ),
   );
@@ -1735,7 +1718,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           prefix: "t3code-dmg-background-missing-",
         });
 
-        const error = yield* stageDesktopDmgBackground(stageResourcesDir, "latest", false).pipe(
+        const error = yield* stageDesktopDmgBackground(stageResourcesDir, "latest").pipe(
           Effect.flip,
         );
 

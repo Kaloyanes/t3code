@@ -1201,7 +1201,6 @@ describe("composer and pull request shortcuts", () => {
     ["a", "composer.mode"],
     ["x", "composer.workspace"],
     ["g", "composer.branch"],
-    ["l", "composer.previousWorktree"],
     ["c", "thread.copyReference"],
     ["k", "pullRequest.copyNumber"],
     ["Enter", "thread.steerQueuedMessage"],
