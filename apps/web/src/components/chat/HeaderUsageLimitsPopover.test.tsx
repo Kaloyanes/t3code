@@ -168,11 +168,17 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function render() {
+async function render(activeAccount?: {
+  environmentId: EnvironmentId;
+  instanceId: ProviderInstanceId;
+}) {
   await act(() => {
     renderer = create(
       <StrictMode>
-        <HeaderUsageLimitsPopover />
+        <HeaderUsageLimitsPopover
+          activeEnvironmentId={activeAccount?.environmentId ?? null}
+          activeProviderInstanceId={activeAccount?.instanceId ?? null}
+        />
       </StrictMode>,
     );
   });
@@ -204,6 +210,34 @@ describe("groupLimitAccounts", () => {
     expect(groups.map((group) => group.label)).toEqual(["Codex", "Claude"]);
     expect(groups[0]?.accounts.map((item) => item.displayName)).toEqual(["Alpha", "Zulu"]);
   });
+});
+
+it.each([
+  [60, "40%", "var(--foreground)"],
+  [75, "25%", "var(--warning)"],
+  [95, "5%", "var(--destructive)"],
+])("shows the active account's tightest remaining limit", async (usedPercent, label, color) => {
+  const environmentId = EnvironmentId.make("active");
+  const instanceId = ProviderInstanceId.make("active-provider");
+  state.presentations = new Map([
+    [
+      environmentId,
+      presentation("Active", [
+        provider({
+          instanceId,
+          displayName: "Active account",
+          usedPercent,
+        }),
+      ]),
+    ],
+  ]);
+
+  await render({ environmentId, instanceId });
+
+  const trigger = renderer.root.findByProps({ "data-toolbar-control": "" });
+  expect(trigger.props["aria-label"]).toBe(`Usage limits, ${label} remaining`);
+  expect(trigger.props.style).toEqual({ color });
+  expect(renderedText()).toContain(label);
 });
 
 it("shows distinct native and hub accounts across providers and keeps source notices", async () => {

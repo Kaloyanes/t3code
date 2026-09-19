@@ -4,6 +4,7 @@ import {
   type ProviderConsumeResetCreditInput,
   type ProviderConsumeResetCreditOutcome,
   type ProviderDriverKind,
+  type ProviderInstanceId,
 } from "@t3tools/contracts";
 import { refreshUsageLimits } from "@t3tools/client-runtime/state/usage";
 import {
@@ -13,6 +14,7 @@ import {
 import {
   collectLimitAccounts,
   collectLimitNotices,
+  remainingPercent,
   type LimitAccount,
 } from "@t3tools/shared/usageLimits";
 import { AlertTriangleIcon, GaugeIcon, TicketIcon } from "lucide-react";
@@ -29,6 +31,7 @@ import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
 import { DRIVER_OPTIONS, getDriverOption } from "../settings/providerDriverMeta";
 import { LimitWindows, ResetCreditDialog, resetCreditsSummary } from "../usage/UsageLimits";
+import { usageLimitBarColor } from "../usage/usageLimitColors";
 import { toastManager } from "../ui/toast";
 
 const RESET_OUTCOME_TEXT: Record<ProviderConsumeResetCreditOutcome, string> = {
@@ -172,7 +175,13 @@ function AccountLimits({
   );
 }
 
-export function HeaderUsageLimitsPopover() {
+export function HeaderUsageLimitsPopover({
+  activeEnvironmentId,
+  activeProviderInstanceId,
+}: {
+  readonly activeEnvironmentId: EnvironmentId | null;
+  readonly activeProviderInstanceId: ProviderInstanceId | null;
+}) {
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
@@ -199,6 +208,31 @@ export function HeaderUsageLimitsPopover() {
     () => collectLimitAccounts(connectedPresentations),
     [connectedPresentations],
   );
+  const activeProvider =
+    activeEnvironmentId && activeProviderInstanceId
+      ? connectedPresentations
+          .get(activeEnvironmentId)
+          ?.serverConfig?.providers?.find(
+            (provider) => provider.instanceId === activeProviderInstanceId,
+          )
+      : undefined;
+  const activeEmail = activeProvider?.auth.email?.trim().toLowerCase();
+  const activeAccount = activeProvider
+    ? accounts.find((account) =>
+        activeEmail
+          ? account.driver === activeProvider.driver &&
+            account.email?.trim().toLowerCase() === activeEmail
+          : account.key === `${activeEnvironmentId}:${activeProvider.instanceId}`,
+      )
+    : undefined;
+  const activeRemaining = activeAccount?.limits.windows.reduce<number | null>(
+    (lowest, window) => Math.min(lowest ?? 100, remainingPercent(window)),
+    null,
+  );
+  const triggerColor =
+    activeRemaining === null || activeRemaining === undefined
+      ? undefined
+      : usageLimitBarColor("var(--foreground)", activeRemaining);
   const groups = useMemo(() => groupLimitAccounts(accounts), [accounts]);
   const notices = useMemo(
     () => collectLimitNotices(connectedPresentations),
@@ -274,9 +308,17 @@ export function HeaderUsageLimitsPopover() {
               <PopoverTrigger
                 render={
                   <Button
-                    size="icon-xs"
+                    size={
+                      activeRemaining === null || activeRemaining === undefined ? "icon-xs" : "xs"
+                    }
                     variant="outline"
-                    aria-label="Usage limits"
+                    aria-label={
+                      activeRemaining === null || activeRemaining === undefined
+                        ? "Usage limits"
+                        : `Usage limits, ${activeRemaining}% remaining`
+                    }
+                    className="gap-1.5 tabular-nums"
+                    style={triggerColor ? { color: triggerColor } : undefined}
                     data-toolbar-control=""
                   />
                 }
@@ -284,8 +326,15 @@ export function HeaderUsageLimitsPopover() {
             }
           >
             <GaugeIcon className="size-4" aria-hidden />
+            {activeRemaining === null || activeRemaining === undefined ? null : (
+              <span>{activeRemaining}%</span>
+            )}
           </TooltipTrigger>
-          <TooltipPopup side="top">Usage limits</TooltipPopup>
+          <TooltipPopup side="top">
+            {activeRemaining === null || activeRemaining === undefined
+              ? "Usage limits"
+              : `Usage limits · ${activeRemaining}% remaining`}
+          </TooltipPopup>
         </Tooltip>
         <PopoverPopup
           side="bottom"
