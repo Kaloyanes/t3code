@@ -26,7 +26,10 @@ describe("prompt enhancement contracts", () => {
 
   it("rejects empty prompts, negative selection offsets, reference fields, attachment fields, and results", () => {
     expect(() => decodeInput({ ...input, prompt: "" })).toThrow();
+    expect(decodeInput({ ...input, prompt: "  Fix it  " }).prompt).toBe("  Fix it  ");
+    expect(() => decodeInput({ ...input, prompt: "   " })).toThrow();
     expect(() => decodeInput({ ...input, selection: { start: -1, end: 1 } })).toThrow();
+    expect(() => decodeInput({ ...input, selection: { start: 0, end: 0 } })).toThrow();
     expect(() => decodeInput({ ...input, references: [{ token: "", label: "file" }] })).toThrow();
     expect(() =>
       decodeInput({ ...input, attachments: [{ name: "trace", mimeType: "" }] }),

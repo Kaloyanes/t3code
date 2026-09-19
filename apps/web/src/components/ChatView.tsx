@@ -10170,6 +10170,10 @@ export default function ChatView(props: ChatViewProps) {
                             supportsPromptEnhancement={
                               serverConfig?.environment.capabilities.promptEnhancement === true
                             }
+                            supportsPromptEnhancementSelection={
+                              serverConfig?.environment.capabilities.promptEnhancementSelection ===
+                              true
+                            }
                             pullRequestProjectId={
                               supportsPullRequests ? (activeProject?.id ?? null) : null
                             }

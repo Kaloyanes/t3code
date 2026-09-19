@@ -2574,6 +2574,21 @@ const makeWsRpcLayer = (
                   message: "The draft contains an invalid prompt reference.",
                 });
               }
+              if (
+                input.selection &&
+                (input.selection.start >= input.selection.end ||
+                  input.selection.end > input.prompt.length ||
+                  input.prompt.slice(input.selection.start, input.selection.end).trim().length ===
+                    0)
+              ) {
+                return yield* new PromptEnhancementError({
+                  message: "The selected prompt range is invalid.",
+                });
+              }
+              const targetPrompt = input.selection
+                ? input.prompt.slice(input.selection.start, input.selection.end)
+                : input.prompt;
+              const targetTokens = tokens.filter((token) => targetPrompt.includes(token));
               const settings = resolveProjectSettings(
                 yield* serverSettings.getSettings.pipe(
                   Effect.mapError(
@@ -2594,6 +2609,7 @@ const makeWsRpcLayer = (
                 .enhancePrompt({
                   cwd: config.stateDir,
                   prompt: input.prompt,
+                  ...(input.selection ? { selection: input.selection } : {}),
                   references: input.references,
                   attachments: input.attachments,
                   modelSelection,
@@ -2608,7 +2624,10 @@ const makeWsRpcLayer = (
                 );
               if (
                 generated.prompt.trim().length === 0 ||
-                tokens.some((token) => generated.prompt.split(token).length !== 2)
+                targetTokens.some((token) => generated.prompt.split(token).length !== 2) ||
+                tokens.some(
+                  (token) => !targetTokens.includes(token) && generated.prompt.includes(token),
+                )
               ) {
                 return yield* new PromptEnhancementError({
                   message: "The rewritten prompt did not preserve its references.",

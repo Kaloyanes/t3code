@@ -64,16 +64,33 @@ const makeStubRegistry = (
 };
 
 describe("TextGeneration.make", () => {
-  it("builds an isolated rewrite prompt without inventing requirements", () => {
+  it("builds an expansion prompt without inventing requirements", () => {
     const built = buildPromptEnhancementPrompt({
       prompt: "Fix [[T3_CONTEXT_0]]",
       references: [{ token: "[[T3_CONTEXT_0]]", label: "src/app.ts" }],
       attachments: [{ name: "trace.txt", mimeType: "text/plain" }],
     });
     expect(built.prompt).toContain("Do not invent requirements");
+    expect(built.prompt).toContain("Expand useful detail instead of merely rephrasing");
     expect(built.prompt).toContain("[[T3_CONTEXT_0]]: src/app.ts");
     expect(built.prompt).toContain("trace.txt (text/plain)");
     expect(built.prompt).toContain("Do not claim to have read attachment contents");
+  });
+
+  it("asks for only the selected replacement while providing the full draft as context", () => {
+    const prompt = "Keep this context.\nFix the login flow.\nKeep this too.";
+    const selection = { start: prompt.indexOf("Fix"), end: prompt.indexOf(" flow.") + 6 };
+    const built = buildPromptEnhancementPrompt({
+      prompt,
+      selection,
+      references: [],
+      attachments: [],
+    });
+
+    expect(built.prompt).toContain("Return only the enhanced selected portion");
+    expect(built.prompt).toContain("The surrounding draft is context only");
+    expect(built.prompt).toContain("Fix the login flow.");
+    expect(built.prompt).toContain("Keep this context.");
   });
 
   it.effect("routes prompt enhancement to the selected provider instance", () =>

@@ -104,3 +104,14 @@ export function restoreEnhancedPrompt(
   }
   return restored;
 }
+
+export function replaceEnhancedPromptTarget(
+  prompt: string,
+  prepared: PreparedPromptEnhancement,
+  replacement: string,
+): string {
+  const selection = prepared.originalSelection;
+  return selection
+    ? `${prompt.slice(0, selection.start)}${replacement}${prompt.slice(selection.end)}`
+    : replacement;
+}

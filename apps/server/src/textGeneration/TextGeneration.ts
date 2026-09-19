@@ -1,7 +1,12 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type { ChatAttachment, ModelSelection, ProviderInstanceId } from "@t3tools/contracts";
+import type {
+  ChatAttachment,
+  ModelSelection,
+  ProviderInstanceId,
+  PromptEnhancementSelection,
+} from "@t3tools/contracts";
 import { TextGenerationError } from "@t3tools/contracts";
 
 import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstanceRegistry.ts";
@@ -80,6 +85,7 @@ export interface ThreadTitleGenerationResult {
 export interface PromptEnhancementInput {
   cwd: string;
   prompt: string;
+  selection?: PromptEnhancementSelection;
   references: ReadonlyArray<{ readonly token: string; readonly label: string }>;
   attachments: ReadonlyArray<{ readonly name: string; readonly mimeType: string }>;
   modelSelection: ModelSelection;

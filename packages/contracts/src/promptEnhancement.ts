@@ -20,9 +20,13 @@ export const PromptEnhancementSelection = Schema.Struct({
 });
 export type PromptEnhancementSelection = typeof PromptEnhancementSelection.Type;
 
+const PromptEnhancementPrompt = Schema.String.check(
+  Schema.makeFilter((prompt) => prompt.trim().length > 0),
+);
+
 export const PromptEnhancementInput = Schema.Struct({
   projectId: ProjectId,
-  prompt: TrimmedNonEmptyString,
+  prompt: PromptEnhancementPrompt,
   selection: Schema.optionalKey(PromptEnhancementSelection),
   references: Schema.Array(PromptEnhancementReference),
   attachments: Schema.Array(PromptEnhancementAttachment),

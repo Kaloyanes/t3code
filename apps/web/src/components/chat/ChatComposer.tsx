@@ -44,6 +44,7 @@ import {
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import {
   preparePromptEnhancement,
+  replaceEnhancedPromptTarget,
   restoreEnhancedPrompt,
 } from "@t3tools/client-runtime/prompt-enhancement";
 import {
@@ -934,12 +935,14 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
 }
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
+import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
   FileIcon,
   BotIcon,
   CircleAlertIcon,
+  PenLineIcon,
   PaperclipIcon,
   PencilRulerIcon,
   PlayIcon,
@@ -1392,6 +1395,7 @@ export interface ChatComposerProps {
   gitCwd: string | null;
   projectId: ProjectId | null;
   supportsPromptEnhancement: boolean;
+  supportsPromptEnhancementSelection: boolean;
   pullRequestProjectId: ProjectId | null;
   pullRequestRepository: string | null;
   restingControlsHost: HTMLDivElement | null;
@@ -1519,6 +1523,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     gitCwd,
     projectId,
     supportsPromptEnhancement,
+    supportsPromptEnhancementSelection,
     pullRequestProjectId,
     pullRequestRepository,
     restingControlsHost,
@@ -1589,6 +1594,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const questionPreparations = useQuestionAttachmentPreparation((state) => state.counts);
   const prompt = composerDraft.prompt;
   const [isEnhancingPrompt, setIsEnhancingPrompt] = useState(false);
+  const [isEnhancingSelection, setIsEnhancingSelection] = useState(false);
   const promptEnhancementRequestRef = useRef(false);
   const [showPromptEnhancementHalo, setShowPromptEnhancementHalo] = useState(false);
   const promptEnhancementHaloTimerRef = useRef<number | null>(null);
@@ -3473,14 +3479,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     )
       return;
 
-    const prepared = preparePromptEnhancement(previousPrompt);
+    const selection = supportsPromptEnhancementSelection
+      ? composerEditorRef.current?.readSelectionRange()
+      : undefined;
+    const prepared = preparePromptEnhancement(previousPrompt, selection);
+    const enhancingSelection = prepared.originalSelection !== undefined;
     promptEnhancementRequestRef.current = true;
     setIsEnhancingPrompt(true);
+    setIsEnhancingSelection(enhancingSelection);
     const result = await enhancePrompt({
       environmentId,
       input: {
         projectId,
         prompt: prepared.prompt,
+        ...(supportsPromptEnhancementSelection && prepared.selection
+          ? { selection: prepared.selection }
+          : {}),
         references: prepared.references,
         attachments: [...composerImagesRef.current, ...composerFilesRef.current].map(
           ({ name, mimeType }) => ({ name, mimeType }),
@@ -3489,6 +3503,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     });
     promptEnhancementRequestRef.current = false;
     setIsEnhancingPrompt(false);
+    setIsEnhancingSelection(false);
 
     if (result._tag === "Failure") {
       if (!isAtomCommandInterrupted(result)) {
@@ -3515,12 +3530,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       toastManager.add({ type: "error", title: "Couldn't preserve prompt references" });
       return;
     }
+    const replacementRange = prepared.originalSelection;
+    const nextPrompt = replaceEnhancedPromptTarget(previousPrompt, prepared, restored);
+    const nextCursor = collapseExpandedComposerCursor(
+      nextPrompt,
+      replacementRange ? replacementRange.start + restored.length : restored.length,
+    );
     onPromptChange(
-      restored,
-      collapseExpandedComposerCursor(restored, restored.length),
-      restored.length,
+      nextPrompt,
+      nextCursor,
+      expandCollapsedComposerCursor(nextPrompt, nextCursor),
       false,
-      collectInlineContextIds(restored),
+      collectInlineContextIds(nextPrompt),
     );
     scheduleComposerFocus();
     setShowPromptEnhancementHalo(true);
@@ -3534,7 +3555,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     toastManager.add(
       stackedThreadToast({
         type: "success",
-        title: "Prompt enhanced",
+        title: enhancingSelection ? "Prompt section enhanced" : "Prompt enhanced",
         timeout: 5_000,
         actionProps: {
           children: "Undo",
@@ -3554,12 +3575,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [
     composerFilesRef,
     composerImagesRef,
+    composerEditorRef,
     enhancePrompt,
     environmentId,
     onPromptChange,
     projectId,
     promptRef,
     scheduleComposerFocus,
+    supportsPromptEnhancementSelection,
   ]);
 
   useEffect(
@@ -7097,16 +7120,31 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               projectId === null ||
                               !promptEnhancementModelAvailable
                             }
-                            aria-label="Enhance prompt"
+                            aria-label={
+                              isEnhancingPrompt
+                                ? isEnhancingSelection
+                                  ? "Enhancing selection"
+                                  : "Enhancing prompt"
+                                : "Enhance prompt"
+                            }
                             aria-busy={isEnhancingPrompt}
                           />
                         }
                       >
-                        <SparklesIcon />
+                        {isEnhancingPrompt ? (
+                          <Spinner className="size-4" aria-hidden />
+                        ) : (
+                          <span className="relative size-4" aria-hidden="true">
+                            <PenLineIcon className="absolute inset-0 size-4" />
+                            <SparklesIcon className="absolute -end-1 -top-1 size-2.5" />
+                          </span>
+                        )}
                       </TooltipTrigger>
                       <TooltipPopup>
                         {isEnhancingPrompt
-                          ? "Enhancing prompt…"
+                          ? isEnhancingSelection
+                            ? "Enhancing selection…"
+                            : "Enhancing prompt…"
                           : promptEnhancementModelAvailable
                             ? "Enhance prompt"
                             : "Prompt enhancement model unavailable"}

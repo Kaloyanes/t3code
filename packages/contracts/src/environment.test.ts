@@ -57,6 +57,16 @@ describe("ExecutionEnvironmentDescriptor", () => {
     ).toBe(true);
   });
 
+  it("treats selected prompt enhancement as an optional versioned capability", () => {
+    expect(decodeDescriptor(descriptor).capabilities.promptEnhancementSelection).toBeUndefined();
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, promptEnhancementSelection: true },
+      }).capabilities.promptEnhancementSelection,
+    ).toBe(true);
+  });
+
   it("treats a missing attachment upload capability as unsupported", () => {
     expect(decodeDescriptor(descriptor).capabilities.attachmentUploads).toBeUndefined();
   });

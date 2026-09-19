@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { preparePromptEnhancement, restoreEnhancedPrompt } from "./promptEnhancement.ts";
+import {
+  preparePromptEnhancement,
+  replaceEnhancedPromptTarget,
+  restoreEnhancedPrompt,
+} from "./promptEnhancement.ts";
 
 describe("prompt enhancement references", () => {
   const reference = "[src/app.ts](t3-context://v1/file/ctx_1)";
@@ -65,6 +69,22 @@ describe("prompt enhancement references", () => {
       `Improve ${secondReference}`,
     );
     expect(restoreEnhancedPrompt(prepared, `Improve ${firstToken}`)).toBeNull();
+  });
+
+  it("replaces only the original selected range", () => {
+    const prompt = "Keep this. Fix the login flow. Keep this too.";
+    const start = prompt.indexOf("Fix");
+    const prepared = preparePromptEnhancement(prompt, {
+      start,
+      end: prompt.indexOf(".", start) + 1,
+    });
+
+    expect(replaceEnhancedPromptTarget(prompt, prepared, "Improve the login flow.")).toBe(
+      "Keep this. Improve the login flow. Keep this too.",
+    );
+    expect(replaceEnhancedPromptTarget(prompt, preparePromptEnhancement(prompt), "Rewrite")).toBe(
+      "Rewrite",
+    );
   });
 
   it("uses the full prompt when the selection is empty or whitespace", () => {

@@ -7639,6 +7639,38 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("accepts a selected enhancement without requiring unrelated references", () =>
+    Effect.gen(function* () {
+      let request: TextGeneration.PromptEnhancementInput | undefined;
+      yield* buildAppUnderTest({
+        layers: {
+          textGeneration: {
+            enhancePrompt: (input) =>
+              Effect.sync(() => {
+                request = input;
+                return { prompt: "Improve the selected request" };
+              }),
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.promptEnhance]({
+            projectId: defaultProjectId,
+            prompt: "Keep this. Fix [[ref:0]] later.",
+            selection: { start: 11, end: 14 },
+            references: [{ token: "[[ref:0]]", label: "src/index.ts" }],
+            attachments: [],
+          }),
+        ),
+      );
+
+      assert.deepEqual(request?.selection, { start: 11, end: 14 });
+      assert.equal(result.prompt, "Improve the selected request");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket rpc projects.writeFile errors", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
