@@ -58,7 +58,12 @@ import {
   type ProjectId as ProjectIdType,
   type ThreadId as ThreadIdType,
 } from "@t3tools/contracts";
-import { sanitizeBranchFragment } from "@t3tools/shared/git";
+import {
+  buildConventionalWorktreeBranchName,
+  resolveWorktreeBranchNaming,
+  sanitizeBranchFragment,
+  type WorktreeBranchPurpose,
+} from "@t3tools/shared/git";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -409,10 +414,13 @@ export function issueWorktreeBranch(
   name: string,
   suffix?: number,
   prefix: string = DEFAULT_WORKTREE_BRANCH_PREFIX,
+  purpose?: WorktreeBranchPurpose,
 ): string {
   const fragment = issueWorktreeFragment(number, name);
   const suffixFragment = suffix === undefined || suffix <= 1 ? fragment : `${fragment}-${suffix}`;
-  return `${prefix}/${suffixFragment}`;
+  return purpose
+    ? buildConventionalWorktreeBranchName(purpose, suffixFragment)
+    : `${prefix}/${suffixFragment}`;
 }
 
 /** Compare worktree paths without allowing a trailing separator to bypass checks. */
@@ -1544,12 +1552,29 @@ export const make = Effect.gen(function* () {
       const worktreeBranchPrefix = settings.worktreeBranchPrefix;
       const baseBranch = yield* resolveBaseBranch(repo, input.baseBranch);
       const issue = yield* detail(input);
+      const purpose =
+        settings.worktreeBranchNamingMode === "conventional"
+          ? resolveWorktreeBranchNaming({
+              firstMessage: issue.title,
+              issue: {
+                title: issue.title,
+                body: issue.body,
+                labels: issue.labels.map((label) => label.name),
+              },
+            }).purpose
+          : undefined;
       const refs = yield* collectRefs(repo);
       const existingBranches = new Set(refs.map((ref) => ref.toLowerCase()));
       const baseFragment = issueWorktreeFragment(input.number, input.name);
       const basePath = path.join(config.worktreesDir, path.basename(repo.cwd), baseFragment);
       let suffix = 1;
-      let branch = issueWorktreeBranch(input.number, input.name, undefined, worktreeBranchPrefix);
+      let branch = issueWorktreeBranch(
+        input.number,
+        input.name,
+        undefined,
+        worktreeBranchPrefix,
+        purpose,
+      );
       let worktreePath = basePath;
       let pathExists = yield* fs
         .exists(worktreePath)
@@ -1560,7 +1585,13 @@ export const make = Effect.gen(function* () {
         );
       while (existingBranches.has(branch.toLowerCase()) || pathExists) {
         suffix += 1;
-        branch = issueWorktreeBranch(input.number, input.name, suffix, worktreeBranchPrefix);
+        branch = issueWorktreeBranch(
+          input.number,
+          input.name,
+          suffix,
+          worktreeBranchPrefix,
+          purpose,
+        );
         worktreePath = path.join(
           config.worktreesDir,
           path.basename(repo.cwd),

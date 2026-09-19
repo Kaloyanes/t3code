@@ -47,6 +47,9 @@ describe("IssueService pure issue helpers", () => {
     expect(issueWorktreeBranch(42, " Fix / checkout ", undefined, "Kaloyanes")).toBe(
       "Kaloyanes/42-fix-checkout",
     );
+    expect(issueWorktreeBranch(42, " Fix / checkout ", undefined, "Kaloyanes", "bug")).toBe(
+      "bug/42-fix-checkout",
+    );
   });
 
   it("only permits deleting the attached worktree, never the project root", () => {

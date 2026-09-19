@@ -16,7 +16,12 @@ import {
 } from "@t3tools/contracts";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
-import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
+import {
+  buildConventionalWorktreeBranchName,
+  isTemporaryWorktreeBranch,
+  resolveWorktreeBranchNaming,
+  worktreeBranchPurposeFromPrefix,
+} from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
@@ -189,6 +194,8 @@ function stalePendingRequestDetail(
 function buildGeneratedWorktreeBranchName(
   raw: string,
   prefix: string = DEFAULT_WORKTREE_BRANCH_PREFIX,
+  namingMode: "prefix" | "conventional" = "prefix",
+  purpose?: Parameters<typeof buildConventionalWorktreeBranchName>[0],
 ): string {
   const normalized = raw
     .trim()
@@ -203,7 +210,12 @@ function buildGeneratedWorktreeBranchName(
       ? normalized.slice(defaultPrefix.length + 1)
       : normalized;
 
-  const branchFragment = withoutPrefix
+  const generatedPurpose = worktreeBranchPurposeFromPrefix(normalized);
+  const withoutPurpose =
+    generatedPurpose !== null && normalized.startsWith(`${generatedPurpose}/`)
+      ? normalized.slice(generatedPurpose.length + 1)
+      : withoutPrefix;
+  const branchFragment = (namingMode === "conventional" ? withoutPurpose : withoutPrefix)
     .replace(/[^a-z0-9/_-]+/g, "-")
     .replace(/\/+/g, "/")
     .replace(/-+/g, "-")
@@ -212,6 +224,12 @@ function buildGeneratedWorktreeBranchName(
     .replace(/[./_-]+$/g, "");
 
   const safeFragment = branchFragment.length > 0 ? branchFragment : "update";
+  if (namingMode === "conventional") {
+    return buildConventionalWorktreeBranchName(
+      purpose ?? generatedPurpose ?? "chore",
+      safeFragment,
+    );
+  }
   return `${prefix}/${safeFragment}`;
 }
 
@@ -224,6 +242,17 @@ const make = Effect.gen(function* () {
   const providerRegistry = yield* ProviderRegistry;
   const gitWorkflow = yield* GitWorkflowService;
   const sql = yield* SqlClient.SqlClient;
+  const hasLinkedGitHubIssue = Effect.fn("hasLinkedGitHubIssue")(function* (threadId: ThreadId) {
+    return yield* sql<{ readonly found: number }>`
+      SELECT 1 AS found
+      FROM projection_issue_links
+      WHERE thread_id = ${threadId}
+      LIMIT 1
+    `.pipe(
+      Effect.map((rows) => rows.length > 0),
+      Effect.catchAll(() => Effect.succeed(false)),
+    );
+  });
   const hasDetachedIssueWorkspace = (threadId: ThreadId) =>
     sql<{ readonly threadId: string }>`
       SELECT thread_id AS "threadId"
@@ -939,9 +968,22 @@ const make = Effect.gen(function* () {
       });
       if (!generated) return;
 
+      const issueLinked =
+        settings.worktreeBranchNamingMode === "conventional"
+          ? yield* hasLinkedGitHubIssue(input.threadId)
+          : false;
+      const naming = resolveWorktreeBranchNaming({
+        firstMessage: input.messageText,
+        ...(issueLinked
+          ? { issue: { title: "", body: "", labels: [] as ReadonlyArray<string> } }
+          : {}),
+      });
+
       const targetBranch = buildGeneratedWorktreeBranchName(
         generated.branch,
         settings.worktreeBranchPrefix,
+        settings.worktreeBranchNamingMode,
+        naming.purpose,
       );
       if (targetBranch === oldBranch) return;
 
