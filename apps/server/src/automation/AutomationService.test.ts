@@ -3,8 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
-import { AutomationExecution, ProjectId, ProviderInstanceId } from "@t3tools/contracts";
-import * as Schema from "effect/Schema";
+import { ProjectId, ProviderInstanceId } from "@t3tools/contracts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { AutomationService, layer as automationLayer } from "./AutomationService.ts";
 
@@ -20,10 +19,13 @@ layer("AutomationService", (it) => {
     Effect.gen(function* () {
       const service = yield* AutomationService;
       const projectId = ProjectId.make("project-1");
-      const execution = Schema.decodeSync(AutomationExecution)({
+      const execution = {
         modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
         baseBranch: "main",
-      });
+        runtimeMode: "approval-required" as const,
+        interactionMode: "default" as const,
+        worktreePolicy: "dedicated" as const,
+      };
       const created = yield* service.create({
         projectId,
         name: "Health check",

@@ -92,6 +92,7 @@ import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/uns
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
+import * as AutomationService from "./automation/AutomationService.ts";
 import * as ServerConfig from "./config.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -524,6 +525,7 @@ const makeWsRpcLayer = (
               Effect.orElseSucceed(() => null),
             );
       const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
+      const automationService = yield* AutomationService.AutomationService;
       const threadDeletionReactor = yield* ThreadDeletionReactor;
       const analytics = yield* AnalyticsService.AnalyticsService;
       // Every command dispatched on this connection carries the connecting
@@ -2342,6 +2344,42 @@ const makeWsRpcLayer = (
               "rpc.aggregate": "server",
             },
           ),
+        [WS_METHODS.automationsGetSnapshot]: (_input) =>
+          observeRpcEffect(WS_METHODS.automationsGetSnapshot, automationService.getSnapshot(), {
+            "rpc.aggregate": "automations",
+          }),
+        [WS_METHODS.automationsCreate]: (input) =>
+          observeRpcEffect(WS_METHODS.automationsCreate, automationService.create(input), {
+            "rpc.aggregate": "automations",
+          }),
+        [WS_METHODS.automationsUpdate]: (input) =>
+          observeRpcEffect(WS_METHODS.automationsUpdate, automationService.update(input), {
+            "rpc.aggregate": "automations",
+          }),
+        [WS_METHODS.automationsPause]: (input) =>
+          observeRpcEffect(WS_METHODS.automationsPause, automationService.pause(input), {
+            "rpc.aggregate": "automations",
+          }),
+        [WS_METHODS.automationsResume]: (input) =>
+          observeRpcEffect(WS_METHODS.automationsResume, automationService.resume(input), {
+            "rpc.aggregate": "automations",
+          }),
+        [WS_METHODS.automationsCancel]: (input) =>
+          observeRpcEffect(WS_METHODS.automationsCancel, automationService.cancel(input), {
+            "rpc.aggregate": "automations",
+          }),
+        [WS_METHODS.automationsRunNow]: (input) =>
+          observeRpcEffect(WS_METHODS.automationsRunNow, automationService.runNow(input), {
+            "rpc.aggregate": "automations",
+          }),
+        [WS_METHODS.automationsRetryRun]: (input) =>
+          observeRpcEffect(WS_METHODS.automationsRetryRun, automationService.retryRun(input), {
+            "rpc.aggregate": "automations",
+          }),
+        [WS_METHODS.automationsStopRun]: (input) =>
+          observeRpcEffect(WS_METHODS.automationsStopRun, automationService.stopRun(input), {
+            "rpc.aggregate": "automations",
+          }),
         [WS_METHODS.serverRefreshProviders]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverRefreshProviders,
@@ -4081,6 +4119,11 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               previewAutomationBroker,
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
+              Layer.provideMerge(
+                AutomationService.layer.pipe(
+                  Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),
+                ),
+              ),
               Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),
               Layer.provide(AgentSessionScanner.layer),
               Layer.provide(ProviderMaintenanceRunner.layer),
