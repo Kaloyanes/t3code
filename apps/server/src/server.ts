@@ -529,8 +529,8 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   ),
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(VcsLayerLive),
-  Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(AutomationSchedulerLive),
+  Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(
     Layer.mergeAll(TerminalLayerLive, WorktreeRunLayerLive, PreviewLayerLive, DeviceLayerLive),
   ),
