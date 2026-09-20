@@ -286,6 +286,8 @@ export const LoadBalancingWeights = Schema.Record(
 );
 
 export const DiffColorScheme = Schema.Literals(["red-green", "blue-orange"]);
+export const UsageMonitorMode = Schema.Literals(["lowest-percentage", "shortest-window"]);
+export type UsageMonitorMode = typeof UsageMonitorMode.Type;
 
 export const ClientSettingsSchema = Schema.Struct({
   notificationMode: NotificationMode.pipe(
@@ -427,6 +429,9 @@ export const ClientSettingsSchema = Schema.Struct({
   // Legacy context window meter. The composer hides it by default; users who
   // still want the old usage indicator can restore it from Settings.
   contextWindowMeterEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  usageMonitorMode: UsageMonitorMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed("lowest-percentage" as const)),
+  ),
   // Desktop resting composer: scrolling an existing thread's conversation
   // settles the composer into its single-line layout. Losing focus never does.
   composerCollapseOnScroll: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
@@ -1618,6 +1623,7 @@ export const ClientSettingsPatch = Schema.Struct({
   ),
   planModeEnabled: Schema.optionalKey(Schema.Boolean),
   contextWindowMeterEnabled: Schema.optionalKey(Schema.Boolean),
+  usageMonitorMode: Schema.optionalKey(UsageMonitorMode),
   composerCollapseOnScroll: Schema.optionalKey(Schema.Boolean),
   composerRichTextEnabled: Schema.optionalKey(Schema.Boolean),
   sendShortcut: Schema.optionalKey(Schema.Literals(["enter", "mod-enter-multiline", "mod-enter"])),

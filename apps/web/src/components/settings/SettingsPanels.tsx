@@ -42,6 +42,7 @@ import {
   type ResponseStreamingMode,
   MIN_TERMINAL_FONT_SIZE,
   type QuitConfirmationMode,
+  type UsageMonitorMode,
 } from "@t3tools/contracts/settings";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -190,6 +191,11 @@ const RESPONSE_STREAMING_MODE_DESCRIPTIONS: Record<ResponseStreamingMode, string
   paragraph: "Each paragraph or code block appears as soon as it is complete.",
   token:
     "Every token repaints the answer as it arrives. Slower and harder to read. Thinking traces still arrive a paragraph at a time.",
+};
+
+const USAGE_MONITOR_MODE_LABELS: Record<UsageMonitorMode, string> = {
+  "lowest-percentage": "Lowest percentage",
+  "shortest-window": "Shortest window",
 };
 
 const TIMESTAMP_FORMAT_LABELS = {
@@ -591,6 +597,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.contextWindowMeterEnabled !== DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled
         ? ["Context window indicator"]
         : []),
+      ...(settings.usageMonitorMode !== DEFAULT_UNIFIED_SETTINGS.usageMonitorMode
+        ? ["Usage monitor"]
+        : []),
       ...(settings.responseStreamingMode !== DEFAULT_UNIFIED_SETTINGS.responseStreamingMode
         ? ["Response streaming"]
         : []),
@@ -658,6 +667,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.proactivePanelsEnabled,
       settings.environmentIdentificationMode,
       settings.contextWindowMeterEnabled,
+      settings.usageMonitorMode,
       settings.fontFamilyCode,
       settings.fontFamilyComposer,
       settings.fontFamilySans,
@@ -765,6 +775,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sendShortcut: DEFAULT_UNIFIED_SETTINGS.sendShortcut,
       followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior,
       contextWindowMeterEnabled: DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled,
+      usageMonitorMode: DEFAULT_UNIFIED_SETTINGS.usageMonitorMode,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
@@ -2419,6 +2430,42 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
                 <SelectItem hideIndicator value="24-hour">
                   {TIMESTAMP_FORMAT_LABELS["24-hour"]}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("usage-monitor")}
+          description="Choose whether the header usage pill shows the lowest percentage or the shortest window, such as 5 hours instead of 1 week."
+          resetAction={
+            settings.usageMonitorMode !== DEFAULT_UNIFIED_SETTINGS.usageMonitorMode ? (
+              <SettingResetButton
+                label="usage monitor"
+                onClick={() =>
+                  updateSettings({ usageMonitorMode: DEFAULT_UNIFIED_SETTINGS.usageMonitorMode })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.usageMonitorMode}
+              onValueChange={(value) => {
+                if (value === "lowest-percentage" || value === "shortest-window") {
+                  updateSettings({ usageMonitorMode: value });
+                }
+              }}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-48" aria-label="Usage monitor">
+                <SelectValue>{USAGE_MONITOR_MODE_LABELS[settings.usageMonitorMode]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="lowest-percentage">
+                  {USAGE_MONITOR_MODE_LABELS["lowest-percentage"]}
+                </SelectItem>
+                <SelectItem hideIndicator value="shortest-window">
+                  {USAGE_MONITOR_MODE_LABELS["shortest-window"]}
                 </SelectItem>
               </SelectPopup>
             </Select>

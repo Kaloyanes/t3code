@@ -81,6 +81,20 @@ describe("ClientSettings rich text composer", () => {
   });
 });
 
+describe("ClientSettings usage monitor", () => {
+  it("defaults to the lowest percentage and round-trips the shortest-window preference", () => {
+    expect(decodeClientSettings({}).usageMonitorMode).toBe("lowest-percentage");
+
+    const preference = { usageMonitorMode: "shortest-window" as const };
+    expect(decodeClientSettingsPatch(preference)).toEqual(preference);
+    expect(encodeClientSettings(decodeClientSettings(preference))).toMatchObject(preference);
+  });
+
+  it("rejects unsupported monitor modes", () => {
+    expect(() => decodeClientSettingsPatch({ usageMonitorMode: "longest-window" })).toThrow();
+  });
+});
+
 describe("ServerSettings default permissions", () => {
   it("keeps full access for settings saved before a default was configured", () => {
     expect(decodeServerSettings({}).defaultRuntimeMode).toBe("full-access");

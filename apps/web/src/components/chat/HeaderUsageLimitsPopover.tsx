@@ -14,7 +14,6 @@ import {
 import {
   collectLimitAccounts,
   collectLimitNotices,
-  remainingPercent,
   type LimitAccount,
 } from "@t3tools/shared/usageLimits";
 import { AlertTriangleIcon, GaugeIcon, TicketIcon } from "lucide-react";
@@ -23,6 +22,7 @@ import { useMemo, useRef, useState } from "react";
 import { environmentPresentations } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useClientSettings } from "../../hooks/useSettings";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popover";
@@ -33,6 +33,7 @@ import { DRIVER_OPTIONS, getDriverOption } from "../settings/providerDriverMeta"
 import { LimitWindows, ResetCreditDialog, resetCreditsSummary } from "../usage/UsageLimits";
 import { usageLimitBarColor } from "../usage/usageLimitColors";
 import { toastManager } from "../ui/toast";
+import { usageMonitorRemainingPercent } from "./usageMonitor";
 
 const RESET_OUTCOME_TEXT: Record<ProviderConsumeResetCreditOutcome, string> = {
   reset: "Reset applied. Your windows have cleared.",
@@ -225,10 +226,10 @@ export function HeaderUsageLimitsPopover({
           : account.key === `${activeEnvironmentId}:${activeProvider.instanceId}`,
       )
     : undefined;
-  const activeRemaining = activeAccount?.limits.windows.reduce<number | null>(
-    (lowest, window) => Math.min(lowest ?? 100, remainingPercent(window)),
-    null,
-  );
+  const usageMonitorMode = useClientSettings((settings) => settings.usageMonitorMode);
+  const activeRemaining = activeAccount
+    ? (usageMonitorRemainingPercent(activeAccount.limits.windows, usageMonitorMode) ?? null)
+    : null;
   const triggerColor =
     activeRemaining === null || activeRemaining === undefined
       ? undefined

@@ -1,10 +1,5 @@
 /**
- * The sidebar header: one row holding search, project scope and new thread.
- *
- * Search owns the row's text and spans it. Project scope collapses to an icon
- * that sits with new-project and new-thread as a segmented group at the end.
- * The scope icon swaps to the project favicon while a project is selected,
- * so the header still names the scope after the row that showed it is gone.
+ * The sidebar header keeps primary actions above thread search.
  *
  * The scope picker itself is passed in: its combobox state lives with the rest
  * of the sidebar's scope logic. `searchFieldRef` lands on the search field so
@@ -77,12 +72,50 @@ export function SidebarThreadHeader({
   const newThreadLabel = newThreadShortcutLabel
     ? `New thread (${newThreadShortcutLabel})`
     : "New thread";
+  const newThreadTooltip = showNewThreadInProjectHint ? (
+    <span className="flex flex-col gap-0.5">
+      <span>{newThreadLabel}</span>
+      <span className="text-muted-foreground">
+        New thread in current project: Shift+click
+        {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
+      </span>
+    </span>
+  ) : (
+    newThreadLabel
+  );
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex flex-col gap-1">
+      <div className="flex min-w-0 items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <SidebarMenuButton
+                type="button"
+                disabled={newThreadDisabled}
+                aria-label="New thread"
+                className="min-w-0 flex-1 justify-start px-2"
+                onClick={onNewThread}
+              />
+            }
+          >
+            <SquarePenIcon />
+            <span>New thread</span>
+          </TooltipTrigger>
+          <TooltipPopup side="top">{newThreadTooltip}</TooltipPopup>
+        </Tooltip>
+        {hasProjects ? (
+          <>
+            {projectScope}
+            <SidebarHeaderIconButton label="New project" onClick={onNewProject}>
+              <FolderPlusIcon />
+            </SidebarHeaderIconButton>
+          </>
+        ) : null}
+      </div>
       <div
         ref={searchFieldRef}
-        className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+        className="flex h-8 min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
       >
         <SearchIcon className="size-4 shrink-0 text-[var(--sidebar-icon-color)]" />
         <Input
@@ -121,39 +154,6 @@ export function SidebarThreadHeader({
             <XIcon className="size-3" />
           </Button>
         ) : null}
-      </div>
-      {/* Unfilled like the search field beside it: the buttons carry their own
-          hover states, and a background well reads far louder on themed
-          palettes than on the base light and dark ones. */}
-      <div className="flex shrink-0 items-center">
-        {hasProjects ? (
-          <>
-            {projectScope}
-            <SidebarHeaderIconButton label="New project" onClick={onNewProject}>
-              <FolderPlusIcon />
-            </SidebarHeaderIconButton>
-          </>
-        ) : null}
-        <SidebarHeaderIconButton
-          label="New thread"
-          tooltip={
-            showNewThreadInProjectHint ? (
-              <span className="flex flex-col gap-0.5">
-                <span>{newThreadLabel}</span>
-                <span className="text-muted-foreground">
-                  New thread in current project: Shift+click
-                  {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
-                </span>
-              </span>
-            ) : (
-              newThreadLabel
-            )
-          }
-          disabled={newThreadDisabled}
-          onClick={onNewThread}
-        >
-          <SquarePenIcon />
-        </SidebarHeaderIconButton>
       </div>
     </div>
   );

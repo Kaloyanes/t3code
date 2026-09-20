@@ -164,9 +164,10 @@ export function resolveThreadPullRequestBadgePresentation({
   if (number === undefined || url === undefined) return null;
 
   const tooltip = status?.tooltip ?? `PR #${number}, status pending`;
+  const aggregate = badge === null ? null : PULL_REQUEST_STATE_PRESENTATION[badge.state];
   if (badge?.kind === "pull-request" && badge.others > 0) {
     // Unrelated links fold into one state, so a count of merged PRs reads as merged.
-    const aggregate = PULL_REQUEST_STATE_PRESENTATION[badge.state];
+    if (aggregate === null) return null;
     return {
       Icon: aggregate.Icon,
       toneClassName: aggregate.toneClassName,
@@ -175,8 +176,8 @@ export function resolveThreadPullRequestBadgePresentation({
     };
   }
   return {
-    Icon: status?.Icon ?? PullRequestGlyph.pullRequest,
-    toneClassName: status?.colorClass ?? "text-muted-foreground",
+    Icon: status?.Icon ?? aggregate?.Icon ?? PullRequestGlyph.pullRequest,
+    toneClassName: status?.colorClass ?? aggregate?.toneClassName ?? "text-muted-foreground",
     label: tooltip,
     text: number,
   };

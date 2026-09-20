@@ -102,6 +102,13 @@ describe("searchSettings", () => {
     expect(searchSettings("administrative access")[0]?.id).toBe("connections-environment");
   });
 
+  it("finds the usage monitor display preference", () => {
+    expect(searchSettings("shortest window")[0]).toMatchObject({
+      id: "usage-monitor",
+      to: "/settings/general",
+    });
+  });
+
   it("lists thread confirmations in panel order", () => {
     expect(searchSettings("confirmation").map((item) => item.id)).toEqual([
       "unpin-confirmation",

@@ -6,7 +6,9 @@ import {
   ThreadPullRequestBadgeControl,
   ThreadWorktreeIndicator,
   linkedPullRequestSnapshotStatus,
+  resolveThreadPullRequestBadgePresentation,
 } from "./ThreadStatusIndicators";
+import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 
 describe("ThreadWorktreeIndicator", () => {
   it("renders the worktree folder and branch in an accessible label", () => {
@@ -86,6 +88,22 @@ describe("linked pull request snapshots", () => {
 });
 
 describe("linked pull request badges", () => {
+  it("uses the linked open state while the host snapshot is pending", () => {
+    expect(
+      resolveThreadPullRequestBadgePresentation({
+        badge: { kind: "pull-request", others: 0, state: "open" },
+        number: 42,
+        url: "https://github.com/acme/repo/pull/42",
+        status: null,
+      }),
+    ).toMatchObject({
+      Icon: PullRequestGlyph.pullRequest,
+      toneClassName: "text-emerald-600 dark:text-emerald-300/90",
+      label: "PR #42, status pending",
+      text: 42,
+    });
+  });
+
   it("renders an aggregate badge as an in-app control", () => {
     const markup = renderToStaticMarkup(
       <ThreadPullRequestBadgeControl

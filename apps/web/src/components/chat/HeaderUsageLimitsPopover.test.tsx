@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 const state = vi.hoisted(() => ({
   presentations: new Map(),
+  usageMonitorMode: "lowest-percentage" as "lowest-percentage" | "shortest-window",
   popoverOpen: false,
   openPopover: () => {},
   refreshProviders: vi.fn(async () => ({ _tag: "Success", value: {} })),
@@ -37,6 +38,11 @@ vi.mock("../../state/server", () => ({
 vi.mock("../../state/use-atom-command", () => ({
   useAtomCommand: (command: string) =>
     command === "refresh" ? state.refreshProviders : state.consumeResetCredit,
+}));
+vi.mock("../../hooks/useSettings", () => ({
+  useClientSettings: (
+    selector: (settings: { usageMonitorMode: typeof state.usageMonitorMode }) => unknown,
+  ) => selector({ usageMonitorMode: state.usageMonitorMode }),
 }));
 vi.mock("../ui/toast", () => ({ toastManager: { add: state.toast } }));
 vi.mock("../ui/button", () => ({ Button: "button" }));
@@ -120,6 +126,14 @@ function provider(input: {
   email?: string;
   displayName?: string;
   usedPercent: number;
+  windows?: readonly {
+    id: string;
+    kind: "session" | "weekly" | "monthly" | "other";
+    label: string;
+    usedPercent: number;
+    resetsAt?: string;
+    windowDurationMins?: number;
+  }[];
   resetCredits?: { availableCount: number };
 }) {
   return {
@@ -135,7 +149,13 @@ function provider(input: {
     slashCommands: [],
     skills: [],
     displayName: input.displayName,
-    usageLimits: limits(input.usedPercent, input.resetCredits),
+    usageLimits: input.windows
+      ? {
+          checkedAt,
+          windows: input.windows,
+          ...(input.resetCredits ? { resetCredits: input.resetCredits } : {}),
+        }
+      : limits(input.usedPercent, input.resetCredits),
   };
 }
 
@@ -157,6 +177,7 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-18T10:30:00.000Z"));
   state.presentations = new Map();
+  state.usageMonitorMode = "lowest-percentage";
   state.popoverOpen = false;
   state.refreshProviders.mockClear();
   state.refreshUsageLimits.mockClear();
@@ -240,6 +261,47 @@ it.each([
   expect(trigger.props["aria-label"]).toBe(`Usage limits, ${label} remaining`);
   expect(trigger.props.style).toEqual({ color });
   expect(renderedText()).toContain(label);
+});
+
+it("shows the shortest window when that monitor mode is selected", async () => {
+  const environmentId = EnvironmentId.make("active");
+  const instanceId = ProviderInstanceId.make("active-provider");
+  state.usageMonitorMode = "shortest-window";
+  state.presentations = new Map([
+    [
+      environmentId,
+      presentation("Active", [
+        provider({
+          instanceId,
+          displayName: "Active account",
+          usedPercent: 45,
+          windows: [
+            {
+              id: "session",
+              kind: "session",
+              label: "Session",
+              usedPercent: 0,
+              resetsAt: "2026-09-18T12:00:00.000Z",
+              windowDurationMins: 300,
+            },
+            {
+              id: "weekly",
+              kind: "weekly",
+              label: "Weekly",
+              usedPercent: 45,
+              resetsAt: "2026-09-24T12:00:00.000Z",
+              windowDurationMins: 10080,
+            },
+          ],
+        }),
+      ]),
+    ],
+  ]);
+
+  await render({ environmentId, instanceId });
+
+  const trigger = renderer.root.findByProps({ "data-toolbar-control": "" });
+  expect(trigger.props["aria-label"]).toBe("Usage limits, 100% remaining");
 });
 
 it("shows distinct native and hub accounts across providers and keeps source notices", async () => {

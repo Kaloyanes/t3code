@@ -317,6 +317,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["timestamp clock locale system browser os 12 hour 24 hour"],
   },
   {
+    id: "usage-monitor",
+    title: "Usage monitor",
+    to: "/settings/general",
+    searchTerms: ["usage limits quota percentage shortest window session weekly five hour"],
+  },
+  {
     id: "response-streaming",
     title: "Response streaming",
     to: "/settings/general",
