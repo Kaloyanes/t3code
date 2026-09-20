@@ -1,5 +1,6 @@
 import {
   ArrowLeftIcon,
+  CalendarClockIcon,
   ChartNoAxesColumnIcon,
   CircleDotIcon,
   GitPullRequestIcon,
@@ -147,11 +148,13 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           ? "project-settings"
           : location.pathname === "/usage"
             ? "usage"
-            : location.pathname === "/pull-requests"
-              ? "pull-requests"
-              : location.pathname === "/issues"
-                ? "issues"
-                : null,
+            : location.pathname === "/automations"
+              ? "automations"
+              : location.pathname === "/pull-requests"
+                ? "pull-requests"
+                : location.pathname === "/issues"
+                  ? "issues"
+                  : null,
   });
   const { environments } = useEnvironments();
   const { activeDraftThread, activeThread } = useHandleNewThread();
@@ -161,6 +164,10 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   );
   const pullRequestsSupported = environments.some(
     (environment) => environment.serverConfig?.environment.capabilities.pullRequests === true,
+  );
+  const automationsSupported = environments.some(
+    (environment) =>
+      environment.serverConfig?.environment.capabilities.scheduledAutomations === true,
   );
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) {
@@ -201,6 +208,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     void navigate({ to: "/usage" });
   }, [isMobile, navigate, setOpenMobile]);
 
+  const handleAutomationsClick = useCallback(() => {
+    closeMobileSidebar();
+    void navigate({ to: "/automations" });
+  }, [closeMobileSidebar, navigate]);
+
   const handleBackClick = useCallback(() => {
     closeMobileSidebar();
     if (canGoBack) {
@@ -240,6 +252,13 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             label="Usage"
             onClick={handleUsageClick}
           />
+          {automationsSupported ? (
+            <SidebarUtilityItem
+              icon={<CalendarClockIcon />}
+              label="Automations"
+              onClick={handleAutomationsClick}
+            />
+          ) : null}
           <SidebarUtilityItem
             icon={<SettingsIcon />}
             label="Settings"

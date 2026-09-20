@@ -19,6 +19,8 @@ import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
+import * as AutomationService from "./automation/AutomationService.ts";
+import * as AutomationScheduler from "./automation/AutomationScheduler.ts";
 import * as HostPowerMonitor from "./background/HostPowerMonitor.ts";
 import * as ServerConfig from "./config.ts";
 import {
@@ -260,6 +262,13 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(RuntimeReceiptBusLive),
 );
+
+const AutomationSchedulerLive = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const scheduler = yield* AutomationScheduler.AutomationScheduler;
+    yield* scheduler.start();
+  }),
+).pipe(Layer.provide(AutomationScheduler.layer), Layer.provideMerge(AutomationService.layer));
 
 const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
   Layer.provide(ProviderSessionRuntime.layer),
@@ -520,6 +529,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   ),
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(VcsLayerLive),
+  Layer.provideMerge(AutomationSchedulerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(
     Layer.mergeAll(TerminalLayerLive, WorktreeRunLayerLive, PreviewLayerLive, DeviceLayerLive),
