@@ -9,8 +9,10 @@ import {
   type AutomationRun,
   type AutomationSchedule,
   type EnvironmentId,
+  type ProviderOptionSelection,
   type RuntimeMode,
 } from "@t3tools/contracts";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { AsyncResult } from "effect/unstable/reactivity";
 import * as Option from "effect/Option";
 import {
@@ -24,23 +26,44 @@ import {
   RotateCcwIcon,
   SquareIcon,
   Trash2Icon,
+  WandSparklesIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
+import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { useProjects } from "../../state/entities";
 import { automationEnvironment } from "../../state/automations";
+import { serverEnvironment } from "../../state/server";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { cn } from "../../lib/utils";
+import { getCustomModelOptionsByInstance } from "../../modelSelection";
+import {
+  applyProviderInstanceSettings,
+  deriveProviderInstanceEntries,
+  sortProviderInstanceEntries,
+} from "../../providerInstances";
 import { isElectron } from "../../env";
+import { requestConfirmDialog } from "../../confirmDialog";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { ScrollArea } from "../ui/scroll-area";
 import { SidebarInset } from "../ui/sidebar";
+import { Spinner } from "../ui/spinner";
+import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
+import { toastManager } from "../ui/toast";
+import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { TraitsPicker } from "../chat/TraitsPicker";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import {
+  AutomationDatePicker,
+  AutomationTimePicker,
+  StyledSelect,
+  TimeZonePicker,
+} from "./AutomationScheduleControls";
 
 type ScheduleKind = "once" | "daily" | "weekly";
 type Weekday = "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday";
@@ -56,8 +79,10 @@ interface AutomationFormState {
   readonly days: ReadonlyArray<Weekday>;
   readonly modelInstance: string;
   readonly model: string;
+  readonly modelOptions: ReadonlyArray<ProviderOptionSelection> | undefined;
   readonly baseBranch: string;
   readonly runtimeMode: RuntimeMode;
+  readonly useDedicatedWorktree: boolean;
   readonly timeoutMinutes: string;
   readonly inputTimeoutHours: string;
 }
@@ -101,8 +126,10 @@ function defaultForm(projectId = ""): AutomationFormState {
     days: ["monday", "friday"],
     modelInstance: "codex",
     model: "gpt-5.6",
+    modelOptions: undefined,
     baseBranch: "main",
     runtimeMode: "approval-required",
+    useDedicatedWorktree: true,
     timeoutMinutes: "",
     inputTimeoutHours: "",
   };
@@ -121,8 +148,10 @@ function formFromAutomation(automation: Automation): AutomationFormState {
     days: schedule.kind === "weekly" ? schedule.days : ["monday", "friday"],
     modelInstance: automation.execution.modelSelection.instanceId,
     model: automation.execution.modelSelection.model,
+    modelOptions: automation.execution.modelSelection.options,
     baseBranch: automation.execution.baseBranch,
     runtimeMode: automation.execution.runtimeMode,
+    useDedicatedWorktree: automation.execution.worktreePolicy === "dedicated",
     timeoutMinutes:
       automation.execution.timeoutMs === undefined
         ? ""
@@ -151,11 +180,12 @@ function executionFromForm(form: AutomationFormState): AutomationExecution {
     modelSelection: {
       instanceId: ProviderInstanceId.make(form.modelInstance.trim()),
       model: form.model.trim(),
+      ...(form.modelOptions === undefined ? {} : { options: form.modelOptions }),
     },
     baseBranch: form.baseBranch.trim(),
     runtimeMode: form.runtimeMode,
     interactionMode: "default",
-    worktreePolicy: "dedicated",
+    worktreePolicy: form.useDedicatedWorktree ? "dedicated" : "current-checkout",
     ...(form.timeoutMinutes.trim() === "" || !Number.isFinite(timeoutMinutes)
       ? {}
       : { timeoutMs: Math.max(0, Math.round(timeoutMinutes * 60_000)) }),
@@ -211,20 +241,35 @@ function FormField({
 function AutomationEditor({
   form,
   projects,
+  instanceEntries,
+  modelOptionsByInstance,
+  planModeEnabled,
   editing,
   saving,
+  enhancing,
+  canEnhance,
   onChange,
+  onEnhance,
   onSubmit,
   onNew,
 }: {
   readonly form: AutomationFormState;
   readonly projects: ReadonlyArray<{ readonly id: ProjectId; readonly title: string }>;
+  readonly instanceEntries: Parameters<typeof ProviderModelPicker>[0]["instanceEntries"];
+  readonly modelOptionsByInstance: Parameters<
+    typeof ProviderModelPicker
+  >[0]["modelOptionsByInstance"];
+  readonly planModeEnabled: boolean;
   readonly editing: boolean;
   readonly saving: boolean;
+  readonly enhancing: boolean;
+  readonly canEnhance: boolean;
   readonly onChange: (patch: Partial<AutomationFormState>) => void;
+  readonly onEnhance: () => void;
   readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   readonly onNew: () => void;
 }) {
+  const activeEntry = instanceEntries.find((entry) => entry.instanceId === form.modelInstance);
   return (
     <form
       onSubmit={onSubmit}
@@ -255,70 +300,65 @@ function AutomationEditor({
           />
         </FormField>
         <FormField label="Project">
-          <select
-            required
+          <StyledSelect
             disabled={editing}
             value={form.projectId}
-            onChange={(event) => onChange({ projectId: event.target.value })}
-            className="h-8 rounded-lg border border-input bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <option value="" disabled>
-              Select project
-            </option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.title}
-              </option>
-            ))}
-          </select>
+            ariaLabel="Project"
+            options={projects.map((project) => ({ value: project.id, label: project.title }))}
+            onChange={(projectId) => onChange({ projectId })}
+          />
         </FormField>
       </div>
       <FormField label="Prompt">
-        <Textarea
-          required
-          value={form.prompt}
-          onChange={(event) => onChange({ prompt: event.target.value })}
-          placeholder="What should the agent do?"
-        />
+        <div className="relative">
+          <Textarea
+            required
+            value={form.prompt}
+            onChange={(event) => onChange({ prompt: event.target.value })}
+            placeholder="What should the agent do?"
+            className="pr-10"
+          />
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            className="absolute right-1.5 bottom-1.5"
+            aria-label={enhancing ? "Enhancing prompt" : "Enhance prompt"}
+            aria-busy={enhancing}
+            disabled={
+              !canEnhance || enhancing || form.prompt.trim().length === 0 || !form.projectId
+            }
+            onClick={onEnhance}
+          >
+            {enhancing ? <Spinner className="size-4" /> : <WandSparklesIcon className="size-4" />}
+          </Button>
+        </div>
       </FormField>
       <div className="grid gap-3 sm:grid-cols-2">
         <FormField label="Schedule">
-          <select
+          <StyledSelect
             value={form.kind}
-            onChange={(event) => onChange({ kind: event.target.value as ScheduleKind })}
-            className="h-8 rounded-lg border border-input bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <option value="once">Once</option>
-            <option value="daily">Every day</option>
-            <option value="weekly">Weekly</option>
-          </select>
+            ariaLabel="Schedule"
+            options={[
+              { value: "once", label: "Once" },
+              { value: "daily", label: "Every day" },
+              { value: "weekly", label: "Weekly" },
+            ]}
+            onChange={(kind) => onChange({ kind })}
+          />
         </FormField>
         <FormField label="Time zone">
-          <Input
-            required
-            value={form.timeZone}
-            onChange={(event) => onChange({ timeZone: event.target.value })}
-          />
+          <TimeZonePicker value={form.timeZone} onChange={(timeZone) => onChange({ timeZone })} />
         </FormField>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {form.kind === "once" ? (
           <FormField label="Date">
-            <Input
-              required
-              type="date"
-              value={form.date}
-              onChange={(event) => onChange({ date: event.target.value })}
-            />
+            <AutomationDatePicker value={form.date} onChange={(date) => onChange({ date })} />
           </FormField>
         ) : null}
         <FormField label="Time">
-          <Input
-            required
-            type="time"
-            value={form.time}
-            onChange={(event) => onChange({ time: event.target.value })}
-          />
+          <AutomationTimePicker value={form.time} onChange={(time) => onChange({ time })} />
         </FormField>
       </div>
       {form.kind === "weekly" ? (
@@ -348,20 +388,36 @@ function AutomationEditor({
           </div>
         </FormField>
       ) : null}
-      <div className="grid gap-3 sm:grid-cols-3">
-        <FormField label="Provider instance">
-          <Input
-            required
-            value={form.modelInstance}
-            onChange={(event) => onChange({ modelInstance: event.target.value })}
-          />
-        </FormField>
-        <FormField label="Model">
-          <Input
-            required
-            value={form.model}
-            onChange={(event) => onChange({ model: event.target.value })}
-          />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <FormField label="Model and effort">
+          <div className="flex min-w-0 flex-wrap gap-2">
+            <ProviderModelPicker
+              activeInstanceId={ProviderInstanceId.make(form.modelInstance)}
+              model={form.model}
+              lockedProvider={null}
+              instanceEntries={instanceEntries}
+              modelOptionsByInstance={modelOptionsByInstance}
+              triggerVariant="outline"
+              triggerClassName="min-h-8 flex-1"
+              onInstanceModelChange={(instanceId, model) =>
+                onChange({ modelInstance: instanceId, model, modelOptions: undefined })
+              }
+            />
+            {activeEntry ? (
+              <TraitsPicker
+                provider={activeEntry.driverKind}
+                models={activeEntry.models}
+                model={form.model}
+                prompt=""
+                onPromptChange={() => {}}
+                modelOptions={form.modelOptions ?? []}
+                allowPromptInjectedEffort={false}
+                planModeEnabled={planModeEnabled}
+                triggerVariant="outline"
+                onModelOptionsChange={(modelOptions) => onChange({ modelOptions })}
+              />
+            ) : null}
+          </div>
         </FormField>
         <FormField label="Base branch">
           <Input
@@ -373,20 +429,33 @@ function AutomationEditor({
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <FormField label="Agent safety">
-          <select
+          <StyledSelect
             value={form.runtimeMode}
-            onChange={(event) => onChange({ runtimeMode: event.target.value as RuntimeMode })}
-            className="h-8 rounded-lg border border-input bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <option value="approval-required">Ask before risky actions</option>
-            <option value="auto-accept-edits">Auto-accept edits</option>
-            <option value="auto">Auto</option>
-            <option value="full-access">Full access</option>
-          </select>
+            ariaLabel="Agent safety"
+            options={[
+              { value: "approval-required", label: "Ask before risky actions" },
+              { value: "auto-accept-edits", label: "Auto-accept edits" },
+              { value: "auto", label: "Auto" },
+              { value: "full-access", label: "Full access" },
+            ]}
+            onChange={(runtimeMode) => onChange({ runtimeMode })}
+          />
         </FormField>
-        <div className="flex items-end text-xs text-muted-foreground">
-          Every run uses a dedicated worktree.
-        </div>
+        <FormField label="Workspace">
+          <div className="flex min-h-8 items-center justify-between gap-3 rounded-lg border border-input bg-background px-3 shadow-xs/5">
+            <span className="truncate text-sm font-normal text-foreground">Dedicated worktree</span>
+            <Switch
+              checked={form.useDedicatedWorktree}
+              onCheckedChange={(checked) => onChange({ useDedicatedWorktree: Boolean(checked) })}
+              aria-label="Use a dedicated worktree"
+            />
+          </div>
+          <span className="font-normal text-muted-foreground">
+            {form.useDedicatedWorktree
+              ? "Each run gets an isolated checkout."
+              : "Runs use the project's current checkout."}
+          </span>
+        </FormField>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <FormField label="Execution timeout (minutes)">
@@ -423,6 +492,9 @@ function AutomationEditor({
 }
 
 function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const { environments } = useEnvironments();
+  const environment = environments.find((candidate) => candidate.environmentId === environmentId);
+  const environmentSettings = useEnvironmentSettings(environmentId);
   const target = { environmentId, input: {} } as const;
   const result = useAtomValue(automationEnvironment.snapshot(target));
   const projects = useProjects().filter((project) => project.environmentId === environmentId);
@@ -432,6 +504,22 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<AutomationFormState>(() => defaultForm(projects[0]?.id));
   const [saving, setSaving] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
+  const projectSettings = resolveProjectSettings(
+    environmentSettings,
+    form.projectId ? ProjectId.make(form.projectId) : null,
+  ).settings;
+  const effectiveSettings = { ...environmentSettings, ...projectSettings };
+  const providers = environment?.serverConfig?.providers ?? [];
+  const instanceEntries = sortProviderInstanceEntries(
+    applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), projectSettings),
+  );
+  const modelOptionsByInstance = getCustomModelOptionsByInstance(
+    effectiveSettings,
+    providers,
+    ProviderInstanceId.make(form.modelInstance),
+    form.model,
+  );
   const automations = snapshot?.automations ?? [];
   const selected = creating
     ? null
@@ -453,6 +541,9 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
   const runNow = useAtomCommand(automationEnvironment.runNow, { reportFailure: true });
   const retryRun = useAtomCommand(automationEnvironment.retryRun, { reportFailure: true });
   const stopRun = useAtomCommand(automationEnvironment.stopRun, { reportFailure: true });
+  const enhancePrompt = useAtomCommand(serverEnvironment.enhancePrompt, {
+    reportFailure: false,
+  });
   const refresh = () => appAtomRegistry.refresh(automationEnvironment.snapshot(target));
   const applyForm = (patch: Partial<AutomationFormState>) =>
     setForm((current) => ({ ...current, ...patch }));
@@ -478,6 +569,30 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
     setCreating(true);
     setEditing(false);
     setForm(defaultForm(projects[0]?.id));
+  };
+
+  const runPromptEnhancement = async () => {
+    const previousPrompt = form.prompt;
+    if (!form.projectId || previousPrompt.trim().length === 0 || enhancing) return;
+    setEnhancing(true);
+    const enhanced = await enhancePrompt({
+      environmentId,
+      input: {
+        projectId: ProjectId.make(form.projectId),
+        prompt: previousPrompt,
+        references: [],
+        attachments: [],
+      },
+    });
+    setEnhancing(false);
+    if (AsyncResult.isSuccess(enhanced)) {
+      setForm((current) =>
+        current.prompt === previousPrompt ? { ...current, prompt: enhanced.value.prompt } : current,
+      );
+      toastManager.add({ type: "success", title: "Prompt enhanced" });
+    } else {
+      toastManager.add({ type: "error", title: "Couldn't enhance prompt" });
+    }
   };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -636,12 +751,20 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
                     <Button
                       size="sm"
                       variant="destructive-outline"
-                      onClick={() =>
-                        window.confirm("Cancel this automation and its queued schedule?") &&
-                        void runAction(() =>
-                          cancel({ environmentId, input: { id: AutomationId.make(selected.id) } }),
-                        )
-                      }
+                      onClick={() => {
+                        void requestConfirmDialog(
+                          "Cancel this automation?\nIts queued schedule will also be canceled.",
+                          { variant: "destructive" },
+                        )?.then((confirmed) => {
+                          if (confirmed)
+                            void runAction(() =>
+                              cancel({
+                                environmentId,
+                                input: { id: AutomationId.make(selected.id) },
+                              }),
+                            );
+                        });
+                      }}
                     >
                       <Trash2Icon /> Cancel
                     </Button>
@@ -665,7 +788,10 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
                 <div>
                   <span className="text-muted-foreground">Safety</span>
                   <p className="mt-1 font-medium text-foreground">
-                    {selected.execution.runtimeMode} · dedicated worktree
+                    {selected.execution.runtimeMode} ·{" "}
+                    {selected.execution.worktreePolicy === "dedicated"
+                      ? "dedicated worktree"
+                      : "current checkout"}
                   </p>
                 </div>
               </div>
@@ -682,12 +808,19 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
                 <Button
                   size="xs"
                   variant="outline"
-                  onClick={() =>
-                    window.confirm("Stop the active run?") &&
-                    void runAction(() =>
-                      stopRun({ environmentId, input: { id: AutomationRunId.make(activeRun.id) } }),
-                    )
-                  }
+                  onClick={() => {
+                    void requestConfirmDialog("Stop the active run?", {
+                      variant: "destructive",
+                    })?.then((confirmed) => {
+                      if (confirmed)
+                        void runAction(() =>
+                          stopRun({
+                            environmentId,
+                            input: { id: AutomationRunId.make(activeRun.id) },
+                          }),
+                        );
+                    });
+                  }}
                 >
                   <SquareIcon /> Stop run
                 </Button>
@@ -755,9 +888,17 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
           <AutomationEditor
             form={form}
             projects={projects}
+            instanceEntries={instanceEntries}
+            modelOptionsByInstance={modelOptionsByInstance}
+            planModeEnabled={environmentSettings.planModeEnabled}
             editing={selected !== null && editing}
             saving={saving}
+            enhancing={enhancing}
+            canEnhance={
+              environment?.serverConfig?.environment.capabilities.promptEnhancement === true
+            }
             onChange={applyForm}
+            onEnhance={() => void runPromptEnhancement()}
             onSubmit={submit}
             onNew={startNew}
           />
@@ -795,17 +936,17 @@ export function AutomationsPage() {
               </p>
             </div>
             {environments.length > 1 ? (
-              <select
-                value={environmentId ?? ""}
-                onChange={(event) => setEnvironmentId(event.target.value as EnvironmentId)}
-                className="h-8 max-w-64 rounded-lg border border-input bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {environments.map((candidate) => (
-                  <option key={candidate.environmentId} value={candidate.environmentId}>
-                    {candidate.label}
-                  </option>
-                ))}
-              </select>
+              <StyledSelect
+                value={environmentId!}
+                ariaLabel="Environment"
+                options={environments.map((candidate) => ({
+                  value: candidate.environmentId,
+                  label: candidate.label,
+                }))}
+                onChange={(nextEnvironmentId) =>
+                  setEnvironmentId(nextEnvironmentId as EnvironmentId)
+                }
+              />
             ) : null}
           </div>
         </WorkspacePageHeader>

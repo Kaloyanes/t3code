@@ -51,7 +51,7 @@ export const AutomationExecution = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("default")),
   ),
-  worktreePolicy: Schema.Literal("dedicated").pipe(
+  worktreePolicy: Schema.Literals(["dedicated", "current-checkout"]).pipe(
     Schema.withDecodingDefault(Effect.succeed("dedicated")),
   ),
   timeoutMs: Schema.optional(NonNegativeInt),

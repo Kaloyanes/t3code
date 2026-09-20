@@ -67,4 +67,48 @@ describe("makeAutomationTurnStartCommand", () => {
     });
     expect(command.bootstrap?.createThread?.worktreePath).toBeNull();
   });
+
+  it("starts in the project checkout when dedicated worktrees are disabled", () => {
+    const run = decodeRun({
+      id: "run-2",
+      automationId: "automation-1",
+      projectId: "project-1",
+      threadId: null,
+      trigger: "schedule",
+      prompt: "Update the changelog.",
+      execution: {
+        modelSelection: { instanceId: "codex", model: "gpt-5", options: [] },
+        baseBranch: "main",
+        worktreePolicy: "current-checkout",
+      },
+      scheduledAt: "2026-09-20T09:30:00.000Z",
+      status: "running",
+      startedAt: "2026-09-20T09:30:01.000Z",
+      completedAt: null,
+      lateByMs: 1_000,
+      reason: null,
+    });
+    const project = decodeProject({
+      id: "project-1",
+      title: "T3 Code",
+      workspaceRoot: "/workspace/t3-code",
+      defaultModelSelection: null,
+      scripts: [],
+      createdAt: "2026-09-20T09:00:00.000Z",
+      updatedAt: "2026-09-20T09:00:00.000Z",
+    });
+    const command = decodeCommand(
+      makeAutomationTurnStartCommand({
+        run,
+        project,
+        threadId: ThreadId.make("thread-2"),
+        messageId: MessageId.make("message-2"),
+        commandId: CommandId.make("command-2"),
+        createdAt: "2026-09-20T09:30:01.000Z",
+      }),
+    );
+
+    expect(command.bootstrap?.prepareWorktree).toBeUndefined();
+    expect(command.bootstrap?.createThread?.worktreePath).toBeNull();
+  });
 });

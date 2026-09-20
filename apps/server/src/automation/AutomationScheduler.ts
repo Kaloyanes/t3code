@@ -65,12 +65,16 @@ export function makeAutomationTurnStartCommand(input: {
         worktreePath: null,
         createdAt,
       },
-      prepareWorktree: {
-        projectCwd: project.workspaceRoot,
-        baseBranch: run.execution.baseBranch,
-        branch: `t3/automation/${run.id}`,
-        requireWorktree: true,
-      },
+      ...(run.execution.worktreePolicy === "dedicated"
+        ? {
+            prepareWorktree: {
+              projectCwd: project.workspaceRoot,
+              baseBranch: run.execution.baseBranch,
+              branch: `t3/automation/${run.id}`,
+              requireWorktree: true,
+            },
+          }
+        : {}),
       runSetupScript: false,
     },
     createdAt,

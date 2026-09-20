@@ -63,6 +63,25 @@ describe("AutomationExecution", () => {
       worktreePolicy: "dedicated",
     });
   });
+
+  it("allows scheduled work to use the current checkout", () => {
+    expect(
+      decodeAutomationExecution({
+        modelSelection: {
+          instanceId: "codex",
+          model: "gpt-5.6",
+          options: [{ id: "effort", value: "high" }],
+        },
+        baseBranch: "main",
+        worktreePolicy: "current-checkout",
+      }),
+    ).toMatchObject({
+      modelSelection: {
+        options: [{ id: "effort", value: "high" }],
+      },
+      worktreePolicy: "current-checkout",
+    });
+  });
 });
 
 describe("Automation and AutomationRun", () => {
