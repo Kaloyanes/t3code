@@ -60,7 +60,7 @@ import { Textarea } from "../ui/textarea";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
-import { issueWorktreeIsLinked } from "./issue.logic";
+import { issueWorktreeIsLinked, issueWorktreePrimaryAction } from "./issue.logic";
 
 const REACTION_CONTENT: readonly IssueReactionContent[] = [
   "thumbs-up",
@@ -1006,6 +1006,7 @@ export function IssueWorktreeDialog({
   });
   const remove = useAtomCommand(issueEnvironment.worktreeDelete, { reportFailure: false });
   const replace = useAtomCommand(issueEnvironment.worktreeReplace, { reportFailure: false });
+  const link = useAtomCommand(issueEnvironment.link, { reportFailure: false });
   const newThread = useNewThreadHandler();
   const actions = useScopedActions();
   const [name, setName] = useState(`issue-${reference.number}`);
@@ -1018,6 +1019,7 @@ export function IssueWorktreeDialog({
   const [forceAcknowledged, setForceAcknowledged] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [worktreeQuery, setWorktreeQuery] = useState("");
+  const [linkingThreadId, setLinkingThreadId] = useState<string | null>(null);
   const worktrees = useMemo(
     () =>
       threads.filter(
@@ -1048,7 +1050,12 @@ export function IssueWorktreeDialog({
   const replacePending = actions.hasPending("replace");
   const preflightPending = actions.hasPending("preflight");
   const deletePending = actions.hasPending("delete");
+  const linkPending = actions.hasPending("link");
   const openWorktreePending = actions.hasPending("open-worktree");
+  const worktreePrimaryAction = issueWorktreePrimaryAction({
+    canLink,
+    hasLinkedWork: linkedWork !== null,
+  });
 
   const prepareWorktree = () => {
     const trimmedName = name.trim();
@@ -1175,6 +1182,31 @@ export function IssueWorktreeDialog({
     );
   };
 
+  const linkWorktree = (target: (typeof worktrees)[number]) => {
+    if (linkedWork !== null || !canLink || linkPending) return;
+    setNotice(null);
+    setLinkingThreadId(target.id);
+    void actions
+      .run(
+        "link",
+        "Unable to link issue to worktree",
+        () =>
+          link({
+            environmentId,
+            input: {
+              ...reference,
+              threadId: target.id,
+              source: "manual",
+            },
+          }),
+        () => {
+          setNotice("Issue linked to this worktree.");
+          onActed?.();
+        },
+      )
+      .finally(() => setLinkingThreadId(null));
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup className="max-w-xl">
@@ -1261,7 +1293,9 @@ export function IssueWorktreeDialog({
                   <span className="text-muted-foreground">({worktrees.length})</span>
                 </h3>
                 <p className="text-xs text-muted-foreground">
-                  Start a new thread in a worktree, or select worktrees to check before deleting.
+                  {worktreePrimaryAction === "link-issue"
+                    ? "Link this issue to an existing worktree, or select worktrees to check before deleting."
+                    : "Start a new thread in a worktree, or select worktrees to check before deleting."}
                 </p>
               </div>
               {worktrees.length > 8 ? (
@@ -1313,11 +1347,32 @@ export function IssueWorktreeDialog({
                       <Button
                         size="xs"
                         variant="outline"
-                        aria-label={`New thread in ${thread.branch ?? thread.title}`}
-                        onClick={() => openWorktree(thread)}
-                        disabled={openWorktreePending}
+                        aria-label={
+                          worktreePrimaryAction === "link-issue"
+                            ? `Link issue #${reference.number} to ${thread.branch ?? thread.title}`
+                            : `New thread in ${thread.branch ?? thread.title}`
+                        }
+                        onClick={() =>
+                          worktreePrimaryAction === "link-issue"
+                            ? linkWorktree(thread)
+                            : openWorktree(thread)
+                        }
+                        disabled={linkPending || openWorktreePending}
+                        aria-busy={linkingThreadId === thread.id}
                       >
-                        <SquarePenIcon /> New thread
+                        {linkingThreadId === thread.id ? (
+                          <>
+                            <Spinner className="size-3.5" aria-label="Linking issue" /> Linking…
+                          </>
+                        ) : worktreePrimaryAction === "link-issue" ? (
+                          <>
+                            <LinkIcon /> Link issue
+                          </>
+                        ) : (
+                          <>
+                            <SquarePenIcon /> New thread
+                          </>
+                        )}
                       </Button>
                     </div>
                   );
@@ -1354,6 +1409,11 @@ export function IssueWorktreeDialog({
                 pending={preflightPending}
                 pendingLabel="Checking worktrees before deletion…"
                 error={actions.errorFor("preflight")}
+              />
+              <ActionFeedback
+                pending={linkPending}
+                pendingLabel="Linking issue to worktree…"
+                error={actions.errorFor("link")}
               />
               <ActionFeedback
                 pending={openWorktreePending}

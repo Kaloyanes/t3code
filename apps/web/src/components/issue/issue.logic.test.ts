@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   issueDeletePreflightSummary,
   issueLabelForeground,
+  issueWorktreePrimaryAction,
   issueWorktreeIsLinked,
   normalizeIssueLabelColor,
   selectIssueWorktreeAction,
@@ -89,6 +90,17 @@ describe("issueWorktreeIsLinked", () => {
     expect(issueWorktreeIsLinked({ id: "other-thread", worktreePath: null }, linkedWork)).toBe(
       false,
     );
+  });
+});
+
+describe("issueWorktreePrimaryAction", () => {
+  it("offers linking when the issue is unlinked and the viewer can link it", () => {
+    expect(issueWorktreePrimaryAction({ canLink: true, hasLinkedWork: false })).toBe("link-issue");
+  });
+
+  it("keeps new-thread behavior once the issue is linked or linking is unavailable", () => {
+    expect(issueWorktreePrimaryAction({ canLink: true, hasLinkedWork: true })).toBe("new-thread");
+    expect(issueWorktreePrimaryAction({ canLink: false, hasLinkedWork: false })).toBe("new-thread");
   });
 });
 

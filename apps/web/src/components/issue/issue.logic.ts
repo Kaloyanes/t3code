@@ -217,3 +217,10 @@ export function issueWorktreeIsLinked(
       normalizeProjectPathForComparison(linkedWork.worktreePath)
   );
 }
+
+export function issueWorktreePrimaryAction(input: {
+  readonly canLink: boolean;
+  readonly hasLinkedWork: boolean;
+}): "link-issue" | "new-thread" {
+  return input.canLink && !input.hasLinkedWork ? "link-issue" : "new-thread";
+}
