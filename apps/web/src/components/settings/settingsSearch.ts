@@ -290,6 +290,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/appearance",
   },
   {
+    id: "ui-animations",
+    title: "UI animations",
+    to: "/settings/appearance",
+    searchTerms: ["motion duration milliseconds reduced motion"],
+  },
+  {
     id: "environment-identification",
     title: "Environment identification",
     to: "/settings/appearance",

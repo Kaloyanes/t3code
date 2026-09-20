@@ -37,6 +37,7 @@ import {
   MAX_PROMPT_FONT_SIZE,
   MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   MAX_TERMINAL_FONT_SIZE,
+  MAX_UI_ANIMATION_DURATION_MS,
   MIN_CODE_FONT_SIZE,
   MIN_APPEARANCE_CONTRAST,
   MIN_GLASS_OPACITY,
@@ -46,6 +47,7 @@ import {
   MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   type ResponseStreamingMode,
   MIN_TERMINAL_FONT_SIZE,
+  MIN_UI_ANIMATION_DURATION_MS,
   type QuitConfirmationMode,
   type UsageMonitorMode,
   SidebarProjectSortOrder,
@@ -559,6 +561,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.panelAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs
         ? ["Panel animations"]
         : []),
+      ...(settings.uiAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.uiAnimationDurationMs
+        ? ["UI animations"]
+        : []),
       ...(settings.environmentIdentificationMode !==
       DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
         ? ["Environment identification"]
@@ -823,6 +828,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
+      uiAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.uiAnimationDurationMs,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
@@ -1202,6 +1208,13 @@ export function AppearanceSettingsPanel() {
     "--settings-slider-progress": `${panelAnimationDurationRatio * 100}%`,
     "--settings-slider-fill-offset": `${0.5 - panelAnimationDurationRatio}rem`,
   } as CSSProperties;
+  const uiAnimationDurationRatio =
+    (settings.uiAnimationDurationMs - MIN_UI_ANIMATION_DURATION_MS) /
+    (MAX_UI_ANIMATION_DURATION_MS - MIN_UI_ANIMATION_DURATION_MS);
+  const uiAnimationDurationSliderStyle = {
+    "--settings-slider-progress": `${uiAnimationDurationRatio * 100}%`,
+    "--settings-slider-fill-offset": `${0.5 - uiAnimationDurationRatio}rem`,
+  } as CSSProperties;
 
   return (
     <SettingsPageContainer>
@@ -1512,6 +1525,53 @@ export function AppearanceSettingsPanel() {
       </SettingsSection>
 
       <SettingsSection id="motion" title="Motion">
+        <SettingsRow
+          {...searchableSetting("ui-animations")}
+          description="Set how fast interface changes animate. Menus use their own timing. Set to 0 to reduce motion."
+          control={
+            <div className="flex w-full items-center gap-3 sm:w-52">
+              <output
+                className="min-w-16 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+                htmlFor="ui-animation-duration"
+              >
+                {settings.uiAnimationDurationMs} ms
+              </output>
+              <input
+                aria-label="UI animation duration"
+                className="settings-slider min-w-0 flex-1"
+                id="ui-animation-duration"
+                max={MAX_UI_ANIMATION_DURATION_MS}
+                min={MIN_UI_ANIMATION_DURATION_MS}
+                onChange={(event) => {
+                  const uiAnimationDurationMs = Number(event.currentTarget.value);
+                  if (
+                    Number.isInteger(uiAnimationDurationMs) &&
+                    uiAnimationDurationMs >= MIN_UI_ANIMATION_DURATION_MS &&
+                    uiAnimationDurationMs <= MAX_UI_ANIMATION_DURATION_MS
+                  ) {
+                    updateSettings({ uiAnimationDurationMs });
+                  }
+                }}
+                step={25}
+                style={uiAnimationDurationSliderStyle}
+                type="range"
+                value={settings.uiAnimationDurationMs}
+              />
+            </div>
+          }
+          resetAction={
+            settings.uiAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.uiAnimationDurationMs ? (
+              <SettingResetButton
+                label="UI animations"
+                onClick={() =>
+                  updateSettings({
+                    uiAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.uiAnimationDurationMs,
+                  })
+                }
+              />
+            ) : null
+          }
+        />
         <SettingsRow
           {...searchableSetting("panel-animations")}
           description="Set how fast panels open and close."

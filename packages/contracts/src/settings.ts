@@ -121,6 +121,16 @@ export const PanelAnimationDurationMs = Schema.Int.check(
 );
 export type PanelAnimationDurationMs = typeof PanelAnimationDurationMs.Type;
 const DEFAULT_PANEL_ANIMATION_DURATION_MS: PanelAnimationDurationMs = 0;
+export const MIN_UI_ANIMATION_DURATION_MS = 0;
+export const MAX_UI_ANIMATION_DURATION_MS = 400;
+export const UiAnimationDurationMs = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_UI_ANIMATION_DURATION_MS,
+    maximum: MAX_UI_ANIMATION_DURATION_MS,
+  }),
+);
+export type UiAnimationDurationMs = typeof UiAnimationDurationMs.Type;
+const DEFAULT_UI_ANIMATION_DURATION_MS: UiAnimationDurationMs = 150;
 /**
  * Font size preferences, in CSS pixels. The ranges are deliberately narrow:
  * the interface size scales every rem-based dimension in the app, so the
@@ -338,6 +348,9 @@ export const ClientSettingsSchema = Schema.Struct({
   // layout work on every frame, which is noticeable on lower-power clients.
   panelAnimationDurationMs: PanelAnimationDurationMs.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PANEL_ANIMATION_DURATION_MS)),
+  ),
+  uiAnimationDurationMs: UiAnimationDurationMs.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_UI_ANIMATION_DURATION_MS)),
   ),
   browserDefaultViewport: PreviewViewportSetting.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_VIEWPORT)),
@@ -2175,6 +2188,7 @@ export const ClientSettingsPatch = Schema.Struct({
   loadBalancingWeights: Schema.optionalKey(LoadBalancingWeights),
   appearanceContrast: Schema.optionalKey(AppearanceContrast),
   panelAnimationDurationMs: Schema.optionalKey(PanelAnimationDurationMs),
+  uiAnimationDurationMs: Schema.optionalKey(UiAnimationDurationMs),
   browserDefaultViewport: Schema.optionalKey(PreviewViewportSetting),
   browserDefaultZoomFactor: Schema.optionalKey(PreviewZoomFactor),
   browserDefaultAppearance: Schema.optionalKey(PreviewAppearancePreference),
