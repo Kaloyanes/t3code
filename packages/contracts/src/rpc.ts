@@ -331,6 +331,14 @@ import {
   PromptEnhancementInput,
   PromptEnhancementResult,
 } from "./promptEnhancement.ts";
+import {
+  AutomationCreateInput,
+  AutomationIdInput,
+  AutomationOperationError,
+  AutomationRunIdInput,
+  AutomationSnapshot,
+  AutomationUpdateInput,
+} from "./scheduledAutomation.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -342,6 +350,17 @@ export const WS_METHODS = {
   projectsSearchContents: "projects.searchContents",
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
+
+  // Scheduled automation methods
+  automationsGetSnapshot: "automations.getSnapshot",
+  automationsCreate: "automations.create",
+  automationsUpdate: "automations.update",
+  automationsPause: "automations.pause",
+  automationsResume: "automations.resume",
+  automationsCancel: "automations.cancel",
+  automationsRunNow: "automations.runNow",
+  automationsRetryRun: "automations.retryRun",
+  automationsStopRun: "automations.stopRun",
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
@@ -555,6 +574,54 @@ const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   payload: Schema.Struct({}),
   success: ServerConfig,
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError, EnvironmentAuthorizationError]),
+});
+
+const AutomationRpcError = Schema.Union([AutomationOperationError, EnvironmentAuthorizationError]);
+
+const WsAutomationsGetSnapshotRpc = Rpc.make(WS_METHODS.automationsGetSnapshot, {
+  payload: Schema.Struct({}),
+  success: AutomationSnapshot,
+  error: AutomationRpcError,
+});
+const WsAutomationsCreateRpc = Rpc.make(WS_METHODS.automationsCreate, {
+  payload: AutomationCreateInput,
+  success: AutomationSnapshot,
+  error: AutomationRpcError,
+});
+const WsAutomationsUpdateRpc = Rpc.make(WS_METHODS.automationsUpdate, {
+  payload: AutomationUpdateInput,
+  success: AutomationSnapshot,
+  error: AutomationRpcError,
+});
+const WsAutomationsPauseRpc = Rpc.make(WS_METHODS.automationsPause, {
+  payload: AutomationIdInput,
+  success: AutomationSnapshot,
+  error: AutomationRpcError,
+});
+const WsAutomationsResumeRpc = Rpc.make(WS_METHODS.automationsResume, {
+  payload: AutomationIdInput,
+  success: AutomationSnapshot,
+  error: AutomationRpcError,
+});
+const WsAutomationsCancelRpc = Rpc.make(WS_METHODS.automationsCancel, {
+  payload: AutomationIdInput,
+  success: AutomationSnapshot,
+  error: AutomationRpcError,
+});
+const WsAutomationsRunNowRpc = Rpc.make(WS_METHODS.automationsRunNow, {
+  payload: AutomationIdInput,
+  success: AutomationSnapshot,
+  error: AutomationRpcError,
+});
+const WsAutomationsRetryRunRpc = Rpc.make(WS_METHODS.automationsRetryRun, {
+  payload: AutomationRunIdInput,
+  success: AutomationSnapshot,
+  error: AutomationRpcError,
+});
+const WsAutomationsStopRunRpc = Rpc.make(WS_METHODS.automationsStopRun, {
+  payload: AutomationRunIdInput,
+  success: AutomationSnapshot,
+  error: AutomationRpcError,
 });
 
 const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, {
@@ -1649,6 +1716,15 @@ const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeResourceTel
 export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
+  WsAutomationsGetSnapshotRpc,
+  WsAutomationsCreateRpc,
+  WsAutomationsUpdateRpc,
+  WsAutomationsPauseRpc,
+  WsAutomationsResumeRpc,
+  WsAutomationsCancelRpc,
+  WsAutomationsRunNowRpc,
+  WsAutomationsRetryRunRpc,
+  WsAutomationsStopRunRpc,
   WsServerRefreshProvidersRpc,
   WsServerUpdateProviderRpc,
   WsProviderConsumeResetCreditRpc,

@@ -17,6 +17,17 @@ Terms whose meaning matters across T3 Code. Architecture and lifecycle constrain
 | Activity       | A non-message timeline item, such as a tool action, approval, or failure.                         |
 | T3 home        | The base data directory. Runtime state normally lives under its `userdata` directory.             |
 
+## Scheduled agent work
+
+| Term           | Meaning                                                                                                                                                  |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Automation     | A reusable definition containing an agent instruction, execution settings, and a time-based schedule.                                                   |
+| Scheduled run  | One occurrence of an automation. Each scheduled run starts its own thread so runs keep separate history and workspace state.                             |
+| Missed run     | A scheduled run whose due time passed while its environment was unavailable. The environment may run it once after recovery and marks it as late.       |
+| Automation manager | The environment-scoped place where users view, configure, control, and inspect automations and their scheduled runs.                                  |
+| Needs attention | A derived warning that an automation cannot run until a project, provider, model, or other required configuration is fixed.                              |
+| Run history    | The durable record of an automation's past scheduled runs, outcomes, and links to their threads.                                                        |
+
 ## Orchestration
 
 | Term                    | Meaning                                                                                      |
