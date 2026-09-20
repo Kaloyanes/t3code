@@ -29,8 +29,8 @@ vi.mock("@effect/atom-react", () => ({ useAtomValue: () => null }));
 vi.mock("~/state/server", () => ({ serverEnvironment: { configValueAtom: () => null } }));
 vi.mock("~/state/session", () => ({ readEnvironmentScope: () => true }));
 
-vi.mock("../panelAnimations", () => ({
-  usePanelAnimationSettings: () => ({ active: true, durationMs: 180 }),
+vi.mock("../uiAnimations", () => ({
+  useUiAnimationSettings: () => ({ active: true, durationMs: 180 }),
 }));
 
 vi.mock("./projectScriptEditor", () => ({

@@ -435,10 +435,10 @@ export const ChatHeader = memo(function ChatHeader({
                 render={<h2 aria-label={activeThreadTitle} className="min-w-0 flex-1" />}
               >
                 <AnimatedText
-                    as={WorkspaceBreadcrumbText}
-                    value={activeThreadTitle}
-                    changeKey={`${activeThreadEnvironmentId}:${activeThreadId}`}
-                  />
+                  as={WorkspaceBreadcrumbText}
+                  value={activeThreadTitle}
+                  changeKey={`${activeThreadEnvironmentId}:${activeThreadId}`}
+                />
               </TooltipTrigger>
               <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
             </Tooltip>

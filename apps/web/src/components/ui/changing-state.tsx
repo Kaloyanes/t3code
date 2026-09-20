@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useState,
   type CSSProperties,
   type ElementType,
   type ReactNode,
@@ -11,20 +12,12 @@ import {
 } from "react";
 
 import { cn } from "~/lib/utils";
-import { usePanelAnimationSettings } from "../../panelAnimations";
+import { useUiAnimationSettings } from "../../uiAnimations";
 
 type ChangingStateStyle = CSSProperties & { "--changing-state-duration": string };
-type ChangingTextStyle = CSSProperties & { "--changing-text-index": number };
-
-const derivativeDuration = (durationMs: number) => Math.round(durationMs / 1.5);
-
-function textTokens(value: string) {
-  const occurrences = new Map<string, number>();
-  return value.split(/(\s+)/).map((text, position) => {
-    const occurrence = occurrences.get(text) ?? 0;
-    occurrences.set(text, occurrence + 1);
-    return { key: `${text}:${occurrence}`, position, text };
-  });
+interface AnimatedTextValue {
+  readonly changeKey: string;
+  readonly value: string;
 }
 
 export const AnimatedText = memo(function AnimatedText({
@@ -38,28 +31,43 @@ export const AnimatedText = memo(function AnimatedText({
   readonly as?: ElementType;
   readonly className?: string;
 }) {
-  const { active, durationMs } = usePanelAnimationSettings();
-  const tokens = textTokens(value);
+  const { active, durationMs } = useUiAnimationSettings();
+  const [transition, setTransition] = useState<{
+    current: AnimatedTextValue;
+    previous: AnimatedTextValue | null;
+  }>({ current: { changeKey, value }, previous: null });
+  if (transition.current.changeKey !== changeKey || transition.current.value !== value) {
+    setTransition({
+      current: { changeKey, value },
+      previous: active ? transition.current : null,
+    });
+  }
   const style = {
-    "--changing-state-duration": `${derivativeDuration(durationMs)}ms`,
+    "--changing-state-duration": `${durationMs}ms`,
   } as ChangingStateStyle;
 
   return (
     <Component aria-label={value} className={cn("changing-text", className)}>
-      <span key={changeKey} aria-hidden="true" className="changing-text-content" style={style}>
-        {tokens.map((token) =>
-          /^\s+$/.test(token.text) ? (
-            token.text
-          ) : (
-            <span
-              key={token.key}
-              className={cn(active && "changing-text-word")}
-              style={{ "--changing-text-index": token.position } as ChangingTextStyle}
-            >
-              {token.text}
-            </span>
-          ),
-        )}
+      {active && transition.previous ? (
+        <span
+          key={`${transition.previous.changeKey}:outgoing`}
+          aria-hidden="true"
+          className="changing-text-content changing-text-exit"
+          data-changing-text="outgoing"
+          onAnimationEnd={() => setTransition((current) => ({ ...current, previous: null }))}
+          style={style}
+        >
+          {transition.previous.value}
+        </span>
+      ) : null}
+      <span
+        key={transition.current.changeKey}
+        aria-hidden="true"
+        className={cn("changing-text-content", active && "changing-text-enter")}
+        data-changing-text="incoming"
+        style={style}
+      >
+        {transition.current.value}
       </span>
     </Component>
   );
@@ -75,9 +83,9 @@ export const AnimatedIcon = memo(
     readonly children: ReactNode;
     readonly className?: string;
   }) {
-    const { active, durationMs } = usePanelAnimationSettings();
+    const { active, durationMs } = useUiAnimationSettings();
     const style = {
-      "--changing-state-duration": `${derivativeDuration(durationMs)}ms`,
+      "--changing-state-duration": `${durationMs}ms`,
     } as ChangingStateStyle;
 
     return (
@@ -92,7 +100,7 @@ export const AnimatedIcon = memo(
 );
 
 export function useAnimatedLayout<T extends HTMLElement>(): RefCallback<T> {
-  const { active, durationMs } = usePanelAnimationSettings();
+  const { active, durationMs } = useUiAnimationSettings();
   const elementRef = useRef<T | null>(null);
   const setElement = useCallback((element: T | null) => {
     elementRef.current = element;
@@ -102,7 +110,7 @@ export function useAnimatedLayout<T extends HTMLElement>(): RefCallback<T> {
     const element = elementRef.current;
     if (!element || typeof HTMLElement === "undefined") return;
     const controller = autoAnimate(element, {
-      duration: derivativeDuration(durationMs),
+      duration: durationMs,
       easing: "cubic-bezier(0.23, 1, 0.32, 1)",
     });
     if (!active) controller.disable();
