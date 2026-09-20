@@ -39,6 +39,7 @@ import {
 import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import { useClientSettings } from "../../hooks/useSettings";
+import { AnimatedText } from "../ui/changing-state";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -414,7 +415,11 @@ export const ChatHeader = memo(function ChatHeader({
                 }
               >
                 <h2 className="min-w-0">
-                  <WorkspaceBreadcrumbText>{activeThreadTitle}</WorkspaceBreadcrumbText>
+                  <AnimatedText
+                    as={WorkspaceBreadcrumbText}
+                    value={activeThreadTitle}
+                    changeKey={`${activeThreadEnvironmentId}:${activeThreadId}`}
+                  />
                 </h2>
                 <ChevronDownIcon
                   aria-hidden
@@ -429,7 +434,11 @@ export const ChatHeader = memo(function ChatHeader({
               <TooltipTrigger
                 render={<h2 aria-label={activeThreadTitle} className="min-w-0 flex-1" />}
               >
-                <WorkspaceBreadcrumbText>{activeThreadTitle}</WorkspaceBreadcrumbText>
+                <AnimatedText
+                    as={WorkspaceBreadcrumbText}
+                    value={activeThreadTitle}
+                    changeKey={`${activeThreadEnvironmentId}:${activeThreadId}`}
+                  />
               </TooltipTrigger>
               <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
             </Tooltip>

@@ -29,6 +29,10 @@ vi.mock("@effect/atom-react", () => ({ useAtomValue: () => null }));
 vi.mock("~/state/server", () => ({ serverEnvironment: { configValueAtom: () => null } }));
 vi.mock("~/state/session", () => ({ readEnvironmentScope: () => true }));
 
+vi.mock("../panelAnimations", () => ({
+  usePanelAnimationSettings: () => ({ active: true, durationMs: 180 }),
+}));
+
 vi.mock("./projectScriptEditor", () => ({
   EMPTY_PROJECT_SCRIPT_INPUT: {
     name: "",
@@ -125,28 +129,32 @@ const scripts = [
 
 const action = async () => AsyncResult.success(undefined);
 
-function renderControl(
-  input: {
-    startingScriptIds?: ReadonlySet<string>;
-    runningScriptIds?: ReadonlySet<string>;
-  } = {},
-) {
+interface ControlState {
+  startingScriptIds?: ReadonlySet<string>;
+  runningScriptIds?: ReadonlySet<string>;
+}
+
+function Control(input: ControlState) {
+  return (
+    <ProjectScriptsControl
+      scripts={scripts}
+      environmentId={EnvironmentId.make("environment-1")}
+      {...(input.startingScriptIds ? { startingScriptIds: input.startingScriptIds } : {})}
+      {...(input.runningScriptIds ? { runningScriptIds: input.runningScriptIds } : {})}
+      onRunScript={vi.fn()}
+      onStopScript={vi.fn()}
+      onAddScript={action}
+      onUpdateScript={action}
+      onDeleteScript={action}
+      supportsWorktreeRuns
+    />
+  );
+}
+
+function renderControl(input: ControlState = {}) {
   let nextRenderer!: ReactTestRenderer;
   act(() => {
-    nextRenderer = create(
-      <ProjectScriptsControl
-        scripts={scripts}
-        environmentId={EnvironmentId.make("environment-1")}
-        {...(input.startingScriptIds ? { startingScriptIds: input.startingScriptIds } : {})}
-        {...(input.runningScriptIds ? { runningScriptIds: input.runningScriptIds } : {})}
-        onRunScript={vi.fn()}
-        onStopScript={vi.fn()}
-        onAddScript={action}
-        onUpdateScript={action}
-        onDeleteScript={action}
-        supportsWorktreeRuns
-      />,
-    );
+    nextRenderer = create(<Control {...input} />);
   });
   return nextRenderer;
 }
@@ -202,5 +210,18 @@ describe("ProjectScriptsControl", () => {
     );
     expect(renderer.root.findAllByProps({ "data-icon": "square" })).not.toHaveLength(0);
     expect(runButton.props["aria-busy"]).toBe(false);
+  });
+
+  it("animates the primary icon only when its command state changes", () => {
+    renderer = renderControl();
+    expect(renderer.root.findByProps({ "data-changing-state": "build:idle" })).toBeDefined();
+
+    act(() => {
+      renderer?.update(<Control startingScriptIds={new Set(["build"])} />);
+    });
+
+    expect(renderer.root.findAllByProps({ "data-changing-state": "build:idle" })).toHaveLength(0);
+    expect(renderer.root.findByProps({ "data-changing-state": "build:starting" })).toBeDefined();
+    expect(renderer.root.findAllByProps({ className: "changing-icon-content" })).toHaveLength(1);
   });
 });

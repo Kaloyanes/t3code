@@ -1,5 +1,50 @@
 @import "tailwindcss";
 
+@keyframes changing-text-enter {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translateY(0.22em);
+  }
+}
+
+.changing-text,
+.changing-text-content {
+  min-width: 0;
+}
+
+.changing-text-word {
+  display: inline-block;
+  animation: changing-text-enter min(var(--changing-state-duration, 120ms), 180ms)
+    cubic-bezier(0.23, 1, 0.32, 1) both;
+  animation-delay: min(calc(var(--changing-text-index) * 12ms), 72ms);
+}
+
+@keyframes changing-icon-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.82) rotate(-8deg);
+  }
+}
+
+.changing-icon {
+  display: inline-grid;
+  place-items: center;
+}
+
+.changing-icon-content {
+  display: inline-flex;
+  animation: changing-icon-enter var(--changing-state-duration, 120ms)
+    cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .changing-text-word,
+  .changing-icon-content {
+    animation: none;
+  }
+}
+
 @custom-variant dark (&:is(.dark, .dark *));
 @custom-variant light (&:not(.dark, .dark *));
 /* Window Controls Overlay: active when Electron exposes native titlebar control geometry. */
