@@ -64,6 +64,7 @@ import {
   CircleDashedIcon,
   CircleDotIcon,
   ClockIcon,
+  CopyIcon,
   EyeIcon,
   FolderIcon,
   GitBranchIcon,
@@ -71,15 +72,18 @@ import {
   MoreHorizontalIcon,
   PinIcon,
   PinOffIcon,
+  PlayIcon,
   PlusIcon,
   SettingsIcon,
   ShieldQuestionIcon,
   SquarePenIcon,
   TerminalIcon,
+  Trash2Icon,
   Undo2Icon,
   XIcon,
 } from "lucide-react";
 import {
+  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -120,6 +124,7 @@ import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { issueLinkExternalUrl, useOpenIssueLink } from "../lib/openIssueLink";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { readLocalApi } from "../localApi";
+import { requestConfirmDialog } from "../confirmDialog";
 import {
   isSameSidebarThreadRef,
   useSidebarPendingFileDropStore,
@@ -269,6 +274,16 @@ import {
   SidebarPrimaryMenu,
 } from "./sidebar/SidebarChrome";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "./ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { useWorktreeRunTerminalStore } from "../worktreeRunTerminalStore";
@@ -363,6 +378,58 @@ export function buildWorktreeActionMenuItems(input: {
           },
         ]),
   ];
+}
+
+function WorktreeActionMenuItems(props: {
+  readonly items: readonly ContextMenuItem<WorktreeActionMenuId>[];
+  readonly onAction: (action: WorktreeActionMenuId) => void;
+}) {
+  return props.items.map((item) => {
+    const icon =
+      item.icon === "plus" ? (
+        <PlusIcon />
+      ) : item.icon === "play" ? (
+        <PlayIcon />
+      ) : item.icon === "copy" ? (
+        <CopyIcon />
+      ) : item.icon === "git-branch" ? (
+        <GitBranchIcon />
+      ) : item.icon === "settings" ? (
+        <SettingsIcon />
+      ) : item.icon === "trash" ? (
+        <Trash2Icon />
+      ) : null;
+    const content = item.children?.length ? (
+      <DropdownMenuSub key={item.id}>
+        <DropdownMenuSubTrigger disabled={item.disabled}>
+          {icon}
+          {item.label}
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          <WorktreeActionMenuItems items={item.children} onAction={props.onAction} />
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    ) : (
+      <DropdownMenuItem
+        key={item.id}
+        disabled={item.disabled}
+        variant={item.destructive ? "destructive" : "default"}
+        onClick={() => props.onAction(item.id)}
+      >
+        {icon}
+        {item.label}
+      </DropdownMenuItem>
+    );
+
+    return item.separatorBefore ? (
+      <Fragment key={item.id}>
+        <DropdownMenuSeparator />
+        {content}
+      </Fragment>
+    ) : (
+      content
+    );
+  });
 }
 
 interface SidebarRepositoryGroup {
@@ -1308,11 +1375,16 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
   readonly issues: readonly IssueLinkedWork[];
   readonly threadRef: ScopedThreadRef | null;
   readonly isActive: boolean;
+  readonly menuItems: readonly ContextMenuItem<WorktreeActionMenuId>[];
   readonly onThreadActivate: (threadRef: ScopedThreadRef) => void;
   readonly onCreateThread: () => void;
-  readonly onContextMenu: (position?: { x: number; y: number }) => void;
+  readonly onMenuAction: (action: WorktreeActionMenuId) => void;
   readonly onToggle: () => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<
+    Element | { readonly getBoundingClientRect: () => DOMRect } | null
+  >(null);
   const { servers } = useDiscoveredPortsState(props.environmentId);
   const threadIds = useMemo(() => new Set(props.threadIds), [props.threadIds]);
   const workspaceServers = useMemo(
@@ -1416,145 +1488,164 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
     props.onThreadActivate(threadRef);
   };
   return (
-    <li className="group flex h-8 list-none items-center gap-0.5 ps-3">
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              aria-expanded={props.expanded}
-              aria-label={`${props.expanded ? "Collapse" : "Expand"} ${props.label}${serverPorts.length > 0 ? `, ${serverLabel.toLowerCase()}` : ""}`}
-              onClick={props.onToggle}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                props.onContextMenu({ x: event.clientX, y: event.clientY });
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
-                event.preventDefault();
-                props.onContextMenu();
-              }}
-              className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          }
-        >
-          <ChevronDownIcon
-            aria-hidden
-            className={cn(
-              "size-3.5 shrink-0 [[data-panel-animations=true]_&]:transition-transform [[data-panel-animations=true]_&]:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:ease-in-out motion-reduce:transition-none",
-              !props.expanded && "-rotate-90",
-            )}
-          />
-          <GitBranchIcon aria-hidden className="size-3.5 shrink-0 opacity-65" />
-          <span className="min-w-0 truncate text-sm font-medium">{props.label}</span>
-          {props.primary ? (
-            <span className="shrink-0 rounded border border-sidebar-border px-1 py-px text-[10px] leading-none text-sidebar-muted-foreground">
-              primary
-            </span>
-          ) : null}
-          {props.hasUnread ? (
-            <span
-              role="img"
-              aria-label="Contains unread threads"
-              className="ml-auto size-1.5 shrink-0 rounded-full bg-primary"
-            />
-          ) : null}
-          <span
-            className={cn(
-              "shrink-0 text-[11px] tabular-nums text-sidebar-muted-foreground/70",
-              !props.hasUnread && "ml-auto",
-            )}
+    <DropdownMenu
+      open={menuOpen}
+      onOpenChange={(open) => {
+        setMenuOpen(open);
+        if (!open) setMenuAnchor(null);
+      }}
+    >
+      <li
+        className="group flex h-8 list-none items-center gap-0.5 ps-3"
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const anchorRect = new DOMRect(event.clientX, event.clientY, 0, 0);
+          setMenuAnchor({ getBoundingClientRect: () => anchorRect });
+          setMenuOpen(true);
+        }}
+      >
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-expanded={props.expanded}
+                aria-label={`${props.expanded ? "Collapse" : "Expand"} ${props.label}${serverPorts.length > 0 ? `, ${serverLabel.toLowerCase()}` : ""}`}
+                onClick={props.onToggle}
+                onKeyDown={(event) => {
+                  if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10"))
+                    return;
+                  event.preventDefault();
+                  setMenuAnchor(event.currentTarget);
+                  setMenuOpen(true);
+                }}
+                className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            }
           >
-            {props.threadCount}
-          </span>
-        </TooltipTrigger>
-        <TooltipPopup side="top">
-          <div className="flex flex-col gap-0.5">
-            <span>{props.path}</span>
-            {serverPorts.length > 0 ? (
-              <span className="font-mono tabular-nums text-foreground">{serverLabel}</span>
+            <ChevronDownIcon
+              aria-hidden
+              className={cn(
+                "size-3.5 shrink-0 [[data-panel-animations=true]_&]:transition-transform [[data-panel-animations=true]_&]:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:ease-in-out motion-reduce:transition-none",
+                !props.expanded && "-rotate-90",
+              )}
+            />
+            <GitBranchIcon aria-hidden className="size-3.5 shrink-0 opacity-65" />
+            <span className="min-w-0 truncate text-sm font-medium">{props.label}</span>
+            {props.primary ? (
+              <span className="shrink-0 rounded border border-sidebar-border px-1 py-px text-[10px] leading-none text-sidebar-muted-foreground">
+                primary
+              </span>
             ) : null}
-          </div>
-        </TooltipPopup>
-      </Tooltip>
-      {workspaceServers.length > 0 ? (
-        <WorkspaceServersPopover
-          servers={workspaceServers}
-          label={props.label}
-          onFocusTerminal={focusServerTerminal}
-        />
-      ) : null}
-      {badge !== null && current !== null ? (
-        <ThreadPullRequestBadgeControl
-          variant="underline"
-          badge={badge}
-          number={current.number}
-          url={current.url}
-          status={null}
-          onOpenStack={handleAggregateOpen}
-          onOpenPullRequest={handleSingleOpen}
-          openAggregate={links.length > 1}
-        />
-      ) : null}
-      {props.issues.map((issue) => {
-        const url = issueLinkExternalUrl(issue.issue);
-        const label = `GitHub issue #${issue.issue.number} · ${issue.issue.repository}`;
-        return (
-          <Tooltip key={`${issue.issue.host}/${issue.issue.repository}#${issue.issue.number}`}>
-            <TooltipTrigger
-              render={
-                <a
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={label}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(event) => handleIssueOpen(event, issue)}
-                  className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 whitespace-nowrap border-b border-transparent text-xs tabular-nums text-emerald-600 hover:border-current hover:text-emerald-700 focus-visible:outline-2 focus-visible:outline-ring dark:text-emerald-400 dark:hover:text-emerald-300"
-                />
-              }
+            {props.hasUnread ? (
+              <span
+                role="img"
+                aria-label="Contains unread threads"
+                className="ml-auto size-1.5 shrink-0 rounded-full bg-primary"
+              />
+            ) : null}
+            <span
+              className={cn(
+                "shrink-0 text-[11px] tabular-nums text-sidebar-muted-foreground/70",
+                !props.hasUnread && "ml-auto",
+              )}
             >
-              <CircleDotIcon aria-hidden className="size-3 shrink-0" />#{issue.issue.number}
-            </TooltipTrigger>
-            <TooltipPopup side="top">{label}</TooltipPopup>
-          </Tooltip>
-        );
-      })}
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              aria-label={`New thread in ${props.label}`}
-              onClick={props.onCreateThread}
-              className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          }
-        >
-          <PlusIcon aria-hidden className="size-3.5" />
-        </TooltipTrigger>
-        <TooltipPopup side="top">New thread in this worktree</TooltipPopup>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              aria-label={`Worktree actions for ${props.label}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                const rect = event.currentTarget.getBoundingClientRect();
-                props.onContextMenu({ x: rect.right, y: rect.bottom });
-              }}
-              className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
-            />
-          }
-        >
-          <MoreHorizontalIcon aria-hidden className="size-3.5" />
-        </TooltipTrigger>
-        <TooltipPopup side="top">Worktree actions</TooltipPopup>
-      </Tooltip>
-    </li>
+              {props.threadCount}
+            </span>
+          </TooltipTrigger>
+          <TooltipPopup side="top">
+            <div className="flex flex-col gap-0.5">
+              <span>{props.path}</span>
+              {serverPorts.length > 0 ? (
+                <span className="font-mono tabular-nums text-foreground">{serverLabel}</span>
+              ) : null}
+            </div>
+          </TooltipPopup>
+        </Tooltip>
+        {workspaceServers.length > 0 ? (
+          <WorkspaceServersPopover
+            servers={workspaceServers}
+            label={props.label}
+            onFocusTerminal={focusServerTerminal}
+          />
+        ) : null}
+        {badge !== null && current !== null ? (
+          <ThreadPullRequestBadgeControl
+            variant="underline"
+            badge={badge}
+            number={current.number}
+            url={current.url}
+            status={null}
+            onOpenStack={handleAggregateOpen}
+            onOpenPullRequest={handleSingleOpen}
+            openAggregate={links.length > 1}
+          />
+        ) : null}
+        {props.issues.map((issue) => {
+          const url = issueLinkExternalUrl(issue.issue);
+          const label = `GitHub issue #${issue.issue.number} · ${issue.issue.repository}`;
+          return (
+            <Tooltip key={`${issue.issue.host}/${issue.issue.repository}#${issue.issue.number}`}>
+              <TooltipTrigger
+                render={
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={label}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => handleIssueOpen(event, issue)}
+                    className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 whitespace-nowrap border-b border-transparent text-xs tabular-nums text-emerald-600 hover:border-current hover:text-emerald-700 focus-visible:outline-2 focus-visible:outline-ring dark:text-emerald-400 dark:hover:text-emerald-300"
+                  />
+                }
+              >
+                <CircleDotIcon aria-hidden className="size-3 shrink-0" />#{issue.issue.number}
+              </TooltipTrigger>
+              <TooltipPopup side="top">{label}</TooltipPopup>
+            </Tooltip>
+          );
+        })}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-label={`New thread in ${props.label}`}
+                onClick={props.onCreateThread}
+                className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            }
+          >
+            <PlusIcon aria-hidden className="size-3.5" />
+          </TooltipTrigger>
+          <TooltipPopup side="top">New thread in this worktree</TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <DropdownMenuTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label={`Worktree actions for ${props.label}`}
+                    onPointerDown={() => setMenuAnchor(null)}
+                    onClick={(event) => event.stopPropagation()}
+                    className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                }
+              />
+            }
+          >
+            <MoreHorizontalIcon aria-hidden className="size-3.5" />
+          </TooltipTrigger>
+          <TooltipPopup side="top">Worktree actions</TooltipPopup>
+        </Tooltip>
+      </li>
+      <DropdownMenuContent align="start" anchor={menuAnchor ?? undefined} className="w-56">
+        <WorktreeActionMenuItems items={props.menuItems} onAction={props.onMenuAction} />
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 });
 
@@ -3567,15 +3658,13 @@ export default function Sidebar() {
   // a ref keeps it out of attemptSettle's dependency array.
   const handleNewThreadRef = useRef(newThreadContext.handleNewThread);
   handleNewThreadRef.current = newThreadContext.handleNewThread;
-  const handleWorktreeContextMenu = useCallback(
+  const handleWorktreeMenuAction = useCallback(
     (
       repository: SidebarRepositoryGroup,
       worktree: SidebarWorktreeGroup,
-      position?: { x: number; y: number },
+      action: WorktreeActionMenuId,
     ) => {
       void (async () => {
-        const api = readLocalApi();
-        if (!api) return;
         const project = repository.project.memberProjects.find(
           (member) =>
             member.environmentId === repository.environmentId && member.id === worktree.projectId,
@@ -3592,16 +3681,7 @@ export default function Sidebar() {
             (thread) =>
               thread.session?.status === "running" || thread.session?.status === "starting",
           ) || worktree.issues.length > 0;
-        const action = await api.contextMenu.show(
-          buildWorktreeActionMenuItems({
-            branch: worktree.branch,
-            primary: worktree.primary,
-            scripts,
-            deletionBlocked,
-          }),
-          position,
-        );
-        if (action === null || action === "run-actions") return;
+        if (action === "run-actions") return;
         if (action === "new-thread") {
           await handleNewThreadRef.current(
             scopeProjectRef(repository.environmentId, worktree.projectId),
@@ -3659,7 +3739,7 @@ export default function Sidebar() {
           return;
         }
         if (action !== "delete-worktree" || worktree.primary || deletionBlocked) return;
-        const confirmed = await api.dialogs.confirm(
+        const confirmation = requestConfirmDialog(
           [
             `Delete worktree "${worktree.label}"?`,
             worktree.path,
@@ -3671,7 +3751,7 @@ export default function Sidebar() {
           ].join("\n"),
           { variant: "destructive" },
         );
-        if (!confirmed) return;
+        if (!confirmation || !(await confirmation)) return;
         const detachResults = await Promise.all(
           worktree.threads.map((thread) =>
             updateThreadMetadata({
@@ -5809,6 +5889,26 @@ export default function Sidebar() {
                             const contextThreadRef = contextThread
                               ? scopeThreadRef(contextThread.environmentId, contextThread.id)
                               : null;
+                            const worktreeProject = repository.project.memberProjects.find(
+                              (member) =>
+                                member.environmentId === repository.environmentId &&
+                                member.id === worktree.projectId,
+                            );
+                            const environmentConfig = serverConfigs.get(repository.environmentId);
+                            const scripts =
+                              worktreeProject &&
+                              environmentConfig?.environment.capabilities.worktreeRuns
+                                ? resolveProjectScripts(
+                                    environmentConfig.settings,
+                                    worktreeProject,
+                                  ).filter((script) => script.scope === "worktree")
+                                : [];
+                            const deletionBlocked =
+                              worktree.threads.some(
+                                (thread) =>
+                                  thread.session?.status === "running" ||
+                                  thread.session?.status === "starting",
+                              ) || worktree.issues.length > 0;
                             items.push(
                               <SidebarWorktreeHeader
                                 key={`worktree:${worktree.key}`}
@@ -5828,6 +5928,12 @@ export default function Sidebar() {
                                   contextThreadRef !== null &&
                                   routeThreadKey === scopedThreadKey(contextThreadRef)
                                 }
+                                menuItems={buildWorktreeActionMenuItems({
+                                  branch: worktree.branch,
+                                  primary: worktree.primary,
+                                  scripts,
+                                  deletionBlocked,
+                                })}
                                 onThreadActivate={navigateToThread}
                                 onCreateThread={() => {
                                   void handleNewThreadRef.current(
@@ -5840,8 +5946,8 @@ export default function Sidebar() {
                                     },
                                   );
                                 }}
-                                onContextMenu={(position) =>
-                                  handleWorktreeContextMenu(repository, worktree, position)
+                                onMenuAction={(action) =>
+                                  handleWorktreeMenuAction(repository, worktree, action)
                                 }
                                 onToggle={() => setWorktreeExpanded(worktree.key, !expanded)}
                               />,
