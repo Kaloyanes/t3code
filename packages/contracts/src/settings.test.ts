@@ -7,6 +7,7 @@ import {
   ClientSettingsPatch,
   ClaudeSettings,
   DEFAULT_SERVER_SETTINGS,
+  DEFAULT_PROMPT_ENHANCEMENT_SYSTEM_PROMPT,
   DEFAULT_WORKTREE_BRANCH_PREFIX,
   DEFAULT_WORKTREE_BRANCH_NAMING_MODE,
   resolveProviderInstanceEnabled,
@@ -155,6 +156,26 @@ describe("ServerSettings prompt enhancement model", () => {
         }),
       ),
     ).toMatchObject(patch);
+  });
+});
+
+describe("ServerSettings prompt enhancement system prompt", () => {
+  const customPrompt = "  Keep leading whitespace.\n\nKeep trailing whitespace.  ";
+
+  it("uses the built-in Luna prompt when no override exists", () => {
+    expect(decodeServerSettings({}).promptEnhancementSystemPrompt).toBeNull();
+    expect(DEFAULT_PROMPT_ENHANCEMENT_SYSTEM_PROMPT).toContain(
+      "You are usually running on Luna with Medium reasoning effort.",
+    );
+  });
+
+  it("round-trips custom prompt text exactly and accepts reset", () => {
+    const patch = { promptEnhancementSystemPrompt: customPrompt };
+    expect(decodeServerSettingsPatch(patch)).toEqual(patch);
+    expect(encodeServerSettings(decodeServerSettings(patch))).toMatchObject(patch);
+    expect(decodeServerSettingsPatch({ promptEnhancementSystemPrompt: null })).toEqual({
+      promptEnhancementSystemPrompt: null,
+    });
   });
 });
 

@@ -1,7 +1,8 @@
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
 import { SymbolView } from "../../components/AppSymbol";
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text, AppTextInput } from "../../components/AppText";
 import {
+  DEFAULT_PROMPT_ENHANCEMENT_SYSTEM_PROMPT,
   type ModelSelection,
   type ResponseStreamingMode,
   type ServerSettings,
@@ -50,7 +51,12 @@ const PAGE_TITLES: Record<SettingsPage, string> = {
 };
 
 const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettingKey[]> = {
-  "new-threads": ["defaultThreadEnvMode", "defaultRuntimeMode", "promptEnhancementModelSelection"],
+  "new-threads": [
+    "defaultThreadEnvMode",
+    "defaultRuntimeMode",
+    "promptEnhancementModelSelection",
+    "promptEnhancementSystemPrompt",
+  ],
   "source-control": [
     "defaultAutoPull",
     "newWorktreesStartFromOrigin",
@@ -214,6 +220,17 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
     (target) =>
       target.environment.serverConfig?.environment.capabilities.promptEnhancement === true,
   );
+  const promptSystemPromptMixed =
+    reference !== null &&
+    displayTargets.some(
+      (target) =>
+        target.settings.promptEnhancementSystemPrompt !==
+        reference.settings.promptEnhancementSystemPrompt,
+    );
+  const promptSystemPrompt = promptSystemPromptMixed
+    ? ""
+    : (reference?.settings.promptEnhancementSystemPrompt ??
+      DEFAULT_PROMPT_ENHANCEMENT_SYSTEM_PROMPT);
 
   return (
     <>
@@ -331,6 +348,23 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                         )),
                     )}
                   </SettingsSection>
+                  <PromptEnhancementSystemPromptSection
+                    key={promptSystemPromptMixed ? "mixed" : promptSystemPrompt}
+                    value={promptSystemPrompt}
+                    mixed={promptSystemPromptMixed}
+                    projectSelected={projectSelected}
+                    customized={
+                      promptSystemPromptMixed ||
+                      reference.settings.promptEnhancementSystemPrompt !== null
+                    }
+                    disabled={
+                      disabledFor("promptEnhancementSystemPrompt") || !supportsPromptEnhancement
+                    }
+                    onSave={(promptEnhancementSystemPrompt) =>
+                      write({ promptEnhancementSystemPrompt })
+                    }
+                    onReset={() => write({ promptEnhancementSystemPrompt: null })}
+                  />
                   {promptSetting !== null && promptDescriptors.length > 0 ? (
                     <SettingsSection title="Prompt enhancement effort">
                       {promptDescriptors.flatMap((descriptor) =>
@@ -507,6 +541,70 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
         </ScrollView>
       </SettingsScreen>
     </>
+  );
+}
+
+function PromptEnhancementSystemPromptSection(props: {
+  readonly value: string;
+  readonly mixed: boolean;
+  readonly projectSelected: boolean;
+  readonly customized: boolean;
+  readonly disabled: boolean;
+  readonly onSave: (value: string) => void;
+  readonly onReset: () => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(props.mixed ? null : props.value);
+  const canSave = props.mixed ? draft !== null : draft !== props.value;
+
+  return (
+    <SettingsSection
+      title="Prompt enhancement system prompt"
+      trailing={props.mixed ? <MixedValuesLabel projectSelected={props.projectSelected} /> : null}
+    >
+      <View className="gap-3 p-4">
+        <Text className="text-sm leading-normal text-foreground-muted">
+          Instructions used to compile prompt-enhancement requests.
+        </Text>
+        <AppTextInput
+          accessibilityLabel="Prompt enhancement system prompt"
+          className="h-80 rounded-xl px-3 py-3 text-sm"
+          value={draft ?? ""}
+          placeholder={props.mixed ? "Enter a prompt to apply it to all." : undefined}
+          multiline
+          scrollEnabled
+          textAlignVertical="top"
+          autoCapitalize="none"
+          autoCorrect={false}
+          editable={!props.disabled}
+          onChangeText={setDraft}
+        />
+        <View className="flex-row justify-end gap-2">
+          {props.customized ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Reset prompt enhancement system prompt to default"
+              disabled={props.disabled}
+              className="rounded-full bg-subtle px-4 py-2 active:opacity-70 disabled:opacity-[0.45]"
+              onPress={props.onReset}
+            >
+              <Text className="text-sm font-t3-medium text-foreground">Reset</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Save prompt enhancement system prompt"
+            accessibilityState={{ disabled: props.disabled || !canSave }}
+            disabled={props.disabled || !canSave}
+            className="rounded-full bg-subtle-strong px-4 py-2 active:opacity-70 disabled:opacity-[0.45]"
+            onPress={() => {
+              if (draft !== null) props.onSave(draft);
+            }}
+          >
+            <Text className="text-sm font-t3-medium text-foreground">Save</Text>
+          </Pressable>
+        </View>
+      </View>
+    </SettingsSection>
   );
 }
 

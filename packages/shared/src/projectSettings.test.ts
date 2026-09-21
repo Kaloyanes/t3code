@@ -90,6 +90,22 @@ describe("resolveProjectSettings", () => {
     ).toBeNull();
   });
 
+  it("inherits or overrides the prompt enhancement system prompt per project", () => {
+    const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      promptEnhancementSystemPrompt: "Environment compiler",
+      projectSettingsOverrides: {
+        [projectId]: { promptEnhancementSystemPrompt: "Project compiler\n\nKeep spacing." },
+        [otherProjectId]: { promptEnhancementSystemPrompt: null },
+      },
+    });
+    expect(resolveProjectSettings(settings, projectId).settings.promptEnhancementSystemPrompt).toBe(
+      "Project compiler\n\nKeep spacing.",
+    );
+    expect(
+      resolveProjectSettings(settings, otherProjectId).settings.promptEnhancementSystemPrompt,
+    ).toBeNull();
+  });
+
   it("honours the aggregate's own fields only until the server has folded them", () => {
     const aggregateModel = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.5");
     const project = {

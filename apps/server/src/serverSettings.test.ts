@@ -303,6 +303,36 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     ).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("persists prompt enhancement text exactly and removes the override on reset", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const customPrompt = "  Custom compiler.\n\nKeep trailing whitespace.  ";
+
+      yield* serverSettings.updateSettings({ promptEnhancementSystemPrompt: customPrompt });
+      assert.strictEqual(
+        (yield* serverSettings.getSettings).promptEnhancementSystemPrompt,
+        customPrompt,
+      );
+      const saved = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      assert.strictEqual(
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        (JSON.parse(saved) as Record<string, unknown>).promptEnhancementSystemPrompt,
+        customPrompt,
+      );
+
+      yield* serverSettings.updateSettings({ promptEnhancementSystemPrompt: null });
+      assert.isNull((yield* serverSettings.getSettings).promptEnhancementSystemPrompt);
+      const reset = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      assert.notProperty(
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.parse(reset) as Record<string, unknown>,
+        "promptEnhancementSystemPrompt",
+      );
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("persists and broadcasts thread settlement settings", () =>
     Effect.scoped(
       Effect.gen(function* () {

@@ -258,6 +258,10 @@ describe("searchSettings", () => {
     );
   });
 
+  it("finds the prompt enhancement system prompt editor", () => {
+    expect(searchSettings("prompt compiler")[0]?.id).toBe("prompt-enhancement-system-prompt");
+  });
+
   it("sends commands without a default binding to the section", () => {
     expect(searchSettings("thread.stop")[0]).toMatchObject({
       id: "keybinding-thread.stop",

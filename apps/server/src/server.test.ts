@@ -7574,6 +7574,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ...DEFAULT_SERVER_SETTINGS,
         textGenerationModelSelection: inheritedModel,
         promptEnhancementModelSelection: null,
+        promptEnhancementSystemPrompt: null,
       };
       const requests: Array<TextGeneration.PromptEnhancementInput> = [];
       const config = yield* buildAppUnderTest({
@@ -7599,7 +7600,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) => client[WS_METHODS.promptEnhance](input)),
       );
-      settings = { ...settings, promptEnhancementModelSelection: dedicatedModel };
+      settings = {
+        ...settings,
+        promptEnhancementModelSelection: dedicatedModel,
+        promptEnhancementSystemPrompt: "Custom compiler\n\nKeep exact spacing.",
+      };
       yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) => client[WS_METHODS.promptEnhance](input)),
       );
@@ -7611,6 +7616,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(requests[0]?.cwd, config.stateDir);
       assert.deepEqual(requests[0]?.references, input.references);
       assert.deepEqual(requests[0]?.attachments, input.attachments);
+      assert.deepEqual(
+        requests.map(({ systemPrompt }) => systemPrompt),
+        [undefined, settings.promptEnhancementSystemPrompt],
+      );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

@@ -122,7 +122,10 @@ describe("splitSharedServerPatch", () => {
       instanceId: ProviderInstanceId.make("codex"),
       model: "gpt-5.6-sol",
     };
-    const patch = { promptEnhancementModelSelection: selection };
+    const patch = {
+      promptEnhancementModelSelection: selection,
+      promptEnhancementSystemPrompt: "Custom compiler\n\nKeep spacing.",
+    };
     expect(
       filterSharedServerPatch(patch, { promptEnhancement: true }, DEFAULT_SERVER_SETTINGS),
     ).toEqual(patch);
@@ -137,7 +140,11 @@ describe("splitSharedServerPatch", () => {
     ).toEqual({ promptEnhancementModelSelection: null });
     expect(
       pickSharedServerSettings(
-        { ...DEFAULT_SERVER_SETTINGS, promptEnhancementModelSelection: selection },
+        {
+          ...DEFAULT_SERVER_SETTINGS,
+          promptEnhancementModelSelection: selection,
+          promptEnhancementSystemPrompt: patch.promptEnhancementSystemPrompt,
+        },
         { promptEnhancement: true },
       ),
     ).toMatchObject(patch);

@@ -469,6 +469,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["rewrite improve composer new thread provider"],
   },
   {
+    id: "prompt-enhancement-system-prompt",
+    title: "Prompt enhancement system prompt",
+    to: "/settings/general",
+    scope: "project-defaults",
+    searchTerms: ["rewrite improve compiler instructions customize reset default"],
+  },
+  {
     id: "diagnostics",
     title: "Diagnostics",
     to: "/settings/general",

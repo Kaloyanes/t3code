@@ -29,6 +29,7 @@ const SHARED_SERVER_SETTING_KEYS = [
   "sourceControlWritingStyle",
   "textGenerationModelSelection",
   "promptEnhancementModelSelection",
+  "promptEnhancementSystemPrompt",
 ] as const satisfies ReadonlyArray<keyof ServerSettings & keyof ServerSettingsPatch>;
 
 export type SharedServerSettingKey = (typeof SHARED_SERVER_SETTING_KEYS)[number];
@@ -93,7 +94,10 @@ export function filterSharedServerPatch(
       promptSelection !== undefined &&
       (!settings || !isModelSelectionProviderEnabled(settings, promptSelection)))
   ) {
-    patch = Struct.omit(patch, ["promptEnhancementModelSelection"]);
+    patch = Struct.omit(patch, [
+      "promptEnhancementModelSelection",
+      "promptEnhancementSystemPrompt",
+    ]);
   }
   return capabilities?.threadRestartContinuation === true
     ? patch

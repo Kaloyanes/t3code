@@ -82,6 +82,7 @@ export interface ThreadTitleGenerationResult {
 
 export interface PromptEnhancementInput {
   cwd: string;
+  systemPrompt?: string | undefined;
   prompt: string;
   selection?: PromptEnhancementSelection;
   references: ReadonlyArray<{ readonly token: string; readonly label: string }>;

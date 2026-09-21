@@ -9,7 +9,11 @@
 import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import { limitTitleMessage } from "./ThreadTitleContext.ts";
-import type { ChatAttachment, PromptEnhancementSelection } from "@t3tools/contracts";
+import {
+  DEFAULT_PROMPT_ENHANCEMENT_SYSTEM_PROMPT,
+  type ChatAttachment,
+  type PromptEnhancementSelection,
+} from "@t3tools/contracts";
 
 import { limitSection } from "./TextGenerationUtils.ts";
 import type { TextGenerationPolicy } from "./TextGenerationPolicy.ts";
@@ -329,6 +333,7 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
 }
 
 export function buildPromptEnhancementPrompt(input: {
+  systemPrompt?: string | undefined;
   prompt: string;
   selection?: PromptEnhancementSelection;
   references: ReadonlyArray<{ readonly token: string; readonly label: string }>;
@@ -344,17 +349,15 @@ export function buildPromptEnhancementPrompt(input: {
     ? input.prompt.slice(input.selection.start, input.selection.end)
     : undefined;
   const prompt = [
-    "You are an expert prompt editor for coding agents.",
+    input.systemPrompt ?? DEFAULT_PROMPT_ENHANCEMENT_SYSTEM_PROMPT,
+    "",
+    "Prompt enhancement request:",
     input.selection
       ? "Improve only the selected portion of the draft. The surrounding draft is context only."
       : "Improve the full coding-agent prompt.",
     "Return a JSON object with key: prompt.",
     "Rules:",
-    "- Preserve the user's intent, facts, scope, and tone.",
-    "- Do not invent requirements, technical decisions, file names, or acceptance criteria.",
-    "- Expand useful detail instead of merely rephrasing or swapping synonyms.",
-    "- Make the objective, relevant context, constraints, expected outcome, and supported success criteria easier to scan.",
-    "- Add examples, edge cases, or implementation detail only when directly implied by the draft.",
+    "- The system prompt above controls how to compile the draft.",
     `- Return only ${input.selection ? "the enhanced selected portion" : "the enhanced prompt"} in the JSON value, with no commentary.`,
     ...(input.selection
       ? ["- Do not rewrite or return any text outside the selected portion."]

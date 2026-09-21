@@ -5,7 +5,7 @@ import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 import { describe, expect } from "vite-plus/test";
 
-import { ProviderInstanceId } from "@t3tools/contracts";
+import { DEFAULT_PROMPT_ENHANCEMENT_SYSTEM_PROMPT, ProviderInstanceId } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
@@ -64,17 +64,28 @@ const makeStubRegistry = (
 };
 
 describe("TextGeneration.make", () => {
-  it("builds an expansion prompt without inventing requirements", () => {
+  it("builds prompt enhancement with the Luna compiler by default", () => {
     const built = buildPromptEnhancementPrompt({
       prompt: "Fix [[T3_CONTEXT_0]]",
       references: [{ token: "[[T3_CONTEXT_0]]", label: "src/app.ts" }],
       attachments: [{ name: "trace.txt", mimeType: "text/plain" }],
     });
-    expect(built.prompt).toContain("Do not invent requirements");
-    expect(built.prompt).toContain("Expand useful detail instead of merely rephrasing");
+    expect(built.prompt.startsWith(DEFAULT_PROMPT_ENHANCEMENT_SYSTEM_PROMPT)).toBe(true);
     expect(built.prompt).toContain("[[T3_CONTEXT_0]]: src/app.ts");
     expect(built.prompt).toContain("trace.txt (text/plain)");
     expect(built.prompt).toContain("Do not claim to have read attachment contents");
+  });
+
+  it("uses a custom prompt enhancement system prompt without rewriting it", () => {
+    const systemPrompt = "  Custom compiler.\n\nPreserve this spacing.  ";
+    const built = buildPromptEnhancementPrompt({
+      prompt: "Fix it",
+      references: [],
+      attachments: [],
+      systemPrompt,
+    });
+
+    expect(built.prompt.startsWith(`${systemPrompt}\n`)).toBe(true);
   });
 
   it("asks for only the selected replacement while providing the full draft as context", () => {

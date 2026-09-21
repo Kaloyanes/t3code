@@ -2664,6 +2664,9 @@ const makeWsRpcLayer = (
               const generated = yield* textGeneration
                 .enhancePrompt({
                   cwd: config.stateDir,
+                  ...(settings.promptEnhancementSystemPrompt !== null
+                    ? { systemPrompt: settings.promptEnhancementSystemPrompt }
+                    : {}),
                   prompt: input.prompt,
                   ...(input.selection ? { selection: input.selection } : {}),
                   references: input.references,

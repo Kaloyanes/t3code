@@ -21,6 +21,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
+  DEFAULT_PROMPT_ENHANCEMENT_SYSTEM_PROMPT,
   DEFAULT_UNIFIED_SETTINGS,
   type DiffLayout,
   type EnvironmentIdentificationMode,
@@ -120,6 +121,7 @@ import {
 } from "../ui/dialog";
 import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
+import { Textarea } from "../ui/textarea";
 import {
   DEFAULT_CODE_FONT_STACK,
   DEFAULT_SANS_FONT_STACK,
@@ -2229,6 +2231,9 @@ export function GeneralSettingsPanel() {
   const mixedAddProjectBaseDirectory = useScopedSettingsMixed(["addProjectBaseDirectory"]);
   const mixedTextGenerationModel = useScopedSettingsMixed(["textGenerationModelSelection"]);
   const mixedPromptEnhancementModel = useScopedSettingsMixed(["promptEnhancementModelSelection"]);
+  const mixedPromptEnhancementSystemPrompt = useScopedSettingsMixed([
+    "promptEnhancementSystemPrompt",
+  ]);
   const promptEnhancementModelSelection = resolveAppModelSelectionState(
     {
       ...settings,
@@ -3366,6 +3371,59 @@ export function GeneralSettingsPanel() {
             )
           }
         />
+        <SettingsRow
+          serverScoped
+          settingKeys={["promptEnhancementSystemPrompt"]}
+          mixed={mixedPromptEnhancementSystemPrompt}
+          {...searchableSetting("prompt-enhancement-system-prompt")}
+          description="Instructions used to compile prompt-enhancement requests. Changes save when the editor loses focus."
+          resetAction={
+            mixedPromptEnhancementSystemPrompt ||
+            settings.promptEnhancementSystemPrompt !== null ? (
+              <SettingResetButton
+                label="prompt enhancement system prompt"
+                onClick={() => updateSettings({ promptEnhancementSystemPrompt: null })}
+              />
+            ) : null
+          }
+        >
+          <div className="mt-3 max-w-4xl pb-3.5">
+            <Textarea
+              key={
+                mixedPromptEnhancementSystemPrompt
+                  ? "mixed"
+                  : (settings.promptEnhancementSystemPrompt ??
+                    DEFAULT_PROMPT_ENHANCEMENT_SYSTEM_PROMPT)
+              }
+              defaultValue={
+                mixedPromptEnhancementSystemPrompt
+                  ? ""
+                  : (settings.promptEnhancementSystemPrompt ??
+                    DEFAULT_PROMPT_ENHANCEMENT_SYSTEM_PROMPT)
+              }
+              onBlur={(event) => {
+                const systemPrompt = event.target.value;
+                if (
+                  mixedPromptEnhancementSystemPrompt ||
+                  systemPrompt !==
+                    (settings.promptEnhancementSystemPrompt ??
+                      DEFAULT_PROMPT_ENHANCEMENT_SYSTEM_PROMPT)
+                ) {
+                  updateSettings({ promptEnhancementSystemPrompt: systemPrompt });
+                }
+              }}
+              rows={16}
+              spellCheck={false}
+              placeholder={
+                mixedPromptEnhancementSystemPrompt
+                  ? "Selected environments use different system prompts. Enter a prompt to apply it to all."
+                  : undefined
+              }
+              aria-label="Prompt enhancement system prompt"
+              className="[&_[data-slot=textarea]]:max-h-[32rem] [&_[data-slot=textarea]]:min-h-80 [&_[data-slot=textarea]]:resize-y"
+            />
+          </div>
+        </SettingsRow>
       </SettingsSection>
 
       <SettingsSection id="about" title="About">
