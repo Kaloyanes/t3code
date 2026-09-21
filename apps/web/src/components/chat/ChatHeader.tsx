@@ -1,6 +1,7 @@
 import {
   type EnvironmentId,
   type EditorId,
+  type ModelSelection,
   type ProjectScript,
   type ProviderInstanceId,
   type ResolvedKeybindingsConfig,
@@ -12,7 +13,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, ForwardIcon, LoaderCircleIcon } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -49,6 +50,18 @@ import {
 } from "../WorkspaceBreadcrumb";
 import { cn } from "~/lib/utils";
 import { HeaderUsageLimitsPopover } from "./HeaderUsageLimitsPopover";
+import { ProviderModelPicker } from "./ProviderModelPicker";
+import type { ModelEsque } from "./providerIconUtils";
+import type { ProviderInstanceEntry } from "../../providerInstances";
+
+interface ThreadHandoffAction {
+  activeSelection: ModelSelection;
+  instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
+  modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
+  disabled: boolean;
+  pending: boolean;
+  onSelect: (selection: ModelSelection) => void;
+}
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -80,6 +93,7 @@ interface ChatHeaderProps {
   ) => Promise<ProjectScriptActionResult>;
   onDeleteProjectScript: (scriptId: string) => Promise<ProjectScriptActionResult>;
   supportsWorktreeRuns?: boolean;
+  handoff?: ThreadHandoffAction;
 }
 
 /**
@@ -151,6 +165,7 @@ export const ChatHeader = memo(function ChatHeader({
   onUpdateProjectScript,
   onDeleteProjectScript,
   supportsWorktreeRuns = false,
+  handoff,
 }: ChatHeaderProps) {
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
@@ -425,6 +440,32 @@ export const ChatHeader = memo(function ChatHeader({
           activeEnvironmentId={activeThreadEnvironmentId}
           activeProviderInstanceId={activeProviderInstanceId}
         />
+        {handoff ? (
+          <ProviderModelPicker
+            activeInstanceId={handoff.activeSelection.instanceId}
+            model={handoff.activeSelection.model}
+            lockedProvider={null}
+            instanceEntries={handoff.instanceEntries}
+            modelOptionsByInstance={handoff.modelOptionsByInstance}
+            size="xs"
+            disabled={handoff.disabled}
+            triggerVariant="outline"
+            triggerLabel="Hand off"
+            triggerAriaLabel="Hand off to another provider"
+            triggerAriaBusy={handoff.pending}
+            triggerIcon={
+              handoff.pending ? (
+                <LoaderCircleIcon className="size-3.5 motion-safe:animate-spin motion-reduce:animate-none" />
+              ) : (
+                <ForwardIcon className="size-3.5" />
+              )
+            }
+            triggerLabelClassName="sr-only @3xl/header-actions:not-sr-only"
+            triggerClassName="w-9 px-1 sm:w-8 @3xl/header-actions:w-auto! @3xl/header-actions:px-[calc(--spacing(2)-1px)]"
+            isToolbarControl
+            onInstanceModelChange={(instanceId, model) => handoff.onSelect({ instanceId, model })}
+          />
+        ) : null}
         {activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}

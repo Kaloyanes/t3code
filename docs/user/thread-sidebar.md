@@ -25,6 +25,14 @@ in a new thread's model picker to add or remove them. A regular click returns to
 single model. Choose a base branch and send. Each selection starts a separate thread
 and worktree while you stay in the new thread composer. This requires a Git project.
 
+## Hand off a thread
+
+On web and desktop, hand off an idle thread to any ready provider or model from the
+thread header. T3 Code starts a new thread in the same workspace with the relevant
+conversation and attachments, then opens it after the receiving agent starts. The
+source thread stays unchanged. Finish active work, approvals, questions, and
+background agents before handing off.
+
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.

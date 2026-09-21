@@ -267,6 +267,7 @@ import { getProviderModelCapabilities } from "../providerModels";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
+  isProviderInstancePickerReady,
   NO_PROVIDER_MODEL_SELECTION,
   sortProviderInstanceEntries,
 } from "../providerInstances";
@@ -281,7 +282,11 @@ import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useRemoveClonedProject } from "../hooks/useRemoveClonedProject";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { useThreadActions } from "../hooks/useThreadActions";
-import { resolveAppModelSelectionForInstance } from "../modelSelection";
+import {
+  getCustomModelOptionsByInstance,
+  resolveAppModelSelectionForInstance,
+} from "../modelSelection";
+import { buildThreadHandoffPackage } from "../threadHandoff";
 import {
   getComposerPromptInjectionState,
   getComposerProviderState,
@@ -1558,6 +1563,8 @@ export default function ChatView(props: ChatViewProps) {
     reportFailure: false,
   });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const handoffInFlightRef = useRef(false);
+  const [handoffInFlight, setHandoffInFlight] = useState(false);
   const createAttachmentAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
     reportFailure: false,
     refresh: true,
@@ -3025,6 +3032,17 @@ export default function ChatView(props: ChatViewProps) {
         applyProviderInstanceSettings(deriveProviderInstanceEntries(providerStatuses), settings),
       ),
     [providerStatuses, settings],
+  );
+  const handoffActiveSelection = activeThread?.modelSelection ?? NO_PROVIDER_MODEL_SELECTION;
+  const handoffModelOptionsByInstance = useMemo(
+    () =>
+      getCustomModelOptionsByInstance(
+        settings,
+        providerStatuses,
+        handoffActiveSelection.instanceId,
+        handoffActiveSelection.model,
+      ),
+    [handoffActiveSelection.instanceId, handoffActiveSelection.model, providerStatuses, settings],
   );
   const { selectedProviderEntry, requestedDriverKind } = useMemo(
     () =>
@@ -9488,6 +9506,153 @@ export default function ChatView(props: ChatViewProps) {
     composerRef,
   ]);
 
+  const onHandoffThread = useCallback(
+    async (nextThreadModelSelection: ModelSelection) => {
+      const targetProvider = providerInstanceEntries.find(
+        ({ instanceId }) => instanceId === nextThreadModelSelection.instanceId,
+      );
+      if (
+        !activeThread ||
+        !activeProject ||
+        !isServerThread ||
+        isWorking ||
+        activeThreadShell?.backgroundLiveness != null ||
+        pendingApprovals.length > 0 ||
+        pendingUserInputs.length > 0 ||
+        activeEnvironmentUnavailable ||
+        handoffInFlightRef.current ||
+        !targetProvider ||
+        !isProviderInstancePickerReady(targetProvider)
+      ) {
+        return;
+      }
+
+      const createdAt = new Date().toISOString();
+      const nextThreadId = newThreadId();
+      const nextThreadTitle = truncate(`${activeThread.title} · Handoff`);
+      const handoff = buildThreadHandoffPackage({
+        source: {
+          title: activeThread.title,
+          threadId: activeThread.id,
+          branch: activeThreadBranch,
+          worktreePath: activeThread.worktreePath,
+        },
+        messages: activeThread.messages,
+        hasOlderHistory: threadHasOlderTurns(routeThreadState),
+      });
+
+      handoffInFlightRef.current = true;
+      setHandoffInFlight(true);
+      const finish = () => {
+        handoffInFlightRef.current = false;
+        setHandoffInFlight(false);
+      };
+
+      const createResult = await createThread({
+        environmentId,
+        input: {
+          threadId: nextThreadId,
+          projectId: activeProject.id,
+          title: nextThreadTitle,
+          modelSelection: nextThreadModelSelection,
+          runtimeMode: activeThread.runtimeMode,
+          interactionMode: "default",
+          branch: activeThreadBranch,
+          worktreePath: activeThread.worktreePath,
+          createdAt,
+        },
+      });
+      let failure: AtomCommandResult<unknown, unknown> | null =
+        createResult._tag === "Failure" ? createResult : null;
+
+      if (failure === null) {
+        const startResult = await startThreadTurn({
+          environmentId,
+          input: {
+            threadId: nextThreadId,
+            message: {
+              messageId: newMessageId(),
+              role: "user",
+              text: handoff.text,
+              attachments: [...handoff.attachments],
+            },
+            modelSelection: nextThreadModelSelection,
+            titleSeed: nextThreadTitle,
+            runtimeMode: activeThread.runtimeMode,
+            interactionMode: "default",
+            createdAt,
+          },
+        });
+        failure = startResult._tag === "Failure" ? startResult : null;
+      }
+
+      if (failure === null) {
+        const startedResult = await settlePromise(() =>
+          waitForStartedServerThread(scopeThreadRef(activeThread.environmentId, nextThreadId)),
+        );
+        failure = startedResult._tag === "Failure" ? startedResult : null;
+      }
+
+      if (failure === null) {
+        const navigateResult = await settlePromise(() =>
+          navigate({
+            to: "/$environmentId/$threadId",
+            params: {
+              environmentId: activeThread.environmentId,
+              threadId: nextThreadId,
+            },
+          }),
+        );
+        failure = navigateResult._tag === "Failure" ? navigateResult : null;
+      }
+
+      if (failure !== null) {
+        const cleanupResult = await deleteThread({
+          environmentId,
+          input: { threadId: nextThreadId },
+        });
+        if (cleanupResult._tag === "Failure" && !isAtomCommandInterrupted(cleanupResult)) {
+          console.warn(
+            "Failed to clean up handoff thread after start failure.",
+            squashAtomCommandFailure(cleanupResult),
+          );
+        }
+        if (!isAtomCommandInterrupted(failure)) {
+          const error = squashAtomCommandFailure(failure);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not hand off thread",
+              description:
+                error instanceof Error
+                  ? error.message
+                  : "An error occurred while creating the handoff thread.",
+            }),
+          );
+        }
+      }
+      finish();
+    },
+    [
+      activeEnvironmentUnavailable,
+      activeProject,
+      activeThread,
+      activeThreadBranch,
+      activeThreadShell?.backgroundLiveness,
+      createThread,
+      deleteThread,
+      environmentId,
+      isServerThread,
+      isWorking,
+      navigate,
+      pendingApprovals.length,
+      pendingUserInputs.length,
+      providerInstanceEntries,
+      routeThreadState,
+      startThreadTurn,
+    ],
+  );
+
   const getModelDisabledReason = useCallback(
     (instanceId: ProviderInstanceId, model: string): string | null => {
       if (!activeThread) {
@@ -10071,6 +10236,25 @@ export default function ChatView(props: ChatViewProps) {
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
             gitCwd={gitCwd}
+            {...(isServerThread
+              ? {
+                  handoff: {
+                    activeSelection: handoffActiveSelection,
+                    instanceEntries: providerInstanceEntries,
+                    modelOptionsByInstance: handoffModelOptionsByInstance,
+                    disabled:
+                      handoffInFlight ||
+                      isWorking ||
+                      activeThreadShell?.backgroundLiveness != null ||
+                      pendingApprovals.length > 0 ||
+                      pendingUserInputs.length > 0 ||
+                      activeEnvironmentUnavailable ||
+                      !providerInstanceEntries.some(isProviderInstancePickerReady),
+                    pending: handoffInFlight,
+                    onSelect: (selection: ModelSelection) => void onHandoffThread(selection),
+                  },
+                }
+              : {})}
             onNewThreadInProject={handleNewThreadInActiveProject}
             {...(activeDraftLogicalProjectKey
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }

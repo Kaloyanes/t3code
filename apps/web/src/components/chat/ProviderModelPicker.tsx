@@ -4,7 +4,7 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { Badge } from "../ui/badge";
 import { buttonVariants } from "../ui/button";
@@ -51,6 +51,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   open?: boolean;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
+  triggerIcon?: ReactNode;
+  triggerLabelClassName?: string;
+  triggerAriaBusy?: boolean;
+  isToolbarControl?: boolean;
   /** Aggregate settings can show a neutral value without claiming one provider is selected. */
   triggerLabel?: string;
   triggerAriaLabel?: string;
@@ -207,9 +211,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         render={
           <ComposerControl
             aria-label={props.triggerAriaLabel ?? allModelNames}
+            aria-busy={props.triggerAriaBusy}
             variant={props.triggerVariant ?? "ghost"}
             size={size}
             data-chat-provider-model-picker="true"
+            data-toolbar-control={props.isToolbarControl ? "" : undefined}
             className={cn(
               "min-w-0 shrink justify-between whitespace-nowrap",
               !props.isComposerOwned && "max-w-48 sm:max-w-56",
@@ -222,6 +228,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         <span
           className={cn("flex min-w-0 flex-1 items-center", size === "xs" ? "gap-1" : "gap-1.5")}
         >
+          {props.triggerIcon ? (
+            <span aria-hidden="true" className="flex shrink-0 items-center">
+              {props.triggerIcon}
+            </span>
+          ) : null}
           {selectedEntries && props.triggerLabel === undefined ? (
             <span className="flex shrink-0 items-center -space-x-1" aria-hidden="true">
               {selectedEntries
@@ -263,7 +274,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             <TooltipTrigger
               render={
                 <span
-                  className="min-w-0 flex-1 overflow-hidden truncate"
+                  className={cn(
+                    "min-w-0 flex-1 overflow-hidden truncate",
+                    props.triggerLabelClassName,
+                  )}
                   data-chat-provider-model-picker-label="true"
                 />
               }
