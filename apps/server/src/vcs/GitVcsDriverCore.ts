@@ -3031,11 +3031,17 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           : input.refKind === "remote"
             ? allBranches.filter((ref) => ref.isRemote)
             : allBranches;
-      const refs = paginateBranches({
-        refs: filterBranchesForListQuery(branchesForKind, input.query),
-        cursor: input.cursor,
-        limit: input.limit,
-      });
+      const visibleBranches = input.worktreesOnly
+        ? branchesForKind.filter((ref) => ref.worktreePath !== null)
+        : branchesForKind;
+      const filteredBranches = filterBranchesForListQuery(visibleBranches, input.query);
+      const refs = input.worktreesOnly
+        ? { refs: filteredBranches, nextCursor: null, totalCount: filteredBranches.length }
+        : paginateBranches({
+            refs: filteredBranches,
+            cursor: input.cursor,
+            limit: input.limit,
+          });
 
       return {
         refs: [...refs.refs],

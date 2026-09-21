@@ -2166,6 +2166,41 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   });
 
   describe("worktree operations", () => {
+    it.effect("lists only checked-out branches when requested", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const worktreePath = path.join(yield* makeTmpDir("git-worktrees-"), "listed");
+        yield* git(cwd, ["branch", "not-checked-out"]);
+        yield* driver.createWorktree({
+          cwd,
+          path: worktreePath,
+          refName: initialBranch,
+          newRefName: "feature/listed",
+        });
+
+        const result = yield* driver.listRefs({
+          cwd,
+          refKind: "local",
+          worktreesOnly: true,
+          limit: 1,
+        });
+
+        const expected = [
+          [initialBranch, yield* fs.realPath(cwd)],
+          ["feature/listed", yield* fs.realPath(worktreePath)],
+        ];
+        assert.deepEqual(
+          result.refs.map((ref) => [ref.name, ref.worktreePath]),
+          expected,
+        );
+        assert.equal(result.totalCount, 2);
+      }),
+    );
+
     it.effect("uses parallel checkout without skipping filters or hooks", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

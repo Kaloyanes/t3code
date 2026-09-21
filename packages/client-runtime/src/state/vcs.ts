@@ -50,6 +50,7 @@ function canUseVcsRefsCache(input: VcsListRefsInput): boolean {
     input.cursor === undefined &&
     input.includeMatchingRemoteRefs === undefined &&
     input.refKind === undefined &&
+    input.worktreesOnly === undefined &&
     input.limit === OFFLINE_BRANCH_LIST_LIMIT
   );
 }

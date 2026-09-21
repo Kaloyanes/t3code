@@ -1,7 +1,7 @@
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildSidebarRepositoryGroups } from "./Sidebar";
+import { buildSidebarRepositoryGroups, buildWorktreeActionMenuItems } from "./Sidebar";
 
 const environmentId = EnvironmentId.make("environment");
 const projectId = ProjectId.make("project");
@@ -101,5 +101,71 @@ describe("sidebar worktree grouping", () => {
     expect(groups[0]?.worktrees[0]?.threads).toHaveLength(2);
     expect(groups[0]?.worktrees[0]?.pullRequests).toEqual([worktreeLink]);
     expect(groups[0]?.worktrees[0]?.issues).toEqual([worktreeIssue]);
+  });
+
+  it("keeps discovered worktrees that have no active threads", () => {
+    const groups = buildSidebarRepositoryGroups({
+      projectGroups: [projectGroup],
+      pinnedThreads: [],
+      activeThreads: [thread("first")],
+      discoveredWorktrees: [
+        {
+          environmentId,
+          projectId,
+          path: "/repo",
+          branch: "main",
+          primary: true,
+        },
+        {
+          environmentId,
+          projectId,
+          path: "/worktrees/empty",
+          branch: "feature/empty",
+          primary: false,
+        },
+      ],
+    });
+
+    expect(
+      groups[0]?.worktrees.map(({ label, primary, threads }) => [label, primary, threads.length]),
+    ).toEqual([
+      ["main", true, 0],
+      ["feature", false, 1],
+      ["feature/empty", false, 0],
+    ]);
+  });
+});
+
+describe("worktree action menu", () => {
+  it("labels deletion as a worktree action and omits it for the primary checkout", () => {
+    const menu = buildWorktreeActionMenuItems({
+      branch: "feature/menu",
+      primary: false,
+      scripts: [
+        {
+          id: "dev",
+          name: "Dev",
+          command: "vp dev",
+          icon: "play",
+          runOnWorktreeCreate: false,
+          scope: "worktree",
+        },
+      ],
+      deletionBlocked: false,
+    });
+
+    expect(menu.find((item) => item.id === "run-actions")?.children?.[0]?.label).toBe("Dev");
+    expect(menu.find((item) => item.id === "delete-worktree")).toMatchObject({
+      label: "Delete worktree…",
+      destructive: true,
+    });
+    expect(
+      buildWorktreeActionMenuItems({
+        branch: "main",
+        primary: true,
+        scripts: [],
+        deletionBlocked: false,
+      }).some((item) => item.id === "delete-worktree"),
+    ).toBe(false);
   });
 });

@@ -6,7 +6,10 @@ import {
   threadPullRequestsWithoutWorktreeShadows,
 } from "@t3tools/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";
+import * as Option from "effect/Option";
+import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import { resolveProjectScripts } from "@t3tools/shared/projectScripts";
 import * as Schema from "effect/Schema";
 import {
   DndContext,
@@ -42,6 +45,8 @@ import {
   type EnvironmentMachineKind,
   type EnvironmentId,
   type IssueLinkedWork,
+  type ContextMenuItem,
+  type ProjectScript,
   type ProjectId,
   type ProjectIconOverride,
   type ScopedThreadRef,
@@ -63,6 +68,7 @@ import {
   FolderIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
+  MoreHorizontalIcon,
   PinIcon,
   PinOffIcon,
   PlusIcon,
@@ -265,6 +271,7 @@ import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarT
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { useWorktreeRunTerminalStore } from "../worktreeRunTerminalStore";
+import { worktreeRunEnvironment } from "../state/worktreeRun";
 import {
   composerDraftHasUserContent,
   DraftId,
@@ -284,7 +291,9 @@ const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
 
 interface SidebarWorktreeGroup {
   readonly key: string;
+  readonly projectId: ProjectId;
   readonly path: string;
+  readonly branch: string | null;
   readonly label: string;
   readonly primary: boolean;
   readonly threads: readonly EnvironmentThreadShell[];
@@ -292,10 +301,73 @@ interface SidebarWorktreeGroup {
   readonly issues: readonly IssueLinkedWork[];
 }
 
+export interface SidebarDiscoveredWorktree {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+  readonly path: string;
+  readonly branch: string;
+  readonly primary: boolean;
+}
+
+type WorktreeActionMenuId =
+  | "new-thread"
+  | "run-actions"
+  | "copy-path"
+  | "copy-branch"
+  | "project-settings"
+  | "delete-worktree"
+  | `run:${string}`;
+
+export function buildWorktreeActionMenuItems(input: {
+  readonly branch: string | null;
+  readonly primary: boolean;
+  readonly scripts: readonly ProjectScript[];
+  readonly deletionBlocked: boolean;
+}): readonly ContextMenuItem<WorktreeActionMenuId>[] {
+  return [
+    { id: "new-thread", label: "New thread in worktree", icon: "plus" },
+    ...(input.scripts.length > 0
+      ? [
+          {
+            id: "run-actions" as WorktreeActionMenuId,
+            label: "Run action",
+            icon: "play",
+            children: input.scripts.map((script) => ({
+              id: `run:${script.id}` as const,
+              label: script.name,
+            })),
+          },
+        ]
+      : []),
+    {
+      id: "copy-path",
+      label: "Copy path",
+      icon: "copy",
+      separatorBefore: input.scripts.length > 0,
+    },
+    ...(input.branch
+      ? [{ id: "copy-branch" as const, label: "Copy branch", icon: "git-branch" }]
+      : []),
+    { id: "project-settings", label: "Project settings", icon: "settings" },
+    ...(input.primary
+      ? []
+      : [
+          {
+            id: "delete-worktree" as const,
+            label: "Delete worktree…",
+            icon: "trash",
+            destructive: true,
+            disabled: input.deletionBlocked,
+            separatorBefore: true,
+          },
+        ]),
+  ];
+}
+
 interface SidebarRepositoryGroup {
   readonly key: string;
   readonly project: SidebarProjectSnapshot;
-  readonly environmentId: string;
+  readonly environmentId: EnvironmentId;
   readonly environmentLabel: string | null;
   readonly worktrees: readonly SidebarWorktreeGroup[];
 }
@@ -304,12 +376,16 @@ export function buildSidebarRepositoryGroups(input: {
   readonly projectGroups: readonly SidebarProjectSnapshot[];
   readonly pinnedThreads: readonly EnvironmentThreadShell[];
   readonly activeThreads: readonly EnvironmentThreadShell[];
+  readonly discoveredWorktrees?: readonly SidebarDiscoveredWorktree[];
 }): SidebarRepositoryGroup[] {
   const orderedThreads = [...input.pinnedThreads, ...input.activeThreads];
   const groups: SidebarRepositoryGroup[] = [];
 
   for (const projectGroup of input.projectGroups) {
-    const membersByEnvironment = new Map<string, (typeof projectGroup.memberProjects)[number][]>();
+    const membersByEnvironment = new Map<
+      EnvironmentId,
+      (typeof projectGroup.memberProjects)[number][]
+    >();
     for (const member of projectGroup.memberProjects) {
       const members = membersByEnvironment.get(member.environmentId);
       if (members) members.push(member);
@@ -317,27 +393,52 @@ export function buildSidebarRepositoryGroups(input: {
     }
     for (const [environmentId, members] of membersByEnvironment) {
       const memberByProjectId = new Map(members.map((member) => [member.id, member] as const));
-      const worktreeThreads = new Map<string, EnvironmentThreadShell[]>();
+      const discoveredByPath = new Map<
+        string,
+        { readonly worktree: SidebarDiscoveredWorktree; readonly threads: EnvironmentThreadShell[] }
+      >();
+      const memberProjectIds = new Set(members.map((member) => member.id));
+      for (const worktree of input.discoveredWorktrees ?? []) {
+        if (worktree.environmentId !== environmentId || !memberProjectIds.has(worktree.projectId)) {
+          continue;
+        }
+        discoveredByPath.set(normalizeProjectPathForComparison(worktree.path), {
+          worktree,
+          threads: [],
+        });
+      }
       for (const thread of orderedThreads) {
         if (thread.environmentId !== environmentId) continue;
         const member = memberByProjectId.get(thread.projectId);
         if (!member) continue;
         const path = normalizeProjectPathForComparison(thread.worktreePath ?? member.workspaceRoot);
-        const groupedThreads = worktreeThreads.get(path);
-        if (groupedThreads) groupedThreads.push(thread);
-        else worktreeThreads.set(path, [thread]);
+        const discovered = discoveredByPath.get(path);
+        if (discovered) discovered.threads.push(thread);
+        else {
+          discoveredByPath.set(path, {
+            worktree: {
+              environmentId,
+              projectId: thread.projectId,
+              path: thread.worktreePath ?? member.workspaceRoot,
+              branch: thread.branch ?? "",
+              primary: thread.worktreePath === null,
+            },
+            threads: [thread],
+          });
+        }
       }
-      if (worktreeThreads.size === 0) continue;
+      if (discoveredByPath.size === 0) continue;
 
-      const worktrees = [...worktreeThreads.entries()]
-        .map(([normalizedPath, threads]): SidebarWorktreeGroup => {
-          const newestThread = threads.toSorted(
+      const worktrees = [...discoveredByPath.entries()]
+        .map(([normalizedPath, entry]): SidebarWorktreeGroup => {
+          const newestThread = entry.threads.toSorted(
             (left, right) =>
               firstValidTimestampMs(right.latestUserMessageAt, right.updatedAt) -
               firstValidTimestampMs(left.latestUserMessageAt, left.updatedAt),
-          )[0]!;
-          const member = memberByProjectId.get(newestThread.projectId)!;
-          const path = newestThread.worktreePath ?? member.workspaceRoot;
+          )[0];
+          const projectId = newestThread?.projectId ?? entry.worktree.projectId;
+          const member = memberByProjectId.get(projectId)!;
+          const path = newestThread?.worktreePath ?? entry.worktree.path ?? member.workspaceRoot;
           const pullRequests = members.flatMap((project) =>
             (project.worktreePullRequests ?? []).filter(
               (link) =>
@@ -352,11 +453,13 @@ export function buildSidebarRepositoryGroups(input: {
                 normalizedPath,
             ),
           );
-          const primary = newestThread.worktreePath === null;
+          const primary = entry.worktree.primary || newestThread?.worktreePath === null;
           const branches = new Set(
-            threads.flatMap((thread) => (thread.branch ? [thread.branch] : [])),
+            [entry.worktree.branch, ...entry.threads.map((thread) => thread.branch)].filter(
+              (branch): branch is string => Boolean(branch),
+            ),
           );
-          const branch = branches.size === 1 ? [...branches][0] : null;
+          const branch = branches.size === 1 ? ([...branches][0] ?? null) : null;
           const fallbackLabel =
             path
               .replace(/[\\/]+$/, "")
@@ -364,13 +467,15 @@ export function buildSidebarRepositoryGroups(input: {
               .pop() || path;
           return {
             key: `sidebar-worktree:${environmentId}:${normalizedPath}`,
+            projectId,
             path,
+            branch,
             label:
               branches.size > 1
                 ? fallbackLabel
                 : (branch ?? (primary ? "Current checkout" : fallbackLabel)),
             primary,
-            threads,
+            threads: entry.threads,
             pullRequests,
             issues,
           };
@@ -383,7 +488,10 @@ export function buildSidebarRepositoryGroups(input: {
                 firstValidTimestampMs(thread.latestUserMessageAt, thread.updatedAt),
               ),
             );
-          return newest(right) - newest(left);
+          const newestDifference = newest(right) - newest(left);
+          return Number.isNaN(newestDifference)
+            ? left.label.localeCompare(right.label)
+            : newestDifference;
         });
 
       groups.push({
@@ -1197,10 +1305,11 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
   readonly threadCount: number;
   readonly pullRequests: readonly WorktreePullRequestLink[];
   readonly issues: readonly IssueLinkedWork[];
-  readonly threadRef: ScopedThreadRef;
+  readonly threadRef: ScopedThreadRef | null;
   readonly isActive: boolean;
   readonly onThreadActivate: (threadRef: ScopedThreadRef) => void;
   readonly onCreateThread: () => void;
+  readonly onContextMenu: (position?: { x: number; y: number }) => void;
   readonly onToggle: () => void;
 }) {
   const { servers } = useDiscoveredPortsState(props.environmentId);
@@ -1230,7 +1339,7 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
       ? `Server running on port ${serverPorts[0]}`
       : `Servers running on ports ${serverPorts.join(", ")}`;
   const openPrLink = useOpenPrLink();
-  const openIssueLink = useOpenIssueLink(props.threadRef);
+  const openIssueLink = useOpenIssueLink(props.threadRef ?? undefined);
   const links = useMemo(
     () =>
       props.pullRequests.map(
@@ -1241,14 +1350,17 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
   const badge = resolveThreadPullRequestBadge(links);
   const current = resolveThreadCurrentPullRequestLink(links);
   const handleAggregateOpen = useCallback(() => {
+    if (props.threadRef === null) return;
     useRightPanelStore.getState().open(props.threadRef, "pull-requests");
     if (!props.isActive) props.onThreadActivate(props.threadRef);
   }, [props.isActive, props.onThreadActivate, props.threadRef]);
   const handleSingleOpen = useCallback(
     (event: ReactMouseEvent<HTMLAnchorElement>) => {
-      if (current === null) return;
+      if (current === null || props.threadRef === null) return;
       const openedInRightPanel = openPrLink(event, current.url, props.threadRef);
-      if (openedInRightPanel && !props.isActive) props.onThreadActivate(props.threadRef);
+      if (openedInRightPanel && !props.isActive && props.threadRef !== null) {
+        props.onThreadActivate(props.threadRef);
+      }
     },
     [current, openPrLink, props.isActive, props.onThreadActivate, props.threadRef],
   );
@@ -1259,7 +1371,9 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
         issueLinkExternalUrl(issue.issue),
         props.environmentId,
       );
-      if (openedInRightPanel && !props.isActive) props.onThreadActivate(props.threadRef);
+      if (openedInRightPanel && !props.isActive && props.threadRef !== null) {
+        props.onThreadActivate(props.threadRef);
+      }
     },
     [openIssueLink, props.environmentId, props.isActive, props.onThreadActivate, props.threadRef],
   );
@@ -1269,8 +1383,10 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
         environmentId: props.environmentId,
         target: server.worktreeRun,
       });
-      useTerminalUiStateStore.getState().setTerminalOpen(props.threadRef, true);
-      props.onThreadActivate(props.threadRef);
+      if (props.threadRef !== null) {
+        useTerminalUiStateStore.getState().setTerminalOpen(props.threadRef, true);
+        props.onThreadActivate(props.threadRef);
+      }
       return;
     }
     const terminal = server.terminal;
@@ -1303,6 +1419,15 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
               aria-expanded={props.expanded}
               aria-label={`${props.expanded ? "Collapse" : "Expand"} ${props.label}${serverPorts.length > 0 ? `, ${serverLabel.toLowerCase()}` : ""}`}
               onClick={props.onToggle}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                props.onContextMenu({ x: event.clientX, y: event.clientY });
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+                event.preventDefault();
+                props.onContextMenu();
+              }}
               className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
             />
           }
@@ -1403,6 +1528,25 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
           <PlusIcon aria-hidden className="size-3.5" />
         </TooltipTrigger>
         <TooltipPopup side="top">New thread in this worktree</TooltipPopup>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              aria-label={`Worktree actions for ${props.label}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                const rect = event.currentTarget.getBoundingClientRect();
+                props.onContextMenu({ x: rect.right, y: rect.bottom });
+              }}
+              className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+            />
+          }
+        >
+          <MoreHorizontalIcon aria-hidden className="size-3.5" />
+        </TooltipTrigger>
+        <TooltipPopup side="top">Worktree actions</TooltipPopup>
       </Tooltip>
     </li>
   );
@@ -2686,6 +2830,12 @@ export default function Sidebar() {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
+  const removeWorktree = useAtomCommand(vcsEnvironment.removeWorktree, {
+    reportFailure: false,
+  });
+  const startWorktreeRun = useAtomCommand(worktreeRunEnvironment.start, {
+    reportFailure: false,
+  });
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) => {
       toastManager.add({
@@ -3288,14 +3438,63 @@ export default function Sidebar() {
     );
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
+  const worktreeRefQueries = useMemo(
+    () =>
+      projectGroups.flatMap((group) =>
+        group.memberProjects.map((project) => ({
+          project,
+          atom: vcsEnvironment.listRefs({
+            environmentId: project.environmentId,
+            input: {
+              cwd: project.workspaceRoot,
+              refKind: "local",
+              worktreesOnly: true,
+              refresh: true,
+            },
+          }),
+        })),
+      ),
+    [projectGroups],
+  );
+  const worktreeRefsAtom = useMemo(
+    () =>
+      Atom.make((get) =>
+        worktreeRefQueries.map(({ project, atom }) => ({ project, result: get(atom) })),
+      ).pipe(Atom.withLabel("web:sidebar-worktree-refs")),
+    [worktreeRefQueries],
+  );
+  const worktreeRefResults = useAtomValue(worktreeRefsAtom);
+  const discoveredWorktrees = useMemo(
+    () =>
+      worktreeRefResults.flatMap(({ project, result }) => {
+        const refs = Option.getOrNull(AsyncResult.value(result))?.refs ?? [];
+        return refs.flatMap((ref): SidebarDiscoveredWorktree[] =>
+          ref.worktreePath
+            ? [
+                {
+                  environmentId: project.environmentId,
+                  projectId: project.id,
+                  path: ref.worktreePath,
+                  branch: ref.name,
+                  primary:
+                    normalizeProjectPathForComparison(ref.worktreePath) ===
+                    normalizeProjectPathForComparison(project.workspaceRoot),
+                },
+              ]
+            : [],
+        );
+      }),
+    [worktreeRefResults],
+  );
   const repositoryGroups = useMemo(
     () =>
       buildSidebarRepositoryGroups({
         projectGroups,
         pinnedThreads,
         activeThreads,
+        discoveredWorktrees,
       }),
-    [activeThreads, pinnedThreads, projectGroups],
+    [activeThreads, discoveredWorktrees, pinnedThreads, projectGroups],
   );
   const groupedVisibleThreads = useMemo(
     () =>
@@ -3362,6 +3561,182 @@ export default function Sidebar() {
   // a ref keeps it out of attemptSettle's dependency array.
   const handleNewThreadRef = useRef(newThreadContext.handleNewThread);
   handleNewThreadRef.current = newThreadContext.handleNewThread;
+  const handleWorktreeContextMenu = useCallback(
+    (
+      repository: SidebarRepositoryGroup,
+      worktree: SidebarWorktreeGroup,
+      position?: { x: number; y: number },
+    ) => {
+      void (async () => {
+        const api = readLocalApi();
+        if (!api) return;
+        const project = repository.project.memberProjects.find(
+          (member) =>
+            member.environmentId === repository.environmentId && member.id === worktree.projectId,
+        );
+        if (!project) return;
+        const config = serverConfigs.get(repository.environmentId);
+        const scripts = config?.environment.capabilities.worktreeRuns
+          ? resolveProjectScripts(config.settings, project).filter(
+              (script) => script.scope === "worktree",
+            )
+          : [];
+        const deletionBlocked =
+          worktree.threads.some(
+            (thread) =>
+              thread.session?.status === "running" || thread.session?.status === "starting",
+          ) || worktree.issues.length > 0;
+        const action = await api.contextMenu.show(
+          buildWorktreeActionMenuItems({
+            branch: worktree.branch,
+            primary: worktree.primary,
+            scripts,
+            deletionBlocked,
+          }),
+          position,
+        );
+        if (action === null || action === "run-actions") return;
+        if (action === "new-thread") {
+          await handleNewThreadRef.current(
+            scopeProjectRef(repository.environmentId, worktree.projectId),
+            {
+              branch: worktree.branch,
+              worktreePath: worktree.primary ? null : worktree.path,
+              envMode: worktree.primary ? "local" : "worktree",
+              startFromOrigin: false,
+            },
+          );
+          return;
+        }
+        if (action === "copy-path") {
+          copyPathToClipboard(worktree.path, { path: worktree.path });
+          return;
+        }
+        if (action === "copy-branch") {
+          if (worktree.branch) copyBranchToClipboard(worktree.branch, { branch: worktree.branch });
+          return;
+        }
+        if (action === "project-settings") {
+          openProjectSettings(repository.project);
+          return;
+        }
+        if (action.startsWith("run:")) {
+          const script = scripts.find((candidate) => candidate.id === action.slice("run:".length));
+          if (!script) return;
+          const result = await startWorktreeRun({
+            environmentId: repository.environmentId,
+            input: {
+              projectId: worktree.projectId,
+              workspacePath: worktree.path,
+              scriptId: script.id,
+            },
+          });
+          if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: `Failed to run ${script.name}`,
+                description: error instanceof Error ? error.message : "An error occurred.",
+              }),
+            );
+            return;
+          }
+          useWorktreeRunTerminalStore.getState().open({
+            environmentId: repository.environmentId,
+            target: {
+              projectId: worktree.projectId,
+              workspacePath: worktree.path,
+              scriptId: script.id,
+            },
+          });
+          return;
+        }
+        if (action !== "delete-worktree" || worktree.primary || deletionBlocked) return;
+        const confirmed = await api.dialogs.confirm(
+          [
+            `Delete worktree "${worktree.label}"?`,
+            worktree.path,
+            "",
+            worktree.threads.length > 0
+              ? `${worktree.threads.length} linked ${worktree.threads.length === 1 ? "thread" : "threads"} will keep their history and move to the current checkout.`
+              : "The branch will remain available.",
+            "Git will refuse to delete the worktree if it contains local changes.",
+          ].join("\n"),
+          { variant: "destructive" },
+        );
+        if (!confirmed) return;
+        const detachResults = await Promise.all(
+          worktree.threads.map((thread) =>
+            updateThreadMetadata({
+              environmentId: thread.environmentId,
+              input: { threadId: thread.id, branch: null, worktreePath: null },
+            }),
+          ),
+        );
+        const detachedThreads = worktree.threads.filter(
+          (_thread, index) => detachResults[index]?._tag === "Success",
+        );
+        const restoreThreads = () =>
+          Promise.all(
+            detachedThreads.map((thread) =>
+              updateThreadMetadata({
+                environmentId: thread.environmentId,
+                input: {
+                  threadId: thread.id,
+                  branch: thread.branch,
+                  worktreePath: worktree.path,
+                },
+              }),
+            ),
+          );
+        if (detachedThreads.length !== worktree.threads.length) {
+          await restoreThreads();
+          toastManager.add({
+            type: "error",
+            title: "Failed to delete worktree",
+            description: "Linked threads could not be moved to the current checkout.",
+          });
+          return;
+        }
+        const result = await removeWorktree({
+          environmentId: repository.environmentId,
+          input: {
+            cwd: project.workspaceRoot,
+            path: worktree.path,
+          },
+        });
+        if (result._tag === "Failure") {
+          await restoreThreads();
+          if (!isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Failed to delete worktree",
+                description: error instanceof Error ? error.message : "An error occurred.",
+              }),
+            );
+          }
+          return;
+        }
+        toastManager.add({
+          type: "success",
+          title: "Worktree deleted",
+          description: worktree.path,
+        });
+      })();
+    },
+    [
+      copyBranchToClipboard,
+      copyPathToClipboard,
+      openProjectSettings,
+      removeWorktree,
+      serverConfigs,
+      startWorktreeRun,
+      updateThreadMetadata,
+    ],
+  );
   const settledThreadKeys = useMemo(
     () =>
       new Set(
@@ -5424,12 +5799,15 @@ export default function Sidebar() {
                                     right.updatedAt,
                                   ) -
                                   firstValidTimestampMs(left.latestUserMessageAt, left.updatedAt),
-                              )[0]!;
+                              )[0];
+                            const contextThreadRef = contextThread
+                              ? scopeThreadRef(contextThread.environmentId, contextThread.id)
+                              : null;
                             items.push(
                               <SidebarWorktreeHeader
                                 key={`worktree:${worktree.key}`}
-                                environmentId={contextThread.environmentId}
-                                projectId={contextThread.projectId}
+                                environmentId={repository.environmentId}
+                                projectId={worktree.projectId}
                                 expanded={expanded}
                                 hasUnread={hasUnread}
                                 label={worktree.label}
@@ -5439,31 +5817,26 @@ export default function Sidebar() {
                                 threadCount={worktree.threads.length}
                                 pullRequests={worktree.pullRequests}
                                 issues={worktree.issues}
-                                threadRef={scopeThreadRef(
-                                  contextThread.environmentId,
-                                  contextThread.id,
-                                )}
+                                threadRef={contextThreadRef}
                                 isActive={
-                                  routeThreadKey ===
-                                  scopedThreadKey(
-                                    scopeThreadRef(contextThread.environmentId, contextThread.id),
-                                  )
+                                  contextThreadRef !== null &&
+                                  routeThreadKey === scopedThreadKey(contextThreadRef)
                                 }
                                 onThreadActivate={navigateToThread}
                                 onCreateThread={() => {
                                   void handleNewThreadRef.current(
-                                    scopeProjectRef(
-                                      contextThread.environmentId,
-                                      contextThread.projectId,
-                                    ),
+                                    scopeProjectRef(repository.environmentId, worktree.projectId),
                                     {
-                                      branch: contextThread.branch,
-                                      worktreePath: contextThread.worktreePath,
-                                      envMode:
-                                        contextThread.worktreePath === null ? "local" : "worktree",
+                                      branch: worktree.branch,
+                                      worktreePath: worktree.primary ? null : worktree.path,
+                                      envMode: worktree.primary ? "local" : "worktree",
+                                      startFromOrigin: false,
                                     },
                                   );
                                 }}
+                                onContextMenu={(position) =>
+                                  handleWorktreeContextMenu(repository, worktree, position)
+                                }
                                 onToggle={() => setWorktreeExpanded(worktree.key, !expanded)}
                               />,
                             );
