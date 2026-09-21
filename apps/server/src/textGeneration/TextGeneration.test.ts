@@ -108,12 +108,12 @@ describe("TextGeneration.make", () => {
   it.effect("routes prompt enhancement to the selected provider instance", () =>
     Effect.gen(function* () {
       const instanceId = ProviderInstanceId.make("codex_personal");
-      const calls: string[] = [];
+      const calls: TextGeneration.PromptEnhancementInput[] = [];
       const instance = makeStubInstance(
         instanceId,
         makeStubTextGeneration({
           enhancePrompt: (input) => {
-            calls.push(input.prompt);
+            calls.push(input);
             return Effect.succeed({ prompt: `Enhanced: ${input.prompt}` });
           },
         }),
@@ -131,13 +131,16 @@ describe("TextGeneration.make", () => {
       );
       const result = yield* generation.enhancePrompt({
         cwd: "/isolated",
+        systemPrompt: "Custom compiler\n\nKeep spacing.",
         prompt: "Fix it",
         references: [],
         attachments: [],
         modelSelection: createModelSelection(instanceId, "gpt-5"),
       });
       expect(result.prompt).toBe("Enhanced: Fix it");
-      expect(calls).toEqual(["Fix it"]);
+      expect(calls.map(({ prompt, systemPrompt }) => ({ prompt, systemPrompt }))).toEqual([
+        { prompt: "Fix it", systemPrompt: "Custom compiler\n\nKeep spacing." },
+      ]);
     }),
   );
 
