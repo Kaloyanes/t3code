@@ -445,11 +445,21 @@ export function buildSidebarRepositoryGroups(input: {
   readonly pinnedThreads: readonly EnvironmentThreadShell[];
   readonly activeThreads: readonly EnvironmentThreadShell[];
   readonly discoveredWorktrees?: readonly SidebarDiscoveredWorktree[];
+  readonly scopedProjectKeys?: ReadonlySet<string> | null;
 }): SidebarRepositoryGroup[] {
   const orderedThreads = [...input.pinnedThreads, ...input.activeThreads];
   const groups: SidebarRepositoryGroup[] = [];
+  const scopedProjectKeys = input.scopedProjectKeys ?? null;
 
   for (const projectGroup of input.projectGroups) {
+    if (
+      scopedProjectKeys !== null &&
+      !projectGroup.memberProjects.some((member) =>
+        scopedProjectKeys.has(`${member.environmentId}:${member.id}`),
+      )
+    ) {
+      continue;
+    }
     const membersByEnvironment = new Map<
       EnvironmentId,
       (typeof projectGroup.memberProjects)[number][]
@@ -3590,8 +3600,9 @@ export default function Sidebar() {
         pinnedThreads,
         activeThreads,
         discoveredWorktrees,
+        scopedProjectKeys,
       }),
-    [activeThreads, discoveredWorktrees, pinnedThreads, projectGroups],
+    [activeThreads, discoveredWorktrees, pinnedThreads, projectGroups, scopedProjectKeys],
   );
   const groupedVisibleThreads = useMemo(
     () =>

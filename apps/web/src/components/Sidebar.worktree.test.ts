@@ -134,6 +134,44 @@ describe("sidebar worktree grouping", () => {
       ["feature/empty", false, 0],
     ]);
   });
+
+  it("hides discovered worktrees outside the selected project scope", () => {
+    const otherProjectId = ProjectId.make("other-project");
+    const otherProject = {
+      ...project,
+      id: otherProjectId,
+      title: "Other Repo",
+      workspaceRoot: "/other-repo",
+      physicalProjectKey: `${environmentId}:${otherProjectId}`,
+    };
+    const otherProjectGroup = {
+      ...projectGroup,
+      ...otherProject,
+      projectKey: "other-repo",
+      displayName: "Other Repo",
+      memberProjects: [otherProject],
+      memberProjectRefs: [{ environmentId, projectId: otherProjectId }],
+    };
+
+    const groups = buildSidebarRepositoryGroups({
+      projectGroups: [projectGroup, otherProjectGroup],
+      pinnedThreads: [],
+      activeThreads: [],
+      discoveredWorktrees: [
+        { environmentId, projectId, path: "/repo", branch: "main", primary: true },
+        {
+          environmentId,
+          projectId: otherProjectId,
+          path: "/other-repo",
+          branch: "main",
+          primary: true,
+        },
+      ],
+      scopedProjectKeys: new Set([`${environmentId}:${projectId}`]),
+    });
+
+    expect(groups.map((group) => group.project.projectKey)).toEqual(["repo"]);
+  });
 });
 
 describe("worktree action menu", () => {
