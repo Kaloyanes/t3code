@@ -1,9 +1,9 @@
 /**
  * The sidebar header keeps primary actions above thread search.
  *
- * The scope picker and utility menu are passed in because their state lives
- * outside this presentation component. `searchFieldRef` lands on the search
- * field so the scope popup can anchor to the field instead of its icon.
+ * The scope picker is passed in because its state lives outside this
+ * presentation component. `searchFieldRef` lands on the search field so the
+ * scope popup can anchor to the field instead of its icon.
  */
 import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
 import {
@@ -27,7 +27,6 @@ export interface SidebarThreadHeaderProps {
   hasProjects: boolean;
   /** The project scope combobox, rendered as the first icon of the group. */
   projectScope: ReactNode;
-  utilityMenu: ReactNode;
   onNewProject: () => void;
   /** Receives the click so Shift+click can skip the project picker. */
   onNewThread: (event: ReactMouseEvent) => void;
@@ -50,7 +49,6 @@ export function SidebarThreadHeader({
   searchFieldRef,
   hasProjects,
   projectScope,
-  utilityMenu,
   onNewProject,
   onNewThread,
   newThreadDisabled,
@@ -112,7 +110,6 @@ export function SidebarThreadHeader({
           </SidebarHeaderIconButton>
         ) : null}
       </div>
-      {utilityMenu}
       <div
         ref={searchFieldRef}
         className="flex h-8 min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"

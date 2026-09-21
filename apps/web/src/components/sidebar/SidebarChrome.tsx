@@ -222,64 +222,71 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   }, [canGoBack, closeMobileSidebar, navigate]);
 
   return (
-    <SidebarMenu className="flex-row items-center">
-      {currentFooterPage ? (
-        <SidebarMenuItem className="min-w-0 flex-1">
-          <SidebarMenuButton onClick={handleBackClick}>
-            <ArrowLeftIcon />
-            <span>Back</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      ) : (
-        <>
-          {issuesSupported ? (
+    <>
+      <SidebarMenu className="flex-row items-center">
+        {currentFooterPage ? (
+          <SidebarMenuItem className="min-w-0 flex-1">
+            <SidebarMenuButton onClick={handleBackClick}>
+              <ArrowLeftIcon />
+              <span>Back</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ) : (
+          <>
+            {issuesSupported ? (
+              <SidebarUtilityItem
+                icon={<CircleDotIcon />}
+                label="Issues"
+                onClick={handleIssuesClick}
+              />
+            ) : null}
+            {pullRequestsSupported ? (
+              <SidebarUtilityItem
+                icon={<PullRequestGlyph.pullRequest />}
+                label="Pull Requests"
+                onClick={handlePullRequestsClick}
+              />
+            ) : null}
             <SidebarUtilityItem
-              icon={<CircleDotIcon />}
-              label="Issues"
-              onClick={handleIssuesClick}
+              icon={<ChartNoAxesColumnIcon />}
+              label="Usage"
+              onClick={handleUsageClick}
             />
-          ) : null}
-          {pullRequestsSupported ? (
-            <SidebarUtilityItem
-              icon={<PullRequestGlyph.pullRequest />}
-              label="Pull Requests"
-              onClick={handlePullRequestsClick}
-            />
-          ) : null}
-          <SidebarUtilityItem
-            icon={<ChartNoAxesColumnIcon />}
-            label="Usage"
-            onClick={handleUsageClick}
-          />
-          {automationsSupported ? (
-            <SidebarUtilityItem
-              icon={<CalendarClockIcon />}
-              label="Automations"
-              onClick={handleAutomationsClick}
-            />
-          ) : null}
-          <SidebarUtilityItem
-            icon={<SettingsIcon />}
-            label="Settings"
-            onClick={handleSettingsClick}
-          />
-        </>
-      )}
-      <SidebarUpdatePill />
-    </SidebarMenu>
+            {automationsSupported ? (
+              <SidebarUtilityItem
+                icon={<CalendarClockIcon />}
+                label="Automations"
+                onClick={handleAutomationsClick}
+              />
+            ) : null}
+          </>
+        )}
+      </SidebarMenu>
+      <SidebarMenu>
+        {!currentFooterPage ? (
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              aria-label="Settings"
+              className="min-w-0 flex-1 justify-start px-2"
+              onClick={handleSettingsClick}
+            >
+              <SettingsIcon />
+              <span>Settings</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ) : null}
+        <SidebarUpdatePill showLabel />
+      </SidebarMenu>
+    </>
   );
 });
 
-export const SidebarChromeFooter = memo(function SidebarChromeFooter({
-  showUtilityMenu = true,
-}: {
-  showUtilityMenu?: boolean;
-}) {
+export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
     <SidebarFooter className="px-[var(--sidebar-content-inset)] py-1">
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
-      {showUtilityMenu ? <SidebarUtilityMenu /> : null}
+      <SidebarUtilityMenu />
     </SidebarFooter>
   );
 });

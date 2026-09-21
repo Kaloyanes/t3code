@@ -22,7 +22,7 @@ import {
 import { showDesktopUpdateDownloadedToast } from "../desktopUpdate.toast";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Popover, PopoverCreateHandle, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { SidebarMenuItem } from "../ui/sidebar";
+import { SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   DesktopUpdateStatusIcon,
@@ -108,11 +108,11 @@ function SidebarUpdateArchitectureWarningContent() {
   );
 }
 
-export function SidebarUpdatePill() {
-  return isElectron ? <SidebarUpdateControl /> : null;
+export function SidebarUpdatePill({ showLabel = false }: { showLabel?: boolean }) {
+  return isElectron ? <SidebarUpdateControl showLabel={showLabel} /> : null;
 }
 
-function SidebarUpdateControl() {
+function SidebarUpdateControl({ showLabel }: { showLabel: boolean }) {
   const state = useDesktopUpdateState();
   const [isActionPending, setIsActionPending] = useState(false);
   const [checkAnimationKey, setCheckAnimationKey] = useState(0);
@@ -298,12 +298,13 @@ function SidebarUpdateControl() {
   }, [prefersReducedMotion, state?.status]);
 
   const updateButton = (
-    <button
+    <SidebarMenuButton
       type="button"
       aria-label={tooltip}
       aria-disabled={isInteractionDisabled || undefined}
+      size={showLabel ? "default" : "icon"}
       className={cn(
-        "inline-flex size-8 items-center justify-center rounded-full outline-hidden ring-ring transition-colors focus-visible:ring-2",
+        showLabel ? "min-w-0 flex-1 justify-start px-2" : "size-8 rounded-full transition-colors",
         isInteractionDisabled ? "cursor-not-allowed" : "cursor-pointer",
         showUpdateIconState
           ? cn(
@@ -344,11 +345,12 @@ function SidebarUpdateControl() {
         onCheckAnimationIteration={handleCheckAnimationIteration}
         status={iconStatus}
       />
-    </button>
+      {showLabel ? <span>{tooltip}</span> : null}
+    </SidebarMenuButton>
   );
 
   return (
-    <SidebarMenuItem className="ml-auto shrink-0">
+    <SidebarMenuItem className={showLabel ? undefined : "ml-auto shrink-0"}>
       <Popover
         handle={releaseNotesPopoverHandle}
         onOpenChange={(open, details) => {
