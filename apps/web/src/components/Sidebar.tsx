@@ -263,7 +263,11 @@ import {
   useComboboxFilter,
 } from "./ui/combobox";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
-import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import {
+  SidebarChromeFooter,
+  SidebarChromeHeader,
+  SidebarPrimaryMenu,
+} from "./sidebar/SidebarChrome";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -5496,6 +5500,7 @@ export default function Sidebar() {
                   </ComboboxPopup>
                 </Combobox>
               }
+              utilityMenu={<SidebarPrimaryMenu />}
               onNewProject={openAddProjectCommandPalette}
               onNewThread={handleNewThreadClick}
               newThreadDisabled={projects.length === 0}
