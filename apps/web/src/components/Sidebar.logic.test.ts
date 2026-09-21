@@ -26,6 +26,7 @@ import {
   resolveThreadRowClassName,
   resolveSidebarThreadStatus,
   resolveThreadStatusPill,
+  resolveWorktreePullRequestPanelRef,
   resolveWorkingStartedAt,
   searchSidebarThreads,
   formatWorkingDurationLabel,
@@ -69,6 +70,24 @@ import {
 } from "../types";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
+
+describe("resolveWorktreePullRequestPanelRef", () => {
+  it("uses the workspace pull request panel when the worktree has no threads", () => {
+    expect(resolveWorktreePullRequestPanelRef(null)).toEqual({
+      environmentId: "pull-requests-panel",
+      threadId: "pull-requests-panel",
+    });
+  });
+
+  it("keeps the thread panel when the worktree has a thread", () => {
+    const threadRef = {
+      environmentId: localEnvironmentId,
+      threadId: ThreadId.make("thread-1"),
+    };
+
+    expect(resolveWorktreePullRequestPanelRef(threadRef)).toBe(threadRef);
+  });
+});
 
 describe("animateSidebarLayoutChanges", () => {
   const baseArgs: Parameters<AnimateLayoutChanges>[0] = {

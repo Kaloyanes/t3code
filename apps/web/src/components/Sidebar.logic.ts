@@ -6,7 +6,7 @@ import {
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import type { ContextMenuItem, EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { ContextMenuItem, EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import type { AsyncResult } from "effect/unstable/reactivity";
 import { planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
@@ -25,6 +25,13 @@ import {
 import type { SidebarThreadSummary, Thread } from "../types";
 import { cn } from "../lib/utils";
 import { isLatestTurnSettled } from "../session-logic";
+import { PULL_REQUESTS_PANEL_REF } from "../rightPanelStore";
+
+export function resolveWorktreePullRequestPanelRef(
+  threadRef: ScopedThreadRef | null,
+): ScopedThreadRef {
+  return threadRef ?? PULL_REQUESTS_PANEL_REF;
+}
 
 export function shouldNavigateAfterThreadPark(input: {
   readonly threadKey: string;

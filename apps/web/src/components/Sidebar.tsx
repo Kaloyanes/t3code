@@ -194,6 +194,7 @@ import {
   shouldCreateNewThreadInCurrentProject,
   shouldNavigateAfterThreadPark,
   shouldRecedeSidebarThread,
+  resolveWorktreePullRequestPanelRef,
   resolveWorkingStartedAt,
   sidebarListItemId,
   sidebarMarkerId,
@@ -1338,7 +1339,7 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
     serverPorts.length === 1
       ? `Server running on port ${serverPorts[0]}`
       : `Servers running on ports ${serverPorts.join(", ")}`;
-  const openPrLink = useOpenPrLink();
+  const openPrLink = useOpenPrLink(undefined, resolveWorktreePullRequestPanelRef(props.threadRef));
   const openIssueLink = useOpenIssueLink(props.threadRef ?? undefined);
   const links = useMemo(
     () =>
@@ -1356,8 +1357,13 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
   }, [props.isActive, props.onThreadActivate, props.threadRef]);
   const handleSingleOpen = useCallback(
     (event: ReactMouseEvent<HTMLAnchorElement>) => {
-      if (current === null || props.threadRef === null) return;
-      const openedInRightPanel = openPrLink(event, current.url, props.threadRef);
+      if (current === null) return;
+      const openedInRightPanel = openPrLink(
+        event,
+        current.url,
+        props.threadRef ?? undefined,
+        props.environmentId,
+      );
       if (openedInRightPanel && !props.isActive && props.threadRef !== null) {
         props.onThreadActivate(props.threadRef);
       }
