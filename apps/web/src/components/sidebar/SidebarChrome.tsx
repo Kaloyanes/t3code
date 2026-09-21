@@ -257,37 +257,28 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   }, [canGoBack, closeMobileSidebar, navigate]);
 
   return (
-    <>
-      <SidebarMenu className="flex-row items-center">
-        {currentFooterPage !== "/usage" ? (
-          <SidebarUtilityIconItem
-            icon={<ChartNoAxesColumnIcon />}
-            label="Usage"
-            onClick={handleUsageClick}
-          />
-        ) : null}
-        {automationsSupported && currentFooterPage !== "/automations" ? (
-          <SidebarUtilityIconItem
-            icon={<CalendarClockIcon />}
-            label="Automations"
-            onClick={handleAutomationsClick}
-          />
-        ) : null}
-      </SidebarMenu>
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            aria-label={currentFooterPage ? "Back" : "Settings"}
-            className="min-w-0 flex-1 justify-start px-2"
-            onClick={currentFooterPage ? handleBackClick : handleSettingsClick}
-          >
-            {currentFooterPage ? <ArrowLeftIcon /> : <SettingsIcon />}
-            <span>{currentFooterPage ? "Back" : "Settings"}</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-        <SidebarUpdatePill showLabel />
-      </SidebarMenu>
-    </>
+    <SidebarMenu className="flex-row items-center">
+      {currentFooterPage !== "/usage" ? (
+        <SidebarUtilityIconItem
+          icon={<ChartNoAxesColumnIcon />}
+          label="Usage"
+          onClick={handleUsageClick}
+        />
+      ) : null}
+      {automationsSupported && currentFooterPage !== "/automations" ? (
+        <SidebarUtilityIconItem
+          icon={<CalendarClockIcon />}
+          label="Automations"
+          onClick={handleAutomationsClick}
+        />
+      ) : null}
+      <SidebarUtilityIconItem
+        icon={currentFooterPage ? <ArrowLeftIcon /> : <SettingsIcon />}
+        label={currentFooterPage ? "Back" : "Settings"}
+        onClick={currentFooterPage ? handleBackClick : handleSettingsClick}
+      />
+      <SidebarUpdatePill />
+    </SidebarMenu>
   );
 });
 
