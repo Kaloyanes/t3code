@@ -31,6 +31,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "../ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
@@ -132,6 +133,31 @@ function SidebarUtilityItem({
   );
 }
 
+function SidebarUtilityIconItem({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <SidebarMenuItem className="shrink-0">
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
+              {icon}
+            </SidebarMenuButton>
+          }
+        />
+        <TooltipPopup side="top">{label}</TooltipPopup>
+      </Tooltip>
+    </SidebarMenuItem>
+  );
+}
+
 export const SidebarPrimaryMenu = memo(function SidebarPrimaryMenu() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -143,10 +169,6 @@ export const SidebarPrimaryMenu = memo(function SidebarPrimaryMenu() {
   );
   const pullRequestsSupported = environments.some(
     (environment) => environment.serverConfig?.environment.capabilities.pullRequests === true,
-  );
-  const automationsSupported = environments.some(
-    (environment) =>
-      environment.serverConfig?.environment.capabilities.scheduledAutomations === true,
   );
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) {
@@ -175,18 +197,6 @@ export const SidebarPrimaryMenu = memo(function SidebarPrimaryMenu() {
       search: readPullRequestListPreferences(),
     });
   }, [closeMobileSidebar, navigate]);
-  const handleUsageClick = useCallback(() => {
-    if (isMobile) {
-      setOpenMobile(false);
-    }
-    void navigate({ to: "/usage" });
-  }, [isMobile, navigate, setOpenMobile]);
-
-  const handleAutomationsClick = useCallback(() => {
-    closeMobileSidebar();
-    void navigate({ to: "/automations" });
-  }, [closeMobileSidebar, navigate]);
-
   return (
     <SidebarMenu>
       {issuesSupported ? (
@@ -199,18 +209,6 @@ export const SidebarPrimaryMenu = memo(function SidebarPrimaryMenu() {
           onClick={handlePullRequestsClick}
         />
       ) : null}
-      <SidebarUtilityItem
-        icon={<ChartNoAxesColumnIcon />}
-        label="Usage"
-        onClick={handleUsageClick}
-      />
-      {automationsSupported ? (
-        <SidebarUtilityItem
-          icon={<CalendarClockIcon />}
-          label="Automations"
-          onClick={handleAutomationsClick}
-        />
-      ) : null}
     </SidebarMenu>
   );
 });
@@ -219,18 +217,35 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   const { isMobile, setOpenMobile } = useSidebar();
+  const { environments } = useEnvironments();
   const currentFooterPage = useLocation({
     select: (location) =>
-      /^\/settings(?:\/|$)/.test(location.pathname) ||
-      /^\/projects\/[^/]+\/?$/.test(location.pathname) ||
-      ["/usage", "/automations", "/pull-requests", "/issues"].includes(location.pathname),
+      /^\/settings(?:\/|$)/.test(location.pathname)
+        ? "settings"
+        : /^\/projects\/[^/]+\/?$/.test(location.pathname)
+          ? "project-settings"
+          : ["/usage", "/automations", "/pull-requests", "/issues"].includes(location.pathname)
+            ? location.pathname
+            : null,
   });
+  const automationsSupported = environments.some(
+    (environment) =>
+      environment.serverConfig?.environment.capabilities.scheduledAutomations === true,
+  );
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) setOpenMobile(false);
   }, [isMobile, setOpenMobile]);
   const handleSettingsClick = useCallback(() => {
     closeMobileSidebar();
     void navigate({ to: "/settings" });
+  }, [closeMobileSidebar, navigate]);
+  const handleUsageClick = useCallback(() => {
+    closeMobileSidebar();
+    void navigate({ to: "/usage" });
+  }, [closeMobileSidebar, navigate]);
+  const handleAutomationsClick = useCallback(() => {
+    closeMobileSidebar();
+    void navigate({ to: "/automations" });
   }, [closeMobileSidebar, navigate]);
   const handleBackClick = useCallback(() => {
     closeMobileSidebar();
@@ -242,19 +257,37 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   }, [canGoBack, closeMobileSidebar, navigate]);
 
   return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <SidebarMenuButton
-          aria-label={currentFooterPage ? "Back" : "Settings"}
-          className="min-w-0 flex-1 justify-start px-2"
-          onClick={currentFooterPage ? handleBackClick : handleSettingsClick}
-        >
-          {currentFooterPage ? <ArrowLeftIcon /> : <SettingsIcon />}
-          <span>{currentFooterPage ? "Back" : "Settings"}</span>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
-      <SidebarUpdatePill showLabel />
-    </SidebarMenu>
+    <>
+      <SidebarMenu className="flex-row items-center">
+        {currentFooterPage !== "/usage" ? (
+          <SidebarUtilityIconItem
+            icon={<ChartNoAxesColumnIcon />}
+            label="Usage"
+            onClick={handleUsageClick}
+          />
+        ) : null}
+        {automationsSupported && currentFooterPage !== "/automations" ? (
+          <SidebarUtilityIconItem
+            icon={<CalendarClockIcon />}
+            label="Automations"
+            onClick={handleAutomationsClick}
+          />
+        ) : null}
+      </SidebarMenu>
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            aria-label={currentFooterPage ? "Back" : "Settings"}
+            className="min-w-0 flex-1 justify-start px-2"
+            onClick={currentFooterPage ? handleBackClick : handleSettingsClick}
+          >
+            {currentFooterPage ? <ArrowLeftIcon /> : <SettingsIcon />}
+            <span>{currentFooterPage ? "Back" : "Settings"}</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+        <SidebarUpdatePill showLabel />
+      </SidebarMenu>
+    </>
   );
 });
 
