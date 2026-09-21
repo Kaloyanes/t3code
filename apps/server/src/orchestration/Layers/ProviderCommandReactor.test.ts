@@ -613,6 +613,18 @@ describe("ProviderCommandReactor", () => {
             `;
           }),
         ),
+      readPendingTurnStartMessages: () =>
+        runtime!.runPromise(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            return yield* sql<{ readonly messageId: string }>`
+              SELECT pending_message_id AS "messageId"
+              FROM projection_turns
+              WHERE turn_id IS NULL AND state = 'pending'
+              ORDER BY requested_at ASC, row_id ASC
+            `;
+          }),
+        ),
       tryHandlePromptCommand,
       startSession,
       sendTurn,
@@ -637,6 +649,147 @@ describe("ProviderCommandReactor", () => {
       },
     };
   }
+
+  it("delivers a queued message only after the active turn settles", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.make("thread-1");
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-active-turn"),
+        threadId,
+        session: {
+          threadId,
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          providerName: "codex",
+          status: "running",
+          runtimeMode: "approval-required",
+          activeTurnId: TurnId.make("active-turn"),
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:01.000Z",
+        },
+        createdAt: "2026-01-01T00:00:01.000Z",
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-queued-follow-up"),
+        threadId,
+        message: {
+          messageId: MessageId.make("queued-follow-up"),
+          role: "user",
+          text: "Run this next",
+          attachments: [],
+        },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        dispatchMode: "queue",
+        createdAt: "2026-01-01T00:00:02.000Z",
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-queued-follow-up-2"),
+        threadId,
+        message: {
+          messageId: MessageId.make("queued-follow-up-2"),
+          role: "user",
+          text: "Run this after that",
+          attachments: [],
+        },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        dispatchMode: "queue",
+        createdAt: "2026-01-01T00:00:02.500Z",
+      }),
+    );
+    await harness.drain();
+
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    expect(await harness.readPendingTurnStartMessages()).toEqual([
+      { messageId: "queued-follow-up" },
+      { messageId: "queued-follow-up-2" },
+    ]);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-active-turn-settled"),
+        threadId,
+        session: {
+          threadId,
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          providerName: "codex",
+          status: "ready",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:03.000Z",
+        },
+        createdAt: "2026-01-01T00:00:03.000Z",
+      }),
+    );
+    await harness.drain();
+
+    expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+    expect(harness.sendTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ input: "Run this next" }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-queued-turn-running"),
+        threadId,
+        session: {
+          threadId,
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          providerName: "codex",
+          status: "running",
+          runtimeMode: "approval-required",
+          activeTurnId: TurnId.make("queued-turn"),
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:04.000Z",
+        },
+        createdAt: "2026-01-01T00:00:04.000Z",
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-queued-turn-settled"),
+        threadId,
+        session: {
+          threadId,
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          providerName: "codex",
+          status: "ready",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:05.000Z",
+        },
+        createdAt: "2026-01-01T00:00:05.000Z",
+      }),
+    );
+    await harness.drain();
+
+    expect(harness.sendTurn).toHaveBeenCalledTimes(2);
+    expect(harness.sendTurn).toHaveBeenLastCalledWith(
+      expect.objectContaining({ input: "Run this after that" }),
+    );
+  });
 
   effectIt.effect.each(["new", "ready", "stopped"] as const)(
     "handles sign-out for a %s thread before worktree repair, text helpers, or startup",

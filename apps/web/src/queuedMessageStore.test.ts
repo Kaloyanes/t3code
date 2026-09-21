@@ -118,13 +118,13 @@ describe("queued message dispatch timing", () => {
     ).toBe("late");
   });
 
-  it("waits mid-turn until a tool call finishes after the message was queued", () => {
+  it("waits for the turn to finish instead of sending at a tool boundary", () => {
     const message = { queuedAfterToolActivityId: "a2" };
     expect(isQueuedMessageDue({ message, phase: "running", latestToolActivityId: "a2" })).toBe(
       false,
     );
     expect(isQueuedMessageDue({ message, phase: "running", latestToolActivityId: "a4" })).toBe(
-      true,
+      false,
     );
   });
 

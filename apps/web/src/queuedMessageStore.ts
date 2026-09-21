@@ -181,9 +181,8 @@ export function latestCompletedToolActivityId(
 }
 
 /**
- * A queued message is due mid-turn once a tool call finished after it was
- * queued, and as soon as the turn is over otherwise. "connecting" is the gap
- * between a send and the provider picking it up, so nothing is due there.
+ * Legacy client-held messages leave only after the active turn ends. New queue
+ * submissions are sent to the server immediately and wait there instead.
  */
 export function isQueuedMessageDue(input: {
   message: Pick<QueuedComposerMessage, "queuedAfterToolActivityId" | "holdUntilUserAction">;
@@ -192,8 +191,7 @@ export function isQueuedMessageDue(input: {
 }): boolean {
   if (input.message.holdUntilUserAction) return false;
   if (input.phase === "connecting") return false;
-  if (input.phase !== "running") return true;
-  return input.latestToolActivityId !== input.message.queuedAfterToolActivityId;
+  return input.phase !== "running";
 }
 
 export function useQueuedMessages(threadKey: string): QueuedComposerMessage[] {

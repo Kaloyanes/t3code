@@ -121,9 +121,11 @@ export interface ProjectionTurnRepositoryShape {
     row: ProjectionPendingTurnStart,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 
-  /**
-   * Returns the newest pending-start placeholder for a thread; this is expected to be at most one row after replacement writes.
-   */
+  readonly appendPendingTurnStart: (
+    row: ProjectionPendingTurnStart,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Returns the oldest pending-start placeholder for a thread. */
   readonly getPendingTurnStartByThreadId: (
     input: GetProjectionPendingTurnStartInput,
   ) => Effect.Effect<Option.Option<ProjectionPendingTurnStart>, ProjectionRepositoryError>;
@@ -134,6 +136,11 @@ export interface ProjectionTurnRepositoryShape {
   readonly deletePendingTurnStartByThreadId: (
     input: GetProjectionPendingTurnStartInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  readonly deletePendingTurnStartByMessageId: (input: {
+    readonly threadId: ThreadId;
+    readonly messageId: MessageId;
+  }) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /**
    * Lists all projection rows for a thread, including pending placeholders, with checkpoint rows ordered before non-checkpoint rows.

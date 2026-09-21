@@ -1398,7 +1398,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               return;
             }
           }
-          yield* projectionTurnRepository.replacePendingTurnStart({
+          const writePendingTurnStart =
+            event.payload.dispatchMode === "queue"
+              ? projectionTurnRepository.appendPendingTurnStart
+              : projectionTurnRepository.replacePendingTurnStart;
+          yield* writePendingTurnStart({
             threadId: event.payload.threadId,
             messageId: event.payload.messageId,
             sourceProposedPlanThreadId: event.payload.sourceProposedPlan?.threadId ?? null,
@@ -1442,8 +1446,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           const turnId = event.payload.session.activeTurnId;
           if (turnId === null || event.payload.session.status !== "running") {
             if (
-              (event.payload.session.status === "ready" &&
-                event.commandId?.startsWith("server:provider-session-set:") === true) ||
               event.payload.session.status === "error" ||
               event.payload.session.status === "stopped" ||
               event.payload.session.status === "interrupted"
@@ -1571,9 +1573,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             });
           }
 
-          yield* projectionTurnRepository.deletePendingTurnStartByThreadId({
-            threadId: event.payload.threadId,
-          });
+          if (Option.isSome(pendingTurnStart))
+            yield* projectionTurnRepository.deletePendingTurnStartByMessageId({
+              threadId: event.payload.threadId,
+              messageId: pendingTurnStart.value.messageId,
+            });
           return;
         }
 

@@ -298,6 +298,7 @@ const make = Effect.gen(function* () {
   type QueuedTurnStart = Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>;
   // Turn starts received while a thread compacts, replayed in order once its session is restored.
   const turnsAfterCompaction = new Map<ThreadId, Array<QueuedTurnStart>>();
+  const queuedTurnStarts = new Map<ThreadId, Array<QueuedTurnStart>>();
   // Replay command id → the queued turn start it re-requests. `sent` settles once the replay's
   // provider send finishes, which is what lets the next queued turn follow it in order.
   const resumedTurnStarts = new Map<
@@ -1276,13 +1277,23 @@ const make = Effect.gen(function* () {
     const resumed =
       receivedEvent.commandId !== null ? resumedTurnStarts.get(receivedEvent.commandId) : undefined;
     const event = resumed ? { ...receivedEvent, payload: resumed.event.payload } : receivedEvent;
-    const key = turnStartKeyForEvent(event);
-    if (yield* hasHandledTurnStartRecently(key)) {
-      return;
-    }
-
     const thread = yield* resolveThreadShell(event.payload.threadId);
     if (!thread) {
+      return;
+    }
+    if (
+      event.payload.dispatchMode === "queue" &&
+      (thread.session?.status === "starting" || thread.session?.status === "running")
+    ) {
+      const queued = queuedTurnStarts.get(thread.id) ?? [];
+      if (!queued.some((candidate) => candidate.payload.messageId === event.payload.messageId)) {
+        queued.push(event);
+        queuedTurnStarts.set(thread.id, queued);
+      }
+      return;
+    }
+    const key = turnStartKeyForEvent(event);
+    if (yield* hasHandledTurnStartRecently(key)) {
       return;
     }
     if (yield* hasDetachedIssueWorkspace(thread.id)) {
@@ -1590,6 +1601,17 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const resumeNextQueuedTurn = Effect.fn("resumeNextQueuedTurn")(function* (threadId: ThreadId) {
+    const queued = queuedTurnStarts.get(threadId);
+    const next = queued?.shift();
+    if (!next) return;
+    if (queued?.length === 0) queuedTurnStarts.delete(threadId);
+    yield* processTurnStartRequested({
+      ...next,
+      payload: { ...next.payload, dispatchMode: "start" },
+    });
+  });
+
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-interrupt-requested" }>,
   ) {
@@ -1866,8 +1888,16 @@ const make = Effect.gen(function* () {
           yield* maybeRefineThreadTitle(event.payload.threadId);
         return;
       case "thread.session-set":
-        if (event.payload.session.status === "ready")
+        if (event.payload.session.status === "ready") {
           yield* maybeRefineThreadTitle(event.payload.threadId);
+          yield* resumeNextQueuedTurn(event.payload.threadId);
+        } else if (
+          event.payload.session.status === "error" ||
+          event.payload.session.status === "stopped" ||
+          event.payload.session.status === "interrupted"
+        ) {
+          queuedTurnStarts.delete(event.payload.threadId);
+        }
         return;
       case "thread.runtime-mode-set": {
         const thread = yield* resolveThreadShell(event.payload.threadId);
