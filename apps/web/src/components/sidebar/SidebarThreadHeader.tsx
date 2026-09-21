@@ -1,9 +1,9 @@
 /**
  * The sidebar header keeps primary actions above thread search.
  *
- * The scope picker itself is passed in: its combobox state lives with the rest
- * of the sidebar's scope logic. `searchFieldRef` lands on the search field so
- * the picker's popup can anchor to that width rather than to its 28px trigger.
+ * The scope picker and utility menu are passed in because their state lives
+ * outside this presentation component. `searchFieldRef` lands on the search
+ * field so the scope popup can anchor to the field instead of its icon.
  */
 import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
 import {
@@ -27,6 +27,7 @@ export interface SidebarThreadHeaderProps {
   hasProjects: boolean;
   /** The project scope combobox, rendered as the first icon of the group. */
   projectScope: ReactNode;
+  utilityMenu: ReactNode;
   onNewProject: () => void;
   /** Receives the click so Shift+click can skip the project picker. */
   onNewThread: (event: ReactMouseEvent) => void;
@@ -49,6 +50,7 @@ export function SidebarThreadHeader({
   searchFieldRef,
   hasProjects,
   projectScope,
+  utilityMenu,
   onNewProject,
   onNewThread,
   newThreadDisabled,
@@ -105,14 +107,12 @@ export function SidebarThreadHeader({
           <TooltipPopup side="top">{newThreadTooltip}</TooltipPopup>
         </Tooltip>
         {hasProjects ? (
-          <>
-            {projectScope}
-            <SidebarHeaderIconButton label="New project" onClick={onNewProject}>
-              <FolderPlusIcon />
-            </SidebarHeaderIconButton>
-          </>
+          <SidebarHeaderIconButton label="New project" onClick={onNewProject}>
+            <FolderPlusIcon />
+          </SidebarHeaderIconButton>
         ) : null}
       </div>
+      {utilityMenu}
       <div
         ref={searchFieldRef}
         className="flex h-8 min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
@@ -154,6 +154,7 @@ export function SidebarThreadHeader({
             <XIcon className="size-3" />
           </Button>
         ) : null}
+        {hasProjects ? projectScope : null}
       </div>
     </div>
   );

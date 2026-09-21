@@ -3,7 +3,6 @@ import {
   CalendarClockIcon,
   ChartNoAxesColumnIcon,
   CircleDotIcon,
-  GitPullRequestIcon,
   SettingsIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -271,12 +270,16 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   );
 });
 
-export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
+export const SidebarChromeFooter = memo(function SidebarChromeFooter({
+  showUtilityMenu = true,
+}: {
+  showUtilityMenu?: boolean;
+}) {
   return (
     <SidebarFooter className="px-[var(--sidebar-content-inset)] py-1">
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
-      <SidebarUtilityMenu />
+      {showUtilityMenu ? <SidebarUtilityMenu /> : null}
     </SidebarFooter>
   );
 });
