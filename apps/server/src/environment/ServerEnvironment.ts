@@ -243,6 +243,7 @@ export const make = Effect.gen(function* () {
       threadTitleRegeneration: true,
       promptEnhancement: true,
       promptEnhancementSelection: true,
+      promptEnhancementStreaming: true,
       threadPullRequests: true,
       worktreePullRequests: true,
       pullRequestStackActions: true,

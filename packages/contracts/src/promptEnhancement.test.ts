@@ -1,10 +1,15 @@
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import { PromptEnhancementInput, PromptEnhancementResult } from "./promptEnhancement.ts";
+import {
+  PromptEnhancementInput,
+  PromptEnhancementResult,
+  PromptEnhancementStreamEvent,
+} from "./promptEnhancement.ts";
 
 const decodeInput = Schema.decodeUnknownSync(PromptEnhancementInput);
 const decodeResult = Schema.decodeUnknownSync(PromptEnhancementResult);
+const decodeStreamEvent = Schema.decodeUnknownSync(PromptEnhancementStreamEvent);
 
 describe("prompt enhancement contracts", () => {
   const input = {
@@ -35,5 +40,18 @@ describe("prompt enhancement contracts", () => {
       decodeInput({ ...input, attachments: [{ name: "trace", mimeType: "" }] }),
     ).toThrow();
     expect(() => decodeResult({ prompt: "" })).toThrow();
+  });
+
+  it("decodes started, text delta, and completed stream events", () => {
+    expect(decodeStreamEvent({ type: "started" })).toEqual({ type: "started" });
+    expect(decodeStreamEvent({ type: "delta", delta: "Improve " })).toEqual({
+      type: "delta",
+      delta: "Improve ",
+    });
+    expect(decodeStreamEvent({ type: "complete", result: { prompt: "Improve it" } })).toEqual({
+      type: "complete",
+      result: { prompt: "Improve it" },
+    });
+    expect(() => decodeStreamEvent({ type: "delta", delta: "" })).toThrow();
   });
 });

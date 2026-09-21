@@ -76,6 +76,16 @@ describe("ExecutionEnvironmentDescriptor", () => {
     ).toBe(true);
   });
 
+  it("treats streaming prompt enhancement as an optional versioned capability", () => {
+    expect(decodeDescriptor(descriptor).capabilities.promptEnhancementStreaming).toBeUndefined();
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, promptEnhancementStreaming: true },
+      }).capabilities.promptEnhancementStreaming,
+    ).toBe(true);
+  });
+
   it("treats a missing attachment upload capability as unsupported", () => {
     expect(decodeDescriptor(descriptor).capabilities.attachmentUploads).toBeUndefined();
   });

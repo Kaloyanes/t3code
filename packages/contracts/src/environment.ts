@@ -148,6 +148,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   promptEnhancement: Schema.optionalKey(Schema.Boolean),
   /** Server can enhance only a selected portion while using the full draft as context. */
   promptEnhancementSelection: Schema.optionalKey(Schema.Boolean),
+  /** Server can stream prompt enhancement progress and generated text. */
+  promptEnhancementStreaming: Schema.optionalKey(Schema.Boolean),
   /** Server supports legacy linkedPullRequest updates through thread.meta.update.
       Independent of threadPullRequests; servers supporting both advertise both. */
   threadPullRequestLinking: Schema.optionalKey(Schema.Boolean),

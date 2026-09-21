@@ -247,6 +247,7 @@ function AutomationEditor({
   editing,
   saving,
   enhancing,
+  enhancementPreview,
   canEnhance,
   onChange,
   onEnhance,
@@ -263,6 +264,7 @@ function AutomationEditor({
   readonly editing: boolean;
   readonly saving: boolean;
   readonly enhancing: boolean;
+  readonly enhancementPreview: string;
   readonly canEnhance: boolean;
   readonly onChange: (patch: Partial<AutomationFormState>) => void;
   readonly onEnhance: () => void;
@@ -333,6 +335,11 @@ function AutomationEditor({
             {enhancing ? <Spinner className="size-4" /> : <WandSparklesIcon className="size-4" />}
           </Button>
         </div>
+        {enhancing && enhancementPreview.length > 0 ? (
+          <p aria-live="polite" className="line-clamp-3 text-xs font-normal text-muted-foreground">
+            {enhancementPreview}
+          </p>
+        ) : null}
       </FormField>
       <div className="grid gap-3 sm:grid-cols-2">
         <FormField label="Schedule">
@@ -505,6 +512,7 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
   const [form, setForm] = useState<AutomationFormState>(() => defaultForm(projects[0]?.id));
   const [saving, setSaving] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
+  const [enhancementPreview, setEnhancementPreview] = useState("");
   const projectSettings = resolveProjectSettings(
     environmentSettings,
     form.projectId ? ProjectId.make(form.projectId) : null,
@@ -575,8 +583,14 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
     const previousPrompt = form.prompt;
     if (!form.projectId || previousPrompt.trim().length === 0 || enhancing) return;
     setEnhancing(true);
+    setEnhancementPreview("");
     const enhanced = await enhancePrompt({
       environmentId,
+      onProgress: (event) => {
+        if (event.type === "delta") {
+          setEnhancementPreview((current) => (current + event.delta).slice(-400));
+        }
+      },
       input: {
         projectId: ProjectId.make(form.projectId),
         prompt: previousPrompt,
@@ -585,6 +599,7 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
       },
     });
     setEnhancing(false);
+    setEnhancementPreview("");
     if (AsyncResult.isSuccess(enhanced)) {
       setForm((current) =>
         current.prompt === previousPrompt ? { ...current, prompt: enhanced.value.prompt } : current,
@@ -894,6 +909,7 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
             editing={selected !== null && editing}
             saving={saving}
             enhancing={enhancing}
+            enhancementPreview={enhancementPreview}
             canEnhance={
               environment?.serverConfig?.environment.capabilities.promptEnhancement === true
             }

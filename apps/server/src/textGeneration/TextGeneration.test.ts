@@ -109,13 +109,17 @@ describe("TextGeneration.make", () => {
     Effect.gen(function* () {
       const instanceId = ProviderInstanceId.make("codex_personal");
       const calls: TextGeneration.PromptEnhancementInput[] = [];
+      const deltas: string[] = [];
       const instance = makeStubInstance(
         instanceId,
         makeStubTextGeneration({
-          enhancePrompt: (input) => {
-            calls.push(input);
-            return Effect.succeed({ prompt: `Enhanced: ${input.prompt}` });
-          },
+          enhancePrompt: (input) =>
+            Effect.gen(function* () {
+              calls.push(input);
+              yield* input.onDelta?.("Enhanced: ") ?? Effect.void;
+              yield* input.onDelta?.(input.prompt) ?? Effect.void;
+              return { prompt: `Enhanced: ${input.prompt}` };
+            }),
         }),
       );
       const generation = yield* TextGeneration.make.pipe(
@@ -136,8 +140,10 @@ describe("TextGeneration.make", () => {
         references: [],
         attachments: [],
         modelSelection: createModelSelection(instanceId, "gpt-5"),
+        onDelta: (delta) => Effect.sync(() => deltas.push(delta)),
       });
       expect(result.prompt).toBe("Enhanced: Fix it");
+      expect(deltas).toEqual(["Enhanced: ", "Fix it"]);
       expect(calls.map(({ prompt, systemPrompt }) => ({ prompt, systemPrompt }))).toEqual([
         { prompt: "Fix it", systemPrompt: "Custom compiler\n\nKeep spacing." },
       ]);

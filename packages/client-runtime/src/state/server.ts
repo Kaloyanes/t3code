@@ -1,5 +1,8 @@
 import {
   type EnvironmentId,
+  type PromptEnhancementInput,
+  type PromptEnhancementResult,
+  type PromptEnhancementStreamEvent,
   type ServerConfig,
   type ServerConfigStreamEvent,
   type ServerLifecycleWelcomePayload,
@@ -78,6 +81,12 @@ export interface ServerUpdateTarget {
   readonly input: EnvironmentRpcInput<typeof WS_METHODS.serverUpdateServer>;
 }
 
+export interface PromptEnhancementTarget {
+  readonly environmentId: EnvironmentId;
+  readonly input: PromptEnhancementInput;
+  readonly onProgress?: (event: PromptEnhancementStreamEvent) => void;
+}
+
 const IDLE_SERVER_UPDATE_STATE: ServerUpdateState = { status: "idle" };
 const EMPTY_SERVER_UPDATE_STATE_ATOM = Atom.make<ServerUpdateState>(IDLE_SERVER_UPDATE_STATE).pipe(
   Atom.withLabel("environment-data:server:update-state:empty"),
@@ -110,6 +119,41 @@ export class ServerUpdateProgressIncompleteError extends Schema.TaggedError<Serv
     return `The t3@${this.targetVersion} update ended before the server accepted the restart.`;
   }
 }
+
+export class PromptEnhancementStreamIncompleteError extends Schema.TaggedError<PromptEnhancementStreamIncompleteError>()(
+  "PromptEnhancementStreamIncompleteError",
+  {},
+) {
+  override get message(): string {
+    return "Prompt enhancement ended before returning a result.";
+  }
+}
+
+export const consumePromptEnhancementStream = Effect.fn("consumePromptEnhancementStream")(
+  function* <E, R>(
+    stream: Stream.Stream<PromptEnhancementStreamEvent, E, R>,
+    onProgress: (event: PromptEnhancementStreamEvent) => Effect.Effect<void>,
+  ) {
+    const result = yield* Ref.make<Option.Option<PromptEnhancementResult>>(Option.none());
+    yield* stream.pipe(
+      Stream.runForEach((event) =>
+        onProgress(event).pipe(
+          Effect.andThen(
+            event.type === "complete" ? Ref.set(result, Option.some(event.result)) : Effect.void,
+          ),
+        ),
+      ),
+    );
+    return yield* Ref.get(result).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.fail(new PromptEnhancementStreamIncompleteError()),
+          onSome: Effect.succeed,
+        }),
+      ),
+    );
+  },
+);
 
 export class ServerUpdateTerminalError extends Schema.TaggedError<ServerUpdateTerminalError>()(
   "ServerUpdateTerminalError",
@@ -907,6 +951,45 @@ export function createServerEnvironmentAtoms<R, E>(
       );
     },
   });
+  const enhancePrompt = createRuntimeCommand<
+    EnvironmentRegistry | EnvironmentCacheStore | R,
+    E,
+    PromptEnhancementTarget,
+    PromptEnhancementResult,
+    unknown
+  >(runtime, {
+    label: "environment-data:prompt:enhance",
+    concurrency: {
+      mode: "singleFlight",
+      key: ({ environmentId, input }) => JSON.stringify([environmentId, input.projectId]),
+    },
+    execute: (target, atomRegistry) =>
+      Effect.gen(function* () {
+        const environmentRegistry = yield* EnvironmentRegistry;
+        const supportsStreaming =
+          atomRegistry.get(configValueAtom(target.environmentId))?.environment.capabilities
+            .promptEnhancementStreaming === true;
+        if (!supportsStreaming) {
+          return yield* environmentRegistry.run(
+            target.environmentId,
+            request(WS_METHODS.promptEnhance, target.input),
+          );
+        }
+        const onProgress = (event: PromptEnhancementStreamEvent) =>
+          target.onProgress === undefined
+            ? Effect.void
+            : Effect.sync(() => {
+                target.onProgress?.(event);
+              });
+        return yield* consumePromptEnhancementStream(
+          environmentRegistry.runStream(
+            target.environmentId,
+            runStream(WS_METHODS.promptEnhanceStream, target.input),
+          ),
+          onProgress,
+        );
+      }),
+  });
   const settingsValueAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.make((get) => get(configValueAtom(environmentId))?.settings ?? null).pipe(
       Atom.withLabel(`environment-data:server:settings:${environmentId}`),
@@ -1098,14 +1181,7 @@ export function createServerEnvironmentAtoms<R, E>(
       scheduler: configScheduler,
       concurrency: configConcurrency,
     }),
-    enhancePrompt: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:prompt:enhance",
-      tag: WS_METHODS.promptEnhance,
-      concurrency: {
-        mode: "singleFlight",
-        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.projectId]),
-      },
-    }),
+    enhancePrompt,
     signalProcess: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:signal-process",
       tag: WS_METHODS.serverSignalProcess,

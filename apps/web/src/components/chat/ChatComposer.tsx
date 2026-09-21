@@ -3517,9 +3517,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       promptEnhancementLoadingToast(enhancingSelection, cancelPromptEnhancement),
     );
     promptEnhancementToastIdRef.current = promptEnhancementToastId;
+    let streamedPrompt = "";
     const result = await enhancePrompt(
       {
         environmentId,
+        onProgress: (event) => {
+          if (event.type !== "delta") return;
+          streamedPrompt = (streamedPrompt + event.delta).slice(-400);
+          toastManager.update(
+            promptEnhancementToastId,
+            promptEnhancementLoadingToast(
+              enhancingSelection,
+              cancelPromptEnhancement,
+              false,
+              streamedPrompt,
+            ),
+          );
+        },
         input: {
           projectId,
           prompt: prepared.prompt,

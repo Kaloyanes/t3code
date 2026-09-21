@@ -23,6 +23,7 @@ export type PromptEnhancementSelection = typeof PromptEnhancementSelection.Type;
 const PromptEnhancementPrompt = Schema.String.check(
   Schema.makeFilter((prompt) => prompt.trim().length > 0),
 );
+const PromptEnhancementDelta = Schema.String.check(Schema.makeFilter((delta) => delta.length > 0));
 
 export const PromptEnhancementInput = Schema.Struct({
   projectId: ProjectId,
@@ -35,6 +36,19 @@ export type PromptEnhancementInput = typeof PromptEnhancementInput.Type;
 
 export const PromptEnhancementResult = Schema.Struct({ prompt: TrimmedNonEmptyString });
 export type PromptEnhancementResult = typeof PromptEnhancementResult.Type;
+
+export const PromptEnhancementStreamEvent = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("started") }),
+  Schema.Struct({
+    type: Schema.Literal("delta"),
+    delta: PromptEnhancementDelta,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("complete"),
+    result: PromptEnhancementResult,
+  }),
+]);
+export type PromptEnhancementStreamEvent = typeof PromptEnhancementStreamEvent.Type;
 
 export class PromptEnhancementError extends Schema.TaggedError<PromptEnhancementError>()(
   "PromptEnhancementError",

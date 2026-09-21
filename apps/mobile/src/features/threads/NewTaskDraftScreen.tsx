@@ -339,6 +339,7 @@ export function NewTaskDraftScreen(props: {
   const loadedBranchesProjectKeyRef = useRef<string | null>(null);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [isEnhancingPrompt, setIsEnhancingPrompt] = useState(false);
+  const [enhancementPreview, setEnhancementPreview] = useState("");
   const promptEnhancementRequestRef = useRef(false);
   const [enhancementUndoPrompt, setEnhancementUndoPrompt] = useState<string | null>(null);
   const enhancementUndoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -695,8 +696,14 @@ export function NewTaskDraftScreen(props: {
     const prepared = preparePromptEnhancement(previousPrompt);
     promptEnhancementRequestRef.current = true;
     setIsEnhancingPrompt(true);
+    setEnhancementPreview("");
     const result = await enhancePrompt({
       environmentId: selectedProject.environmentId,
+      onProgress: (event) => {
+        if (event.type === "delta") {
+          setEnhancementPreview((current) => (current + event.delta).slice(-400));
+        }
+      },
       input: {
         projectId: selectedProject.id,
         prompt: prepared.prompt,
@@ -706,6 +713,7 @@ export function NewTaskDraftScreen(props: {
     });
     promptEnhancementRequestRef.current = false;
     setIsEnhancingPrompt(false);
+    setEnhancementPreview("");
 
     if (result._tag === "Failure") {
       const error = Cause.squash(result.cause);
@@ -1539,6 +1547,15 @@ export function NewTaskDraftScreen(props: {
         }}
         textStyle={{ ...bodyText, color: foregroundColor, fontFamily: regularFontFamily }}
       />
+      {isEnhancingPrompt && enhancementPreview.length > 0 ? (
+        <Text
+          accessibilityLiveRegion="polite"
+          className="mt-2 text-xs text-muted-foreground"
+          numberOfLines={3}
+        >
+          {enhancementPreview}
+        </Text>
+      ) : null}
     </>
   );
 

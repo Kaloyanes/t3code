@@ -330,6 +330,7 @@ import {
   PromptEnhancementError,
   PromptEnhancementInput,
   PromptEnhancementResult,
+  PromptEnhancementStreamEvent,
 } from "./promptEnhancement.ts";
 import {
   AutomationCreateInput,
@@ -386,6 +387,7 @@ export const WS_METHODS = {
   providerInstallSubscribe: "provider.install.subscribe",
   providerInstallRemove: "provider.install.remove",
   promptEnhance: "prompt.enhance",
+  promptEnhanceStream: "prompt.enhanceStream",
 
   // VCS methods
   vcsPull: "vcs.pull",
@@ -740,6 +742,13 @@ const WsPromptEnhanceRpc = Rpc.make(WS_METHODS.promptEnhance, {
   payload: PromptEnhancementInput,
   success: PromptEnhancementResult,
   error: Schema.Union([PromptEnhancementError, EnvironmentAuthorizationError]),
+});
+
+const WsPromptEnhanceStreamRpc = Rpc.make(WS_METHODS.promptEnhanceStream, {
+  payload: PromptEnhancementInput,
+  success: PromptEnhancementStreamEvent,
+  error: Schema.Union([PromptEnhancementError, EnvironmentAuthorizationError]),
+  stream: true,
 });
 
 const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSettings, {
@@ -1744,6 +1753,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRemoveKeybindingRpc,
   WsServerGetSettingsRpc,
   WsPromptEnhanceRpc,
+  WsPromptEnhanceStreamRpc,
   WsServerUpdateSettingsRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,

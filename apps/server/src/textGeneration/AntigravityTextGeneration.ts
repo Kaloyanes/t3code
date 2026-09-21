@@ -33,6 +33,7 @@ import {
   sanitizePrTitle,
   sanitizeThreadTitle,
 } from "./TextGenerationUtils.ts";
+import { makePromptEnhancementJsonDeltaHandler } from "./PromptEnhancementStreaming.ts";
 
 const ANTIGRAVITY_TIMEOUT_MS = 180_000;
 const MAX_OUTPUT_CHARS = 128_000;
@@ -126,6 +127,7 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       readonly prompt: string;
       readonly outputSchema: S;
       readonly modelSelection: ModelSelection;
+      readonly onOutputDelta?: ((delta: string) => Effect.Effect<void>) | undefined;
     }) {
       const { operation } = input;
       const scope = yield* Scope.make();
@@ -223,6 +225,7 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
               if (exceeded) {
                 return yield* reject("Antigravity text generation exceeded the output limit.");
               }
+              yield* input.onOutputDelta?.(text) ?? Effect.void;
             }),
           );
 
@@ -409,10 +412,12 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
   const enhancePrompt: TextGeneration.TextGeneration["Service"]["enhancePrompt"] = Effect.fn(
     "AntigravityTextGeneration.enhancePrompt",
   )(function* (input) {
+    const onOutputDelta = makePromptEnhancementJsonDeltaHandler(input.onDelta);
     const generated = yield* runAntigravityJson({
       operation: "enhancePrompt",
       ...buildPromptEnhancementPrompt(input),
       modelSelection: input.modelSelection,
+      ...(onOutputDelta ? { onOutputDelta } : {}),
     });
     return { prompt: generated.prompt.trim() };
   });

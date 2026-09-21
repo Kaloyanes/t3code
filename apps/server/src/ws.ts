@@ -48,6 +48,9 @@ import {
   ORCHESTRATION_WS_METHODS,
   ProjectId,
   PromptEnhancementError,
+  type PromptEnhancementInput,
+  type ResponseStreamingMode,
+  type ServerSettings as ServerSettingsValue,
   type ProjectEntriesFailure,
   type ProjectFileFailure,
   type ProjectFileOperation,
@@ -102,6 +105,7 @@ import {
   projectThreadDetailSnapshot,
 } from "./orchestration/ActivityPayloadProjection.ts";
 import { makeThreadLiveEventCoalescer } from "./orchestration/ThreadLiveEventCoalescer.ts";
+import { splitBufferedAssistantText } from "./orchestration/Layers/ProviderRuntimeIngestion.ts";
 import { makeLiveStreamBudget, type RetainedLiveItem } from "./orchestration/LiveStreamBudget.ts";
 import {
   cleanupFailedUploadedAttachments,
@@ -750,6 +754,89 @@ const makeWsRpcLayer = (
       const serverEventId = randomUUID.pipe(Effect.map(EventId.make));
       const serverCommandId = (tag: string) =>
         randomUUID.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
+
+      const promptEnhancementSettings = (projectId: ProjectId) =>
+        serverSettings.getSettings.pipe(
+          Effect.mapError(
+            (cause) =>
+              new PromptEnhancementError({
+                message: cause.message || "Prompt enhancement settings are unavailable.",
+              }),
+          ),
+          Effect.map((settings) => resolveProjectSettings(settings, projectId).settings),
+        );
+
+      const enhancePrompt = (
+        input: PromptEnhancementInput,
+        onDelta?: (delta: string) => Effect.Effect<void>,
+        resolvedSettings?: ServerSettingsValue,
+      ) =>
+        Effect.gen(function* () {
+          const tokens = input.references.map((reference) => reference.token);
+          if (new Set(tokens).size !== tokens.length) {
+            return yield* new PromptEnhancementError({
+              message: "Prompt references must use unique tokens.",
+            });
+          }
+          if (tokens.some((token) => input.prompt.split(token).length !== 2)) {
+            return yield* new PromptEnhancementError({
+              message: "The draft contains an invalid prompt reference.",
+            });
+          }
+          if (
+            input.selection &&
+            (input.selection.start >= input.selection.end ||
+              input.selection.end > input.prompt.length ||
+              input.prompt.slice(input.selection.start, input.selection.end).trim().length === 0)
+          ) {
+            return yield* new PromptEnhancementError({
+              message: "The selected prompt range is invalid.",
+            });
+          }
+          const targetPrompt = input.selection
+            ? input.prompt.slice(input.selection.start, input.selection.end)
+            : input.prompt;
+          const targetTokens = tokens.filter((token) => targetPrompt.includes(token));
+          const settings = resolvedSettings ?? (yield* promptEnhancementSettings(input.projectId));
+          const configured = settings.promptEnhancementModelSelection;
+          const modelSelection =
+            configured && isModelSelectionProviderEnabled(settings, configured)
+              ? configured
+              : settings.textGenerationModelSelection;
+          const generated = yield* textGeneration
+            .enhancePrompt({
+              cwd: config.stateDir,
+              ...(settings.promptEnhancementSystemPrompt !== null
+                ? { systemPrompt: settings.promptEnhancementSystemPrompt }
+                : {}),
+              prompt: input.prompt,
+              ...(input.selection ? { selection: input.selection } : {}),
+              references: input.references,
+              attachments: input.attachments,
+              modelSelection,
+              ...(onDelta ? { onDelta } : {}),
+            })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new PromptEnhancementError({
+                    message: cause.detail || "The prompt could not be rewritten.",
+                  }),
+              ),
+            );
+          if (
+            generated.prompt.trim().length === 0 ||
+            targetTokens.some((token) => generated.prompt.split(token).length !== 2) ||
+            tokens.some(
+              (token) => !targetTokens.includes(token) && generated.prompt.includes(token),
+            )
+          ) {
+            return yield* new PromptEnhancementError({
+              message: "The rewritten prompt did not preserve its references.",
+            });
+          }
+          return generated;
+        });
 
       const loadAuthAccessSnapshot = () =>
         Effect.all({
@@ -2616,84 +2703,53 @@ const makeWsRpcLayer = (
             },
           ),
         [WS_METHODS.promptEnhance]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.promptEnhance,
-            Effect.gen(function* () {
-              const tokens = input.references.map((reference) => reference.token);
-              if (new Set(tokens).size !== tokens.length) {
-                return yield* new PromptEnhancementError({
-                  message: "Prompt references must use unique tokens.",
-                });
-              }
-              if (tokens.some((token) => input.prompt.split(token).length !== 2)) {
-                return yield* new PromptEnhancementError({
-                  message: "The draft contains an invalid prompt reference.",
-                });
-              }
-              if (
-                input.selection &&
-                (input.selection.start >= input.selection.end ||
-                  input.selection.end > input.prompt.length ||
-                  input.prompt.slice(input.selection.start, input.selection.end).trim().length ===
-                    0)
-              ) {
-                return yield* new PromptEnhancementError({
-                  message: "The selected prompt range is invalid.",
-                });
-              }
-              const targetPrompt = input.selection
-                ? input.prompt.slice(input.selection.start, input.selection.end)
-                : input.prompt;
-              const targetTokens = tokens.filter((token) => targetPrompt.includes(token));
-              const settings = resolveProjectSettings(
-                yield* serverSettings.getSettings.pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new PromptEnhancementError({
-                        message: cause.message || "Prompt enhancement settings are unavailable.",
-                      }),
-                  ),
-                ),
-                input.projectId,
-              ).settings;
-              const configured = settings.promptEnhancementModelSelection;
-              const modelSelection =
-                configured && isModelSelectionProviderEnabled(settings, configured)
-                  ? configured
-                  : settings.textGenerationModelSelection;
-              const generated = yield* textGeneration
-                .enhancePrompt({
-                  cwd: config.stateDir,
-                  ...(settings.promptEnhancementSystemPrompt !== null
-                    ? { systemPrompt: settings.promptEnhancementSystemPrompt }
-                    : {}),
-                  prompt: input.prompt,
-                  ...(input.selection ? { selection: input.selection } : {}),
-                  references: input.references,
-                  attachments: input.attachments,
-                  modelSelection,
-                })
-                .pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new PromptEnhancementError({
-                        message: cause.detail || "The prompt could not be rewritten.",
-                      }),
-                  ),
-                );
-              if (
-                generated.prompt.trim().length === 0 ||
-                targetTokens.some((token) => generated.prompt.split(token).length !== 2) ||
-                tokens.some(
-                  (token) => !targetTokens.includes(token) && generated.prompt.includes(token),
-                )
-              ) {
-                return yield* new PromptEnhancementError({
-                  message: "The rewritten prompt did not preserve its references.",
-                });
-              }
-              return generated;
-            }),
+          observeRpcEffect(WS_METHODS.promptEnhance, enhancePrompt(input), {
+            "rpc.aggregate": "prompt",
+          }),
+        [WS_METHODS.promptEnhanceStream]: (input) =>
+          observeRpcStream(
+            WS_METHODS.promptEnhanceStream,
+            Stream.callback((queue) =>
+              Effect.gen(function* () {
+                yield* Queue.offer(queue, { type: "started" as const });
+                const settings = yield* promptEnhancementSettings(input.projectId);
+                const streamingMode: ResponseStreamingMode = settings.responseStreamingMode;
+                const paragraphBuffer = yield* Ref.make("");
+                const onDelta =
+                  streamingMode === "turn"
+                    ? undefined
+                    : (delta: string) =>
+                        streamingMode === "token"
+                          ? Queue.offer(queue, { type: "delta" as const, delta }).pipe(
+                              Effect.asVoid,
+                            )
+                          : Ref.modify(paragraphBuffer, (buffer) => {
+                              const { ready, rest } = splitBufferedAssistantText(buffer + delta);
+                              return [ready, rest] as const;
+                            }).pipe(
+                              Effect.flatMap((ready) =>
+                                ready.length > 0
+                                  ? Queue.offer(queue, {
+                                      type: "delta" as const,
+                                      delta: ready,
+                                    }).pipe(Effect.asVoid)
+                                  : Effect.void,
+                              ),
+                            );
+                const result = yield* enhancePrompt(input, onDelta, settings);
+                if (streamingMode === "paragraph") {
+                  const rest = yield* Ref.get(paragraphBuffer);
+                  if (rest.length > 0) {
+                    yield* Queue.offer(queue, { type: "delta" as const, delta: rest });
+                  }
+                }
+                yield* Queue.offer(queue, { type: "complete" as const, result });
+              }).pipe(
+                Effect.catchTag("PromptEnhancementError", (error) => Queue.fail(queue, error)),
+                Effect.andThen(Queue.end(queue)),
+                Effect.forkScoped,
+              ),
+            ),
             { "rpc.aggregate": "prompt" },
           ),
         [WS_METHODS.serverUpdateSettings]: ({ patch }) =>

@@ -23,6 +23,7 @@ import {
   sanitizePrTitle,
   sanitizeThreadTitle,
 } from "./TextGenerationUtils.ts";
+import { makePromptEnhancementJsonDeltaHandler } from "./PromptEnhancementStreaming.ts";
 import {
   applyCursorAcpModelSelection,
   makeCursorAcpRuntime,
@@ -50,6 +51,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
     prompt,
     outputSchemaJson,
     modelSelection,
+    onOutputDelta,
   }: {
     operation:
       | "generateCommitMessage"
@@ -61,6 +63,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
     prompt: string;
     outputSchemaJson: S;
     modelSelection: ModelSelection;
+    onOutputDelta?: ((delta: string) => Effect.Effect<void>) | undefined;
   }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
     Effect.gen(function* () {
       const outputRef = yield* Ref.make("");
@@ -81,7 +84,9 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
         if (content.type !== "text") {
           return Effect.void;
         }
-        return Ref.update(outputRef, (current) => current + content.text);
+        return Ref.update(outputRef, (current) => current + content.text).pipe(
+          Effect.andThen(onOutputDelta?.(content.text) ?? Effect.void),
+        );
       });
 
       const promptResult = yield* Effect.gen(function* () {
@@ -267,12 +272,14 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
     "CursorTextGeneration.enhancePrompt",
   )(function* (input) {
     const { prompt, outputSchema } = buildPromptEnhancementPrompt(input);
+    const onOutputDelta = makePromptEnhancementJsonDeltaHandler(input.onDelta);
     const generated = yield* runCursorJson({
       operation: "enhancePrompt",
       cwd: input.cwd,
       prompt,
       outputSchemaJson: outputSchema,
       modelSelection: input.modelSelection,
+      ...(onOutputDelta ? { onOutputDelta } : {}),
     });
     return { prompt: generated.prompt.trim() };
   });

@@ -25,6 +25,7 @@ import {
   sanitizePrTitle,
   sanitizeThreadTitle,
 } from "./TextGenerationUtils.ts";
+import { makePromptEnhancementJsonDeltaHandler } from "./PromptEnhancementStreaming.ts";
 import {
   applyGrokAcpModelSelection,
   currentGrokModelIdFromSessionSetup,
@@ -50,6 +51,7 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
     prompt,
     outputSchemaJson,
     modelSelection,
+    onOutputDelta,
   }: {
     operation:
       | "generateCommitMessage"
@@ -61,6 +63,7 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
     prompt: string;
     outputSchemaJson: S;
     modelSelection: ModelSelection;
+    onOutputDelta?: ((delta: string) => Effect.Effect<void>) | undefined;
   }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
     Effect.gen(function* () {
       const resolvedModel = resolveGrokAcpBaseModelId(modelSelection.model);
@@ -82,7 +85,9 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
         if (content.type !== "text") {
           return Effect.void;
         }
-        return Ref.update(outputRef, (current) => current + content.text);
+        return Ref.update(outputRef, (current) => current + content.text).pipe(
+          Effect.andThen(onOutputDelta?.(content.text) ?? Effect.void),
+        );
       });
 
       const promptResult = yield* Effect.gen(function* () {
@@ -269,12 +274,14 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
     "GrokTextGeneration.enhancePrompt",
   )(function* (input) {
     const { prompt, outputSchema } = buildPromptEnhancementPrompt(input);
+    const onOutputDelta = makePromptEnhancementJsonDeltaHandler(input.onDelta);
     const generated = yield* runGrokJson({
       operation: "enhancePrompt",
       cwd: input.cwd,
       prompt,
       outputSchemaJson: outputSchema,
       modelSelection: input.modelSelection,
+      ...(onOutputDelta ? { onOutputDelta } : {}),
     });
     return { prompt: generated.prompt.trim() };
   });

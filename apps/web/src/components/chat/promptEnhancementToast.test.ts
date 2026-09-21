@@ -46,4 +46,12 @@ describe("prompt enhancement loading toast", () => {
       disabled: true,
     });
   });
+
+  it("previews streamed enhancement text", () => {
+    expect(
+      promptEnhancementLoadingToast(false, undefined, false, "A clearer prompt"),
+    ).toMatchObject({
+      description: "A clearer prompt",
+    });
+  });
 });

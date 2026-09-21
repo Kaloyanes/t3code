@@ -88,6 +88,7 @@ export interface PromptEnhancementInput {
   references: ReadonlyArray<{ readonly token: string; readonly label: string }>;
   attachments: ReadonlyArray<{ readonly name: string; readonly mimeType: string }>;
   modelSelection: ModelSelection;
+  onDelta?: ((delta: string) => Effect.Effect<void>) | undefined;
 }
 
 export interface PromptEnhancementResult {

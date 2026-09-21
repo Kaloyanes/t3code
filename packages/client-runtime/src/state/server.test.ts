@@ -1,5 +1,6 @@
 import {
   EnvironmentId,
+  type PromptEnhancementStreamEvent,
   type ServerConfig,
   type ServerConfigStreamEvent,
   type ServerLifecycleWelcomePayload,
@@ -32,6 +33,7 @@ import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import type { RpcSession } from "../rpc/session.ts";
 import {
   applyServerWelcomeEvent,
+  consumePromptEnhancementStream,
   makeEnvironmentServerWelcomeState,
   makeEnvironmentServerConfigState,
   isLegacyUpdateHandoffLoss,
@@ -74,6 +76,36 @@ const TARGET = new PrimaryConnectionTarget({
   label: "Test environment",
   httpBaseUrl: "https://environment.example.test",
   wsBaseUrl: "wss://environment.example.test",
+});
+
+describe("prompt enhancement stream", () => {
+  it.effect("returns the terminal result and reports live events", () =>
+    Effect.gen(function* () {
+      const seen: PromptEnhancementStreamEvent[] = [];
+      const result = yield* consumePromptEnhancementStream(
+        Stream.fromIterable<PromptEnhancementStreamEvent>([
+          { type: "started" },
+          { type: "delta", delta: "Improved " },
+          { type: "complete", result: { prompt: "Improved prompt" } },
+        ]),
+        (event) => Effect.sync(() => seen.push(event)),
+      );
+
+      expect(result).toEqual({ prompt: "Improved prompt" });
+      expect(seen.map((event) => event.type)).toEqual(["started", "delta", "complete"]);
+    }),
+  );
+
+  it.effect("fails when the stream ends without a completed result", () =>
+    Effect.gen(function* () {
+      const error = yield* consumePromptEnhancementStream(
+        Stream.make({ type: "started" } satisfies PromptEnhancementStreamEvent),
+        () => Effect.void,
+      ).pipe(Effect.flip);
+
+      expect(error._tag).toBe("PromptEnhancementStreamIncompleteError");
+    }),
+  );
 });
 
 function session(client: WsRpcProtocolClient): RpcSession {
