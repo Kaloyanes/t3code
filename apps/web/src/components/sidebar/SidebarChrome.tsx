@@ -257,7 +257,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   }, [canGoBack, closeMobileSidebar, navigate]);
 
   return (
-    <SidebarMenu className="flex-row items-center">
+    <SidebarMenu className="flex-row flex-nowrap items-center">
       {currentFooterPage !== "/usage" ? (
         <SidebarUtilityIconItem
           icon={<ChartNoAxesColumnIcon />}
