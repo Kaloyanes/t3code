@@ -482,6 +482,7 @@ import {
   rememberReadyThreadTimeline,
   resolveThreadSwitchTimeline,
   timelineHasEphemeralPreviewUrls,
+  threadHandoffIsWorking,
   observeProactivePanelUserChoice,
   resolveProactiveTurnDiffAction,
   resolveThreadMetadataUpdateForNextTurn,
@@ -3440,6 +3441,15 @@ export default function ChatView(props: ChatViewProps) {
     isRevertingCheckpoint ||
     isCompacting ||
     awaitingBootstrapTurn;
+  const handoffIsWorking = threadHandoffIsWorking({
+    phase,
+    latestTurnState: activeLatestTurn?.state ?? null,
+    isSendBusy,
+    isConnecting,
+    isRevertingCheckpoint,
+    isCompacting,
+    awaitingBootstrapTurn,
+  });
   const isPreparingWorktree = isLocallyPreparingWorktree || awaitingBootstrapTurn;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
@@ -9515,7 +9525,7 @@ export default function ChatView(props: ChatViewProps) {
         !activeThread ||
         !activeProject ||
         !isServerThread ||
-        isWorking ||
+        handoffIsWorking ||
         activeThreadShell?.backgroundLiveness != null ||
         pendingApprovals.length > 0 ||
         pendingUserInputs.length > 0 ||
@@ -9643,7 +9653,7 @@ export default function ChatView(props: ChatViewProps) {
       deleteThread,
       environmentId,
       isServerThread,
-      isWorking,
+      handoffIsWorking,
       navigate,
       pendingApprovals.length,
       pendingUserInputs.length,
@@ -10244,7 +10254,7 @@ export default function ChatView(props: ChatViewProps) {
                     modelOptionsByInstance: handoffModelOptionsByInstance,
                     disabled:
                       handoffInFlight ||
-                      isWorking ||
+                      handoffIsWorking ||
                       activeThreadShell?.backgroundLiveness != null ||
                       pendingApprovals.length > 0 ||
                       pendingUserInputs.length > 0 ||

@@ -85,11 +85,48 @@ import {
   shouldRenderPreviewMiniPlayer,
   shouldShowBranchMismatchBanner,
   shouldShowPlanFollowUpPrompt,
+  threadHandoffIsWorking,
   shouldWriteThreadErrorToCurrentServerThread,
   toolGroupConsumesUpwardNavigation,
   waitForRevertedMessage,
   prepareRevertedMessageAttachments,
 } from "./ChatView.logic";
+
+describe("thread handoff availability", () => {
+  const idle = {
+    phase: "ready" as const,
+    latestTurnState: "completed" as const,
+    isSendBusy: false,
+    isConnecting: false,
+    isRevertingCheckpoint: false,
+    isCompacting: false,
+    awaitingBootstrapTurn: false,
+  };
+
+  it("allows handoff when a completed turn still has a running session", () => {
+    expect(threadHandoffIsWorking({ ...idle, phase: "running" })).toBe(false);
+  });
+
+  it("blocks handoff for an active turn", () => {
+    expect(
+      threadHandoffIsWorking({
+        ...idle,
+        phase: "running",
+        latestTurnState: "running",
+      }),
+    ).toBe(true);
+  });
+
+  it.each([
+    "isSendBusy",
+    "isConnecting",
+    "isRevertingCheckpoint",
+    "isCompacting",
+    "awaitingBootstrapTurn",
+  ] as const)("keeps handoff blocked while %s", (state) => {
+    expect(threadHandoffIsWorking({ ...idle, [state]: true })).toBe(true);
+  });
+});
 
 describe("agent browser close confirmation", () => {
   const surfaces = [
@@ -2000,6 +2037,37 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
         latestTurn: newerTurn,
         latestUserMessageId: localDispatch.latestUserMessageId,
         session: { ...readySession, updatedAt: newerTurn.completedAt },
+        hasPendingApproval: false,
+        hasPendingUserInput: false,
+        threadError: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("acknowledges a completed newer turn while the session still reports running", () => {
+    const localDispatch = createLocalDispatchSnapshot(
+      makeThread({ latestTurn: completedTurn, session: readySession }),
+    );
+    const newerTurn = {
+      ...completedTurn,
+      turnId: TurnId.make("turn-2"),
+      requestedAt: "2026-03-29T00:01:00.000Z",
+      startedAt: "2026-03-29T00:01:01.000Z",
+      completedAt: "2026-03-29T00:01:30.000Z",
+    };
+
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        localDispatch,
+        phase: "running",
+        latestTurn: newerTurn,
+        latestUserMessageId: localDispatch.latestUserMessageId,
+        session: {
+          ...readySession,
+          status: "running",
+          activeTurnId: TurnId.make("turn-other"),
+          updatedAt: newerTurn.completedAt,
+        },
         hasPendingApproval: false,
         hasPendingUserInput: false,
         threadError: null,

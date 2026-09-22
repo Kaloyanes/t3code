@@ -65,6 +65,25 @@ export const ENVIRONMENT_RECONNECT_WARNING_GRACE_MS = 2_000;
 
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
 
+export function threadHandoffIsWorking(input: {
+  phase: SessionPhase;
+  latestTurnState: NonNullable<Thread["latestTurn"]>["state"] | null;
+  isSendBusy: boolean;
+  isConnecting: boolean;
+  isRevertingCheckpoint: boolean;
+  isCompacting: boolean;
+  awaitingBootstrapTurn: boolean;
+}): boolean {
+  return (
+    (input.phase === "running" && input.latestTurnState !== "completed") ||
+    input.isSendBusy ||
+    input.isConnecting ||
+    input.isRevertingCheckpoint ||
+    input.isCompacting ||
+    input.awaitingBootstrapTurn
+  );
+}
+
 export function agentControlledBrowserCloseConfirmation(
   surfaces: readonly RightPanelSurface[],
   desktopByTabId: Readonly<Record<string, Pick<DesktopPreviewOverlay, "controller"> | undefined>>,
@@ -1317,6 +1336,9 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     }
     if (!latestTurnChanged) {
       return false;
+    }
+    if (latestTurn?.state === "completed") {
+      return true;
     }
     if (latestTurn?.startedAt === null || latestTurn === null) {
       return false;
