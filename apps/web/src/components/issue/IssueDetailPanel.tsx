@@ -12,6 +12,7 @@ import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import * as Cause from "effect/Cause";
 import {
   CheckIcon,
+  ChevronDownIcon,
   CircleAlertIcon,
   CircleDotIcon,
   ExternalLinkIcon,
@@ -39,7 +40,9 @@ import {
 } from "~/state/issues";
 import { refreshEnvironmentShell } from "~/state/shell";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { useThreadShells } from "~/state/entities";
+import { useProject, useThreadShells } from "~/state/entities";
+import { usePaginatedBranches } from "~/state/queries";
+import { resolveExistingWorktreeOptions } from "../BranchToolbar.logic";
 import { Button } from "../ui/button";
 import { IssueLabelPill } from "./IssueLabelPill";
 import { Badge } from "../ui/badge";
@@ -442,23 +445,7 @@ export function IssueDetailPanel({
                   {editing ? "Cancel editing" : "Edit issue"}
                 </MenuItem>
               ) : null}
-              {issue.state === "open" ? (
-                CLOSE_REASONS.map((reason) => (
-                  <MenuItem
-                    key={reason}
-                    variant="destructive"
-                    disabled={permissions?.close === false || issueStatePending}
-                    onClick={() =>
-                      void runMutation("issue-state", "Unable to close issue", () =>
-                        close({ environmentId, input: { ...reference, reason } }),
-                      )
-                    }
-                  >
-                    <CheckIcon />
-                    Close as {CLOSE_REASON_LABELS[reason].toLowerCase()}
-                  </MenuItem>
-                ))
-              ) : (
+              {issue.state !== "open" ? (
                 <MenuItem
                   disabled={permissions?.reopen === false || issueStatePending}
                   onClick={() =>
@@ -470,7 +457,7 @@ export function IssueDetailPanel({
                   <RotateCcwIcon />
                   Reopen issue
                 </MenuItem>
-              )}
+              ) : null}
             </MenuPopup>
           </Menu>
         </div>
@@ -747,26 +734,72 @@ export function IssueDetailPanel({
                 rows={3}
                 disabled={commentCreatePending}
               />
-              <Button
-                size="sm"
-                disabled={
-                  comment.trim().length === 0 ||
-                  permissions?.comment === false ||
-                  commentCreatePending
-                }
-                onClick={createComment}
-                aria-busy={commentCreatePending}
-              >
-                {commentCreatePending ? (
-                  <>
-                    <Spinner className="size-3.5" aria-label="Adding comment" /> Commenting…
-                  </>
-                ) : (
-                  <>
-                    <SendIcon /> Comment
-                  </>
-                )}
-              </Button>
+              <div className="flex items-center justify-end gap-2">
+                {issue.state === "open" ? (
+                  <div className="flex items-center">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={permissions?.close === false || issueStatePending}
+                      onClick={() =>
+                        void runMutation("issue-state", "Unable to close issue", () =>
+                          close({ environmentId, input: { ...reference, reason: "completed" } }),
+                        )
+                      }
+                    >
+                      <CheckIcon /> Close issue
+                    </Button>
+                    <Menu>
+                      <MenuTrigger
+                        render={
+                          <Button
+                            size="icon-sm"
+                            variant="outline"
+                            aria-label="Other close reasons"
+                            disabled={permissions?.close === false || issueStatePending}
+                          />
+                        }
+                      >
+                        <ChevronDownIcon />
+                      </MenuTrigger>
+                      <MenuPopup align="end" side="top">
+                        {CLOSE_REASONS.filter((reason) => reason !== "completed").map((reason) => (
+                          <MenuItem
+                            key={reason}
+                            onClick={() =>
+                              void runMutation("issue-state", "Unable to close issue", () =>
+                                close({ environmentId, input: { ...reference, reason } }),
+                              )
+                            }
+                          >
+                            <CheckIcon /> Close as {CLOSE_REASON_LABELS[reason].toLowerCase()}
+                          </MenuItem>
+                        ))}
+                      </MenuPopup>
+                    </Menu>
+                  </div>
+                ) : null}
+                <Button
+                  size="sm"
+                  disabled={
+                    comment.trim().length === 0 ||
+                    permissions?.comment === false ||
+                    commentCreatePending
+                  }
+                  onClick={createComment}
+                  aria-busy={commentCreatePending}
+                >
+                  {commentCreatePending ? (
+                    <>
+                      <Spinner className="size-3.5" aria-label="Adding comment" /> Commenting…
+                    </>
+                  ) : (
+                    <>
+                      <SendIcon /> Comment
+                    </>
+                  )}
+                </Button>
+              </div>
               <ActionFeedback
                 pending={commentCreatePending}
                 pendingLabel="Adding comment…"
@@ -1000,6 +1033,11 @@ export function IssueWorktreeDialog({
   onActed,
 }: IssueWorktreeDialogProps) {
   const threads = useThreadShells();
+  const project = useProject(scopeProjectRef(environmentId, reference.projectId));
+  const refs = usePaginatedBranches({
+    environmentId: open ? environmentId : null,
+    cwd: open ? (project?.workspaceRoot ?? null) : null,
+  }).refs;
   const prepare = useAtomCommand(issueEnvironment.worktreePrepare, { reportFailure: false });
   const preflight = useAtomCommand(issueEnvironment.worktreeDeletePreflight, {
     reportFailure: false,
@@ -1022,15 +1060,32 @@ export function IssueWorktreeDialog({
   const [linkingThreadId, setLinkingThreadId] = useState<string | null>(null);
   const worktrees = useMemo(
     () =>
-      threads.filter(
-        (thread) =>
-          thread.environmentId === environmentId &&
-          thread.projectId === reference.projectId &&
-          thread.worktreePath,
-      ),
-    [environmentId, reference.projectId, threads],
+      project
+        ? resolveExistingWorktreeOptions({
+            refs,
+            workspaceRoot: project.workspaceRoot,
+            repositoryRoot: project.repositoryIdentity?.rootPath ?? null,
+          }).map((option) => {
+            const thread = threads.find(
+              (item) =>
+                item.environmentId === environmentId &&
+                item.projectId === reference.projectId &&
+                item.worktreePath === option.worktreePath,
+            );
+            return {
+              ...option,
+              id: thread?.id ?? option.worktreePath,
+              projectId: reference.projectId,
+              title: option.label,
+              threadId: thread?.id ?? null,
+            };
+          })
+        : [],
+    [environmentId, project, reference.projectId, refs, threads],
   );
-  const selectedItems = worktrees.filter((thread) => selected.has(thread.id));
+  const selectedItems = worktrees.filter(
+    (worktree) => selected.has(worktree.id) && worktree.threadId !== null,
+  );
   const visibleWorktrees = useMemo(() => {
     const query = worktreeQuery.trim().toLowerCase();
     if (query.length === 0) return worktrees;
@@ -1042,7 +1097,7 @@ export function IssueWorktreeDialog({
     );
   }, [worktreeQuery, worktrees]);
   const selectedInputs = selectedItems.map((thread) => ({
-    threadId: thread.id,
+    threadId: thread.threadId!,
     projectId: thread.projectId,
     path: thread.worktreePath!,
   }));
@@ -1190,15 +1245,26 @@ export function IssueWorktreeDialog({
       .run(
         "link",
         "Unable to link issue to worktree",
-        () =>
-          link({
+        async () => {
+          const threadId =
+            target.threadId ??
+            (
+              await newThread(scopeProjectRef(environmentId, target.projectId), {
+                branch: target.branch,
+                worktreePath: target.worktreePath,
+                envMode: "worktree",
+              })
+            )?.threadId;
+          if (!threadId) throw new Error("Unable to open a thread for the worktree");
+          return link({
             environmentId,
             input: {
               ...reference,
-              threadId: target.id,
+              threadId,
               source: "manual",
             },
-          }),
+          });
+        },
         () => {
           setNotice("Issue linked to this worktree.");
           onActed?.();
@@ -1331,7 +1397,7 @@ export function IssueWorktreeDialog({
                           })
                         }
                         aria-label={`Select ${thread.title}`}
-                        disabled={deletePending || preflightPending}
+                        disabled={deletePending || preflightPending || thread.threadId === null}
                       />
                       <label htmlFor={checkboxId} className="min-w-0 flex-1 cursor-pointer">
                         <span className="block truncate">{thread.title}</span>
