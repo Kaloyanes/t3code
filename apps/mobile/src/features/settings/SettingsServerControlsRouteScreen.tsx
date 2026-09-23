@@ -8,6 +8,7 @@ import {
   type ServerSettings,
   type ServerSettingsPatch,
   type ThreadEnvMode,
+  type WorktreeSubmodules,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   type ProjectScopedServerSettingKey,
 } from "@t3tools/contracts";
@@ -53,6 +54,7 @@ const PAGE_TITLES: Record<SettingsPage, string> = {
 const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettingKey[]> = {
   "new-threads": [
     "defaultThreadEnvMode",
+    "worktreeSubmodules",
     "defaultRuntimeMode",
     "promptEnhancementModelSelection",
     "promptEnhancementSystemPrompt",
@@ -66,11 +68,37 @@ const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettin
   maintenance: ["continueThreadsAfterServerUpdate"],
 };
 
-const WORKSPACE_CHOICES: ReadonlyArray<{
-  readonly mode: ThreadEnvMode;
+const SUBMODULE_CHOICES: ReadonlyArray<{
+  readonly mode: WorktreeSubmodules | null;
   readonly label: string;
   readonly description: string;
 }> = [
+  // Only offered at environment scope; a project falls back through "Use defaults".
+  {
+    mode: null,
+    label: "Inherit",
+    description: "Use the repository's t3.json, or initialize recursively.",
+  },
+  { mode: "recursive", label: "Recursive", description: "Initialize nested submodules too." },
+  {
+    mode: "top-level",
+    label: "Top level only",
+    description: "Skip submodules declared inside other submodules.",
+  },
+  { mode: "none", label: "Skip", description: "Leave submodules empty for a setup script." },
+];
+
+const WORKSPACE_CHOICES: ReadonlyArray<{
+  readonly mode: ThreadEnvMode | null;
+  readonly label: string;
+  readonly description: string;
+}> = [
+  // Only offered at environment scope; a project falls back through "Use defaults".
+  {
+    mode: null,
+    label: "Inherit",
+    description: "Use the repository's t3.json, or the current checkout.",
+  },
   {
     mode: "local",
     label: "Current checkout",
@@ -143,6 +171,10 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
     const value = reference.settings[key];
     return displayTargets.every((entry) => entry.settings[key] === value) ? value : null;
   };
+  // `uniform` folds a real null into "mixed"; nullable keys need the distinction.
+  const isMixed = (key: keyof ServerSettings) =>
+    reference === null ||
+    displayTargets.some((entry) => entry.settings[key] !== reference.settings[key]);
   const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
     label: "environment settings update",
     reportFailure: true,
@@ -270,20 +302,50 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                   <SettingsSection
                     title="Default workspace"
                     trailing={
-                      pendingWrites === 0 && uniform("defaultThreadEnvMode") === null ? (
+                      pendingWrites === 0 && isMixed("defaultThreadEnvMode") ? (
                         <MixedValuesLabel projectSelected={projectSelected} />
                       ) : null
                     }
                   >
-                    {WORKSPACE_CHOICES.map((choice, index) => (
+                    {WORKSPACE_CHOICES.filter(
+                      (choice) => choice.mode !== null || !projectSelected,
+                    ).map((choice, index) => (
                       <ChoiceRow
-                        key={choice.mode}
+                        key={choice.mode ?? "inherit"}
                         label={choice.label}
                         description={choice.description}
-                        selected={uniform("defaultThreadEnvMode") === choice.mode}
+                        selected={
+                          !isMixed("defaultThreadEnvMode") &&
+                          uniform("defaultThreadEnvMode") === choice.mode
+                        }
                         separated={index > 0}
                         disabled={disabledFor("defaultThreadEnvMode")}
                         onPress={() => write({ defaultThreadEnvMode: choice.mode })}
+                      />
+                    ))}
+                  </SettingsSection>
+                  <SettingsSection
+                    title="Worktree submodules"
+                    trailing={
+                      pendingWrites === 0 && isMixed("worktreeSubmodules") ? (
+                        <MixedValuesLabel projectSelected={projectSelected} />
+                      ) : null
+                    }
+                  >
+                    {SUBMODULE_CHOICES.filter(
+                      (choice) => choice.mode !== null || !projectSelected,
+                    ).map((choice, index) => (
+                      <ChoiceRow
+                        key={choice.mode ?? "inherit"}
+                        label={choice.label}
+                        description={choice.description}
+                        selected={
+                          !isMixed("worktreeSubmodules") &&
+                          uniform("worktreeSubmodules") === choice.mode
+                        }
+                        separated={index > 0}
+                        disabled={disabledFor("worktreeSubmodules")}
+                        onPress={() => write({ worktreeSubmodules: choice.mode })}
                       />
                     ))}
                   </SettingsSection>

@@ -5,6 +5,7 @@ import {
   FolderGit2Icon,
   FolderGitIcon,
   FolderIcon,
+  HistoryIcon,
   ScaleIcon,
 } from "lucide-react";
 import {
@@ -55,6 +56,7 @@ import {
 } from "./ui/menu";
 import { Separator } from "./ui/separator";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { MiddleTruncate } from "./ui/middle-truncate";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { useComposerMenuProps } from "./chat/composerEventScope";
 import { measureRestingComposerControls } from "./chat/restingComposerControlsMeasurement";
@@ -222,7 +224,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
         {triggerContent}
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </MenuTrigger>
-      <MenuPopup align="start" side="top" className="w-64" {...composerFloatingLayerProps}>
+      <MenuPopup align="start" side="top" {...composerFloatingLayerProps}>
         {showEnvironmentPicker && availableEnvironments && onEnvironmentChange ? (
           <>
             <MenuGroup>
@@ -239,6 +241,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
                   <MenuRadioItem
                     value="auto"
                     disabled={envLocked}
+                    closeOnClick
                     onClick={() => {
                       if (autoEnvironmentLabel) onAutoEnvironment?.();
                     }}
@@ -256,6 +259,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
                     key={env.environmentId}
                     disabled={envLocked}
                     value={env.environmentId}
+                    closeOnClick
                   >
                     <span className="flex min-w-0 items-center gap-1.5">
                       <EnvironmentMachineIcon kind={env.machine} className="size-3" />
@@ -283,24 +287,32 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
               if (value === "local" || value === "worktree") onEnvModeChange(value);
             }}
           >
-            <MenuRadioItem disabled={envModeLocked || forceNewWorktree} value="local">
+            <MenuRadioItem disabled={envModeLocked || forceNewWorktree} value="local" closeOnClick>
               <span className="flex min-w-0 items-center gap-1.5">
                 {activeWorktreePath ? (
                   <FolderGitIcon className="size-3" />
                 ) : (
                   <FolderIcon className="size-3" />
                 )}
-                <span className="min-w-0 truncate">
-                  {resolveCurrentWorkspaceLabel(activeWorktreePath, currentCheckoutBranch)}
-                </span>
+                <MiddleTruncate
+                  value={resolveCurrentWorkspaceLabel(activeWorktreePath, currentCheckoutBranch)}
+                />
               </span>
             </MenuRadioItem>
-            <MenuRadioItem disabled={envModeLocked} value="worktree">
+            <MenuRadioItem disabled={envModeLocked} value="worktree" closeOnClick>
               <span className="flex min-w-0 items-center gap-1.5">
                 <FolderGit2Icon className="size-3" />
                 <span className="min-w-0 truncate">{resolveEnvModeLabel("worktree")}</span>
               </span>
             </MenuRadioItem>
+            {previousWorktreeLabel ? (
+              <MenuRadioItem disabled={envModeLocked} value="previous-worktree" closeOnClick>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <HistoryIcon className="size-3" />
+                  <MiddleTruncate value={previousWorktreeLabel} />
+                </span>
+              </MenuRadioItem>
+            ) : null}
           </MenuRadioGroup>
           {existingWorktrees.length > 0 ? (
             <>
