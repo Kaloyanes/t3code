@@ -7,6 +7,8 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import { canDeleteLocalBranch } from "@t3tools/client-runtime/state/vcs";
+import { requestConfirmDialog } from "../confirmDialog";
 import type { ContextMenuItem, EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ChevronDownIcon, GitBranchIcon } from "lucide-react";
@@ -126,6 +128,7 @@ export function BranchToolbarBranchSelector({
   const switchRef = useAtomCommand(vcsEnvironment.switchRef, {
     reportFailure: false,
   });
+  const deleteRefMutation = useAtomCommand(vcsEnvironment.deleteRef, { reportFailure: false });
   const createRefMutation = useAtomCommand(vcsEnvironment.createRef, {
     reportFailure: false,
   });
@@ -386,6 +389,7 @@ export function BranchToolbarBranchSelector({
     );
   }, []);
 
+  const refreshBranches = branchRefState.refresh;
   const handleBranchContextMenu = useCallback(
     (event: ReactMouseEvent, branchName: string | null) => {
       if (!branchName) return;
@@ -393,14 +397,61 @@ export function BranchToolbarBranchSelector({
       if (!api) return;
       event.preventDefault();
       event.stopPropagation();
-      const items: ContextMenuItem<"copy-branch-name">[] = [
+      const branch = branchByName.get(branchName);
+      const items: ContextMenuItem<"copy-branch-name" | "delete-branch">[] = [
         { id: "copy-branch-name", label: "Copy branch name", icon: "copy" },
       ];
-      void api.contextMenu.show(items, { x: event.clientX, y: event.clientY }).then((action) => {
-        if (action === "copy-branch-name") copyBranchName(branchName);
-      });
+      if (branch && canDeleteLocalBranch(branch)) {
+        items.push({
+          id: "delete-branch",
+          label: "Delete branch…",
+          icon: "trash",
+          destructive: true,
+          disabled: isBranchActionPending,
+          separatorBefore: true,
+        });
+      }
+      void api.contextMenu
+        .show(items, { x: event.clientX, y: event.clientY })
+        .then(async (action) => {
+          if (action === "copy-branch-name") copyBranchName(branchName);
+          if (action !== "delete-branch" || !branchCwd || isBranchActionPending) return;
+          const confirmed = await requestConfirmDialog(
+            `Delete local branch "${branchName}"? Git will refuse if it has unmerged commits. Thread history will be kept.`,
+            { variant: "destructive" },
+          );
+          if (!confirmed) return;
+          startBranchActionTransition(async () => {
+            const result = await deleteRefMutation({
+              environmentId,
+              input: { cwd: branchCwd, refName: branchName },
+            });
+            if (result._tag === "Success") {
+              refreshBranches();
+              toastManager.add({
+                type: "success",
+                title: "Branch deleted",
+                description: branchName,
+              });
+            } else if (!isAtomCommandInterrupted(result)) {
+              toastManager.add({
+                type: "error",
+                title: "Failed to delete branch",
+                description: toBranchActionErrorMessage(squashAtomCommandFailure(result)),
+              });
+            }
+          });
+        });
     },
-    [copyBranchName],
+    [
+      branchByName,
+      branchCwd,
+      refreshBranches,
+      copyBranchName,
+      deleteRefMutation,
+      environmentId,
+      isBranchActionPending,
+    ],
   );
 
   const runBranchAction = (action: () => Promise<void>) => {

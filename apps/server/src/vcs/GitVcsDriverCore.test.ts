@@ -934,6 +934,63 @@ for (const scenario of [
 }
 
 it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
+  describe("deleteRef", () => {
+    it.effect("deletes a merged local branch and invalidates cached refs", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* driver.createRef({ cwd, refName: "feature/delete" });
+        const before = yield* driver.listRefs({ cwd });
+        assert.isTrue(before.refs.some((ref) => ref.name === "feature/delete"));
+        yield* driver.deleteRef({ cwd, refName: "feature/delete" });
+        const after = yield* driver.listRefs({ cwd });
+        assert.isFalse(after.refs.some((ref) => ref.name === "feature/delete"));
+      }),
+    );
+
+    it.effect(
+      "refuses to delete the current branch or a branch checked out in another worktree",
+      () =>
+        Effect.gen(function* () {
+          const cwd = yield* makeTmpDir();
+          const { initialBranch } = yield* initRepoWithCommit(cwd);
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+          yield* driver.deleteRef({ cwd, refName: initialBranch }).pipe(Effect.flip);
+          const worktree = yield* makeTmpDir();
+          yield* git(cwd, ["worktree", "add", "-b", "feature/in-use", worktree]);
+          yield* driver.deleteRef({ cwd, refName: "feature/in-use" }).pipe(Effect.flip);
+          assert.include(yield* driver.listLocalBranchNames(cwd), initialBranch);
+          assert.include(yield* driver.listLocalBranchNames(cwd), "feature/in-use");
+        }),
+    );
+
+    it.effect("preserves unmerged branches", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["checkout", "-b", "feature/unmerged"]);
+        yield* git(cwd, ["commit", "--allow-empty", "-m", "unmerged work"]);
+        yield* git(cwd, ["checkout", initialBranch]);
+        yield* driver.deleteRef({ cwd, refName: "feature/unmerged" }).pipe(Effect.flip);
+        assert.include(yield* driver.listLocalBranchNames(cwd), "feature/unmerged");
+      }),
+    );
+
+    it.effect("does not interpret ref names as options or remove remote refs", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["update-ref", "refs/remotes/origin/keep", "HEAD"]);
+        yield* driver.deleteRef({ cwd, refName: "origin/keep" }).pipe(Effect.flip);
+        yield* driver.deleteRef({ cwd, refName: "--all" }).pipe(Effect.flip);
+        assert.isNotEmpty(yield* git(cwd, ["rev-parse", "--verify", "refs/remotes/origin/keep"]));
+      }),
+    );
+  });
+
   describe("process environment", () => {
     it.effect("preserves the caller locale for general Git subprocesses", () =>
       Effect.gen(function* () {

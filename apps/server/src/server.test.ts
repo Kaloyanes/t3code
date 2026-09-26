@@ -7877,6 +7877,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
   it.effect("routes websocket rpc git methods", () =>
     Effect.gen(function* () {
+      const deletedRefs: Array<{ cwd: string; refName: string }> = [];
       yield* buildAppUnderTest({
         config: {
           cwd: "/tmp/repo",
@@ -8019,6 +8020,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 worktree: { path: "/tmp/wt", refName: "feature/demo" },
               }),
             removeWorktree: () => Effect.void,
+            deleteRef: (input) =>
+              Effect.sync(() => {
+                deletedRefs.push(input);
+              }),
             createRef: (input) => Effect.succeed({ refName: input.refName }),
             switchRef: (input) => Effect.succeed({ refName: input.refName }),
           },
@@ -8160,6 +8165,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           }),
         ),
       );
+
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.vcsDeleteRef]({ cwd: "/tmp/repo", refName: "feature/new" }),
+        ),
+      );
+      assert.deepEqual(deletedRefs, [{ cwd: "/tmp/repo", refName: "feature/new" }]);
 
       yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>

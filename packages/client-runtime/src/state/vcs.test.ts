@@ -285,6 +285,7 @@ describe("cached VCS refs", () => {
         });
         const client = {
           [WS_METHODS.vcsPull]: () => Effect.fail(expectedError),
+          [WS_METHODS.vcsDeleteRef]: () => Effect.void,
           [WS_METHODS.vcsRefreshStatus]: () => Effect.void,
         } as unknown as WsRpcProtocolClient;
         const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
@@ -341,6 +342,16 @@ describe("cached VCS refs", () => {
         expect(AsyncResult.isSuccess(refreshResult)).toBe(true);
         expect(yield* Ref.get(clears)).toBe(2);
         expect(registry.get(vcsRefsCacheStateAtom(TARGET)).revision).toBe(2);
+
+        const deleteResult = yield* Effect.promise(() =>
+          atoms.deleteRef.run(registry, {
+            environmentId: TARGET.environmentId,
+            input: { cwd: "/repo", refName: "feature/delete" },
+          }),
+        );
+        expect(AsyncResult.isSuccess(deleteResult)).toBe(true);
+        expect(yield* Ref.get(clears)).toBe(3);
+        expect(registry.get(vcsRefsCacheStateAtom(TARGET)).revision).toBe(3);
       }),
     ),
   );

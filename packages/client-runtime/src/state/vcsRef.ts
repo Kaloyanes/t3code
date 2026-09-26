@@ -7,3 +7,7 @@ export interface VcsRefTarget {
 }
 
 export type VcsRef = ContractVcsRef;
+
+export function canDeleteLocalBranch(ref: ContractVcsRef): boolean {
+  return !ref.isRemote && !ref.current && !ref.worktreePath;
+}

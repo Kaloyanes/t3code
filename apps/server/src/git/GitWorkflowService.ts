@@ -7,6 +7,7 @@ import {
   GitCommandError,
   type VcsSwitchRefInput,
   type VcsSwitchRefResult,
+  type VcsDeleteRefInput,
   type VcsCreateRefInput,
   type VcsCreateRefResult,
   type VcsCreateWorktreeInput,
@@ -99,6 +100,7 @@ export class GitWorkflowService extends Context.Service<
     readonly pruneWorktrees: (input: {
       readonly cwd: string;
     }) => Effect.Effect<void, GitCommandError>;
+    readonly deleteRef: (input: VcsDeleteRefInput) => Effect.Effect<void, GitCommandError>;
     readonly createRef: (
       input: VcsCreateRefInput,
     ) => Effect.Effect<VcsCreateRefResult, GitCommandError>;
@@ -367,6 +369,10 @@ export const make = Effect.gen(function* () {
     pruneWorktrees: (input) =>
       ensureGitCommand("GitWorkflowService.pruneWorktrees", input.cwd).pipe(
         Effect.andThen(git.pruneWorktrees(input)),
+      ),
+    deleteRef: (input) =>
+      ensureGitCommand("GitWorkflowService.deleteRef", input.cwd).pipe(
+        Effect.andThen(git.deleteRef(input)),
       ),
     createRef: (input) =>
       ensureGitCommand("GitWorkflowService.createRef", input.cwd).pipe(

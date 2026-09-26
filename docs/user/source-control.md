@@ -85,6 +85,13 @@ For a local Git repository without a remote, **Publish Repository** creates a ho
 adds it as `origin`, and pushes your commits. If there are no commits yet, it creates the remote;
 make your first commit before pushing.
 
+## Delete a local branch
+
+On web or desktop, open the branch picker, right-click a local branch, and choose **Delete branch**.
+On mobile, use **Delete** beside the branch in **Branches & worktrees**. Switch away from a branch
+before deleting it. Git refuses deletion while a branch is checked out in any worktree or has
+unmerged commits. Remote branches and thread history are kept.
+
 ## Create a pull request
 
 Use a thread's Git actions to commit, push, and create a pull request. T3 Code can generate commit

@@ -1,7 +1,13 @@
+import { canDeleteLocalBranch } from "@t3tools/client-runtime/state/vcs";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
+import { useAtomCommand } from "../../../state/use-atom-command";
 import { sanitizeFeatureBranchName } from "@t3tools/shared/git";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useState } from "react";
-import { Platform, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
+import { Alert, Platform, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AndroidSheetHeader } from "../../../components/AndroidScreenHeader";
@@ -44,7 +50,41 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
   const currentWorktreePath = selectedThreadWorktreePath;
   const availableBranches = gitState.selectedThreadBranches;
   const branchesLoading = gitState.selectedThreadBranchesLoading;
-  const busy = gitState.gitOperationLabel !== null;
+  const [deletingBranch, setDeletingBranch] = useState(false);
+  const deleteRef = useAtomCommand(vcsEnvironment.deleteRef, { reportFailure: false });
+  const busy = gitState.gitOperationLabel !== null || deletingBranch;
+
+  const confirmDeleteBranch = (refName: string) => {
+    if (!selectedThread || !selectedThreadCwd || busy) return;
+    Alert.alert(
+      `Delete local branch "${refName}"?`,
+      "Git will refuse if it has unmerged commits. Thread history will be kept.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete branch",
+          style: "destructive",
+          onPress: () => {
+            setDeletingBranch(true);
+            void deleteRef({
+              environmentId: selectedThread.environmentId,
+              input: { cwd: selectedThreadCwd, refName },
+            })
+              .then((result) => {
+                if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+                  const error = squashAtomCommandFailure(result);
+                  Alert.alert(
+                    "Failed to delete branch",
+                    error instanceof Error ? error.message : "An error occurred.",
+                  );
+                }
+              })
+              .finally(() => setDeletingBranch(false));
+          },
+        },
+      ],
+    );
+  };
 
   const [newBranchName, setNewBranchName] = useState("");
   const [worktreeBaseBranch, setWorktreeBaseBranch] = useState(
@@ -233,42 +273,58 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
                   : "Local branch";
 
               return (
-                <Pressable
-                  key={branch.name}
-                  className={cn(
-                    "gap-1 px-4 py-3 disabled:opacity-[0.45]",
-                    Platform.OS === "android"
-                      ? cn(
-                          "rounded-[20px] active:bg-subtle",
-                          branch.current ? "bg-secondary" : "bg-card",
-                        )
-                      : cn(
-                          "rounded-[18px] border",
-                          branch.current ? "border-subtle-strong" : "border-border",
-                        ),
-                  )}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: branch.current, disabled: busy || disabled }}
-                  disabled={busy || disabled}
-                  onPress={() => {
-                    void gitActions.onCheckoutSelectedThreadBranch(branch.name).then(() => {
-                      navigation.goBack();
-                    });
-                  }}
-                >
-                  {Platform.OS !== "android" ? (
-                    <View className="absolute inset-0 rounded-[18px] bg-card" />
+                <View key={branch.name} className="flex-row items-center gap-2">
+                  <View className="min-w-0 flex-1">
+                    <Pressable
+                      className={cn(
+                        "gap-1 px-4 py-3 disabled:opacity-[0.45]",
+                        Platform.OS === "android"
+                          ? cn(
+                              "rounded-[20px] active:bg-subtle",
+                              branch.current ? "bg-secondary" : "bg-card",
+                            )
+                          : cn(
+                              "rounded-[18px] border",
+                              branch.current ? "border-subtle-strong" : "border-border",
+                            ),
+                      )}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: branch.current, disabled: busy || disabled }}
+                      disabled={busy || disabled}
+                      onPress={() => {
+                        void gitActions.onCheckoutSelectedThreadBranch(branch.name).then(() => {
+                          navigation.goBack();
+                        });
+                      }}
+                    >
+                      {Platform.OS !== "android" ? (
+                        <View className="absolute inset-0 rounded-[18px] bg-card" />
+                      ) : null}
+                      <Text
+                        className={cn(
+                          "text-foreground text-base",
+                          Platform.OS === "android" ? "font-t3-medium" : "font-t3-bold",
+                        )}
+                      >
+                        {branch.name}
+                      </Text>
+                      <Text className="text-foreground-secondary text-xs font-medium">
+                        {subtitle}
+                      </Text>
+                    </Pressable>
+                  </View>
+                  {canDeleteLocalBranch(branch) ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Delete branch ${branch.name}`}
+                      disabled={busy}
+                      className="min-h-12 justify-center px-3 disabled:opacity-[0.45]"
+                      onPress={() => confirmDeleteBranch(branch.name)}
+                    >
+                      <Text className="text-danger-foreground text-sm font-medium">Delete</Text>
+                    </Pressable>
                   ) : null}
-                  <Text
-                    className={cn(
-                      "text-foreground text-base",
-                      Platform.OS === "android" ? "font-t3-medium" : "font-t3-bold",
-                    )}
-                  >
-                    {branch.name}
-                  </Text>
-                  <Text className="text-foreground-secondary text-xs font-medium">{subtitle}</Text>
-                </Pressable>
+                </View>
               );
             })}
           </View>
