@@ -15,6 +15,36 @@ import { detectSourceControlProviderFromRemoteUrl } from "./sourceControl.ts";
 // Kept for existing server-side consumers; the canonical default lives in contracts.
 export const WORKTREE_BRANCH_PREFIX = DEFAULT_WORKTREE_BRANCH_PREFIX;
 
+export function resolveProjectWorktreeOptions(input: {
+  refs: ReadonlyArray<Pick<VcsRef, "name" | "current" | "worktreePath">>;
+  workspaceRoot: string;
+  repositoryRoot: string;
+}) {
+  const current = input.refs.find((ref) => ref.current && ref.worktreePath);
+  const workspaceRoot = input.workspaceRoot.replace(/[\\/]+$/, "");
+  const repositoryRoot = (current?.worktreePath ?? input.repositoryRoot).replace(/[\\/]+$/, "");
+  const separator = repositoryRoot.includes("\\") ? "\\" : "/";
+  const relativePath = workspaceRoot.startsWith(`${repositoryRoot}${separator}`)
+    ? workspaceRoot.slice(repositoryRoot.length)
+    : "";
+  const other = input.refs.flatMap((ref) =>
+    ref.worktreePath && !ref.current
+      ? [
+          {
+            branch: ref.name,
+            worktreePath: `${ref.worktreePath.replace(/[\\/]+$/, "")}${relativePath}`,
+          },
+        ]
+      : [],
+  );
+  return [
+    ...(current ? [{ branch: current.name, worktreePath: input.workspaceRoot }] : []),
+    ...other.sort(
+      (a, b) => a.branch.localeCompare(b.branch) || a.worktreePath.localeCompare(b.worktreePath),
+    ),
+  ];
+}
+
 // Canonical form is `<prefix>/<8 hex>`. Older mobile builds generated
 // `t3code/<uuid>` via Crypto.randomUUID() (always RFC 4122 v4), so the
 // default prefix matcher retains exactly that legacy shape.

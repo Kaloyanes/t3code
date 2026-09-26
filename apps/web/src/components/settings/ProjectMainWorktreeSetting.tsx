@@ -2,6 +2,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import { resolveProjectWorktreeOptions } from "@t3tools/shared/git";
 import { useMemo, useState } from "react";
 
 import type { SidebarProjectGroupMember } from "../../sidebarProjectGrouping";
@@ -11,7 +12,6 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { vcsEnvironment } from "../../state/vcs";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
-import { resolveProjectWorktreeOptions } from "./ProjectSettingsPanel.logic";
 import { SettingsRow } from "./settingsLayout";
 
 export function ProjectMainWorktreeSetting({

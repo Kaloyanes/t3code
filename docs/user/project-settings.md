@@ -32,7 +32,7 @@ the **Server settings** categories and auto-settle controls in **Thread behavior
 selected environments' defaults. Choosing a project edits its overrides on the selected
 environments. Use **Use defaults** in a page to remove that page's project overrides.
 Open **Settings → Projects & threads → Overview** to rename the project across its selected
-connected checkouts and see where those checkouts live.
+connected checkouts, see where they live, and choose the main worktree for each one.
 Settings that are environment-wide stay read-only while a project is selected. When selected
 targets disagree, a control shows **Mixed** until you choose one value. Appearance, keyboard,
 and other phone-only settings ignore the filter.

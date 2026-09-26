@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
+import { resolveProjectWorktreeOptions } from "@t3tools/shared/git";
 
-import {
-  projectGroupTitleNeedsUpdate,
-  resolveProjectWorktreeOptions,
-} from "./ProjectSettingsPanel.logic";
+import { projectGroupTitleNeedsUpdate } from "./ProjectSettingsPanel.logic";
 
 describe("resolveProjectWorktreeOptions", () => {
   it("uses checkout paths and includes a main worktree on master", () => {
@@ -18,7 +16,7 @@ describe("resolveProjectWorktreeOptions", () => {
       }),
     ).toEqual([
       { branch: "master", worktreePath: "/repo/app" },
-      { branch: "feature", worktreePath: "/worktrees/feature/app", label: "feature" },
+      { branch: "feature", worktreePath: "/worktrees/feature/app" },
     ]);
   });
 
@@ -28,6 +26,22 @@ describe("resolveProjectWorktreeOptions", () => {
     ).toEqual([]);
   });
 
+  it("recognizes a linked worktree as the selected main worktree", () => {
+    expect(
+      resolveProjectWorktreeOptions({
+        workspaceRoot: "/worktrees/trunk/app",
+        repositoryRoot: "/repo",
+        refs: [
+          { name: "trunk", current: true, worktreePath: "/worktrees/trunk" },
+          { name: "master", current: false, worktreePath: "/repo" },
+        ],
+      }),
+    ).toEqual([
+      { branch: "trunk", worktreePath: "/worktrees/trunk/app" },
+      { branch: "master", worktreePath: "/repo/app" },
+    ]);
+  });
+
   it("leaves a stale current checkout unselected while keeping live worktrees available", () => {
     expect(
       resolveProjectWorktreeOptions({
@@ -35,7 +49,7 @@ describe("resolveProjectWorktreeOptions", () => {
         repositoryRoot: "/repo",
         refs: [{ name: "next", current: false, worktreePath: "/worktrees/next" }],
       }),
-    ).toEqual([{ branch: "next", worktreePath: "/worktrees/next", label: "next" }]);
+    ).toEqual([{ branch: "next", worktreePath: "/worktrees/next" }]);
   });
 });
 

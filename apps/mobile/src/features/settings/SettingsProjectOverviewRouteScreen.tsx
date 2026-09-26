@@ -1,14 +1,22 @@
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
 import { AppText as Text, AppTextInput } from "../../components/AppText";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
-import { deriveProjectGroupLabel } from "@t3tools/client-runtime/state/project-grouping";
+import {
+  derivePhysicalProjectKey,
+  derivePhysicalProjectKeyFromPath,
+  deriveProjectGroupLabel,
+} from "@t3tools/client-runtime/state/project-grouping";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import { useState } from "react";
+import { resolveProjectWorktreeOptions } from "@t3tools/shared/git";
+import { useMemo, useState } from "react";
 import { Platform, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { projectEnvironment } from "../../state/projects";
+import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { vcsEnvironment } from "../../state/vcs";
+import { SymbolView } from "../../components/AppSymbol";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { SettingsSection } from "./components/SettingsSection";
 import {
@@ -169,6 +177,134 @@ function ProjectOverviewContent(props: {
           );
         })}
       </SettingsSection>
+      <SettingsSection title="Main worktree">
+        {props.members.map((member, index) => (
+          <MainWorktreeChoices
+            key={`${member.environmentId}:${member.id}`}
+            member={member}
+            label={
+              props.members.length > 1
+                ? (props.environments.find((entry) => entry.environmentId === member.environmentId)
+                    ?.label ?? "Environment")
+                : null
+            }
+            divider={index > 0}
+          />
+        ))}
+      </SettingsSection>
     </>
+  );
+}
+
+function MainWorktreeChoices(props: {
+  readonly member: EnvironmentProject;
+  readonly label: string | null;
+  readonly divider: boolean;
+}) {
+  const { selectedProjectKey, selectProject } = useSettingsEnvironmentFilter();
+  const [saving, setSaving] = useState(false);
+  const updateProject = useAtomCommand(projectEnvironment.update, {
+    label: "main worktree update",
+    reportFailure: true,
+  });
+  const refsAtom = useMemo(
+    () =>
+      vcsEnvironment.listRefs({
+        environmentId: props.member.environmentId,
+        input: { cwd: props.member.workspaceRoot, refKind: "local", worktreesOnly: true },
+      }),
+    [props.member.environmentId, props.member.workspaceRoot],
+  );
+  const worktreeRefsQuery = useEnvironmentQuery(refsAtom);
+  const options = useMemo(
+    () =>
+      resolveProjectWorktreeOptions({
+        refs: worktreeRefsQuery.data?.refs ?? [],
+        workspaceRoot: props.member.workspaceRoot,
+        repositoryRoot: props.member.repositoryIdentity?.rootPath ?? props.member.workspaceRoot,
+      }),
+    [
+      props.member.repositoryIdentity?.rootPath,
+      props.member.workspaceRoot,
+      worktreeRefsQuery.data?.refs,
+    ],
+  );
+  const selected = options.some((option) => option.worktreePath === props.member.workspaceRoot);
+
+  return (
+    <View className={props.divider ? "border-t border-border-subtle" : ""}>
+      {props.label ? (
+        <Text className="px-4 pt-4 text-sm font-t3-medium text-foreground-muted">
+          {props.label}
+        </Text>
+      ) : null}
+      {options.length === 0 ? (
+        <Text className="p-4 text-sm text-foreground-muted">
+          {worktreeRefsQuery.isPending
+            ? "Loading worktrees"
+            : worktreeRefsQuery.error
+              ? "Worktrees unavailable"
+              : "No worktrees available"}
+        </Text>
+      ) : (
+        <>
+          {!selected ? (
+            <Text className="px-4 pt-4 text-sm text-foreground-muted">
+              Current worktree unavailable
+            </Text>
+          ) : null}
+          {options.map((option) => (
+            <Pressable
+              key={option.worktreePath}
+              accessibilityRole="radio"
+              accessibilityState={{
+                checked: option.worktreePath === props.member.workspaceRoot,
+                disabled: saving,
+              }}
+              disabled={saving}
+              onPress={() => {
+                if (option.worktreePath === props.member.workspaceRoot) return;
+                setSaving(true);
+                void updateProject({
+                  environmentId: props.member.environmentId,
+                  input: { projectId: props.member.id, workspaceRoot: option.worktreePath },
+                })
+                  .then((result) => {
+                    if (
+                      result._tag === "Success" &&
+                      selectedProjectKey === derivePhysicalProjectKey(props.member)
+                    ) {
+                      selectProject(
+                        derivePhysicalProjectKeyFromPath(
+                          props.member.environmentId,
+                          option.worktreePath,
+                        ),
+                      );
+                    }
+                  })
+                  .finally(() => setSaving(false));
+              }}
+              className="flex-row items-center gap-3 border-t border-border-subtle p-4"
+            >
+              <View className="min-w-0 flex-1 gap-1">
+                <Text className="text-base text-foreground">{option.branch}</Text>
+                <Text className="text-sm text-foreground-muted" selectable>
+                  {option.worktreePath}
+                </Text>
+              </View>
+              {option.worktreePath === props.member.workspaceRoot ? (
+                <SymbolView
+                  name="checkmark"
+                  size={18}
+                  tintColorClassName="accent-icon"
+                  type="monochrome"
+                  weight="semibold"
+                />
+              ) : null}
+            </Pressable>
+          ))}
+        </>
+      )}
+    </View>
   );
 }
