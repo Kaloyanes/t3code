@@ -1,7 +1,11 @@
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildSidebarRepositoryGroups, buildWorktreeActionMenuItems } from "./Sidebar";
+import {
+  buildSidebarRepositoryGroups,
+  buildWorktreeActionMenuItems,
+  findWorktreeThreads,
+} from "./Sidebar";
 
 const environmentId = EnvironmentId.make("environment");
 const projectId = ProjectId.make("project");
@@ -231,5 +235,37 @@ describe("worktree action menu", () => {
         deletionBlocked: false,
       }).some((item) => item.id === "delete-worktree"),
     ).toBe(false);
+  });
+
+  it("explains why deletion is disabled", () => {
+    const menu = buildWorktreeActionMenuItems({
+      branch: "feature/menu",
+      primary: false,
+      scripts: [],
+      deletionBlocked: true,
+      deletionBlockReason: "agent running",
+    });
+    expect(menu.find((item) => item.id === "delete-worktree")).toMatchObject({
+      label: "Delete worktree (agent running)",
+      disabled: true,
+    });
+  });
+});
+
+describe("worktree deletion links", () => {
+  it("includes parked and archived threads sharing the path", () => {
+    const active = thread("active");
+    const archived = { ...thread("archived"), archivedAt: "2026-09-02T00:00:00.000Z" };
+    const otherEnvironment = {
+      ...thread("remote"),
+      environmentId: EnvironmentId.make("other"),
+    };
+    expect(
+      findWorktreeThreads(
+        [active, archived, otherEnvironment, { ...thread("local"), worktreePath: null }],
+        environmentId,
+        "/worktrees/feature/",
+      ).map((item) => item.id),
+    ).toEqual([active.id, archived.id]);
   });
 });

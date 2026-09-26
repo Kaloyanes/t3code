@@ -5,6 +5,7 @@ import {
   resolveCurrentWorkspaceLabel,
   resolveEnvModeLabel,
   resolveLockedWorkspaceLabel,
+  resolveWorktreeDisplayLabel,
   type EnvMode,
   type ExistingWorktreeOption,
 } from "./BranchToolbar.logic";
@@ -27,6 +28,7 @@ interface BranchToolbarEnvModeSelectorProps {
   envLocked: boolean;
   effectiveEnvMode: EnvMode;
   activeWorktreePath: string | null;
+  activeThreadBranch?: string | null;
   currentCheckoutBranch?: string | null;
   onEnvModeChange: (mode: EnvMode) => void;
   existingWorktrees?: ReadonlyArray<ExistingWorktreeOption>;
@@ -38,18 +40,19 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   envLocked,
   effectiveEnvMode,
   activeWorktreePath,
+  activeThreadBranch,
   currentCheckoutBranch,
   onEnvModeChange,
   existingWorktrees = [],
   onSelectExistingWorktree,
 }: BranchToolbarEnvModeSelectorProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
-  const activeWorktree = activeWorktreePath
-    ? existingWorktrees.find((option) => option.worktreePath === activeWorktreePath)
-    : undefined;
   const selectedValue = activeWorktreePath
     ? `${EXISTING_WORKTREE_SELECT_PREFIX}${activeWorktreePath}`
     : effectiveEnvMode;
+  const worktreeLabel = activeWorktreePath
+    ? resolveWorktreeDisplayLabel(activeWorktreePath, activeThreadBranch ?? null, existingWorktrees)
+    : null;
   const envModeItems = useMemo(
     () => [
       {
@@ -86,18 +89,20 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
           >
             <span
               data-composer-label-motion
-              className="block w-full min-w-0 max-w-[240px] truncate transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
+              className="block w-full min-w-0 max-w-[240px] truncate text-foreground/80 transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
             >
               {forceNewWorktree
                 ? resolveEnvModeLabel("worktree")
-                : resolveLockedWorkspaceLabel(activeWorktreePath)}
+                : (worktreeLabel ?? "Local checkout")}
             </span>
           </span>
         </TooltipTrigger>
         <TooltipPopup>
           {forceNewWorktree
             ? "Each model starts in its own worktree."
-            : resolveLockedWorkspaceLabel(activeWorktreePath)}
+            : activeWorktreePath
+              ? `${worktreeLabel} · ${activeWorktreePath}. Start a new thread to use another workspace.`
+              : resolveLockedWorkspaceLabel(null)}
         </TooltipPopup>
       </Tooltip>
     );
@@ -142,16 +147,18 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
           >
             <span
               data-composer-label-motion
-              className="block w-full min-w-0 max-w-[240px] truncate transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
+              className="block w-full min-w-0 max-w-[240px] truncate text-foreground/80 transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
             >
-              {activeWorktree?.label ?? <SelectValue />}
+              {worktreeLabel ?? <SelectValue />}
             </span>
           </span>
         </TooltipTrigger>
         <TooltipPopup>
-          {effectiveEnvMode === "worktree"
-            ? resolveEnvModeLabel("worktree")
-            : resolveCurrentWorkspaceLabel(activeWorktreePath, currentCheckoutBranch)}
+          {activeWorktreePath
+            ? `${worktreeLabel} · ${activeWorktreePath}`
+            : effectiveEnvMode === "worktree"
+              ? resolveEnvModeLabel("worktree")
+              : resolveCurrentWorkspaceLabel(null, currentCheckoutBranch)}
         </TooltipPopup>
       </Tooltip>
       <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>

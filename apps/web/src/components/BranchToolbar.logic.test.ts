@@ -15,6 +15,7 @@ import {
   resolveLockedWorkspaceLabel,
   resolveLocalCheckoutBranchMismatch,
   resolveExistingWorktreeOptions,
+  resolveWorktreeDisplayLabel,
   resolvePreviousWorktreeOption,
   sanitizeNewRefName,
   shouldIncludeBranchPickerItem,
@@ -73,6 +74,23 @@ describe("resolveExistingWorktreeOptions", () => {
         worktreePath: "C:\\worktrees\\email-feature\\apps\\dashboard",
       },
     ]);
+  });
+});
+
+describe("resolveWorktreeDisplayLabel", () => {
+  const path = "/Users/kaloyanes/.t3/worktrees/feature-a";
+
+  it("shows the branch for a known worktree", () => {
+    expect(
+      resolveWorktreeDisplayLabel(path, null, [
+        { branch: "feature/a", label: "feature/a", worktreePath: path },
+      ]),
+    ).toBe("feature/a");
+  });
+
+  it("keeps an attached worktree readable while Git refs are unavailable", () => {
+    expect(resolveWorktreeDisplayLabel(path, "feature/a", [])).toBe("feature/a");
+    expect(resolveWorktreeDisplayLabel(path, null, [])).toBe("feature-a");
   });
 });
 

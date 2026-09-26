@@ -23,7 +23,8 @@ import {
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useProject, useThreadShell, useThreadShellsForProjectRefs } from "../state/entities";
-import { usePaginatedBranches } from "../state/queries";
+import { useEnvironmentQuery } from "../state/query";
+import { vcsEnvironment } from "../state/vcs";
 import {
   type EnvMode,
   type EnvironmentOption,
@@ -35,6 +36,7 @@ import {
   resolveExistingWorktreeOptions,
   resolveLockedWorkspaceLabel,
   resolvePreviousWorktreeOption,
+  resolveWorktreeDisplayLabel,
   shouldShowEnvironmentIndicator,
 } from "./BranchToolbar.logic";
 import {
@@ -104,6 +106,7 @@ interface MobileRunContextSelectorProps {
   onEnvironmentChange: ((environmentId: EnvironmentId) => void) | undefined;
   effectiveEnvMode: EnvMode;
   activeWorktreePath: string | null;
+  activeThreadBranch: string | null;
   currentCheckoutBranch: string | null;
   onEnvModeChange: (mode: EnvMode) => void;
   existingWorktrees: ReadonlyArray<ExistingWorktreeOption>;
@@ -123,6 +126,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
   onEnvironmentChange,
   effectiveEnvMode,
   activeWorktreePath,
+  activeThreadBranch,
   currentCheckoutBranch,
   onEnvModeChange,
   existingWorktrees,
@@ -133,30 +137,31 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
     () => availableEnvironments?.find((env) => env.environmentId === environmentId) ?? null,
     [availableEnvironments, environmentId],
   );
-  const activeWorktree = activeWorktreePath
-    ? existingWorktrees.find((option) => option.worktreePath === activeWorktreePath)
-    : undefined;
-  const WorkspaceIcon =
-    effectiveEnvMode === "worktree"
+  const WorkspaceIcon = activeWorktreePath
+    ? FolderGitIcon
+    : effectiveEnvMode === "worktree"
       ? FolderGit2Icon
-      : activeWorktreePath
-        ? FolderGitIcon
-        : FolderIcon;
+      : FolderIcon;
   const workspaceLabel = forceNewWorktree
     ? resolveEnvModeLabel("worktree")
-    : envModeLocked
-      ? resolveLockedWorkspaceLabel(activeWorktreePath)
-      : (activeWorktree?.label ??
-        (effectiveEnvMode === "worktree"
+    : activeWorktreePath
+      ? resolveWorktreeDisplayLabel(activeWorktreePath, activeThreadBranch, existingWorktrees)
+      : envModeLocked
+        ? resolveLockedWorkspaceLabel(null)
+        : effectiveEnvMode === "worktree"
           ? resolveEnvModeLabel("worktree")
-          : resolveCurrentWorkspaceLabel(activeWorktreePath, currentCheckoutBranch)));
+          : resolveCurrentWorkspaceLabel(null, currentCheckoutBranch);
   const isLocked = envLocked || envModeLocked;
   const workspaceIcon = (
     <Tooltip>
       <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
         <WorkspaceIcon className={cn("size-3 shrink-0", showEnvironmentIndicator && "mx-0!")} />
       </TooltipTrigger>
-      <TooltipPopup>{workspaceLabel}</TooltipPopup>
+      <TooltipPopup>
+        {activeWorktreePath
+          ? `${workspaceLabel} · ${activeWorktreePath}${isLocked ? ". Start a new thread to use another workspace." : ""}`
+          : workspaceLabel}
+      </TooltipPopup>
     </Tooltip>
   );
   const icon = showEnvironmentIndicator ? (
@@ -190,7 +195,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
       >
         <span
           data-composer-label-motion
-          className="block w-full min-w-0 max-w-[240px] truncate transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
+          className="block w-full min-w-0 max-w-[240px] truncate text-foreground/80 transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
         >
           {autoEnvironmentLabel ??
             (showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel)}
@@ -559,6 +564,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   const activeWorktreePath = forceNewWorktree
     ? null
     : (serverThread?.worktreePath ?? draftThread?.worktreePath ?? null);
+  const activeThreadBranch = serverThread?.branch ?? draftThread?.branch ?? null;
   const effectiveEnvMode =
     (forceNewWorktree ? "worktree" : effectiveEnvModeOverride) ??
     resolveEffectiveEnvMode({
@@ -578,17 +584,29 @@ export const BranchToolbar = memo(function BranchToolbar({
     !forceNewWorktree;
   const projectWorkspaceRoot = activeProject?.workspaceRoot ?? null;
   const repositoryRoot = activeProject?.repositoryIdentity?.rootPath ?? null;
-  const worktreeRefs = usePaginatedBranches({
-    environmentId: canSelectExistingWorktree ? environmentId : null,
-    cwd: canSelectExistingWorktree ? projectWorkspaceRoot : null,
-  }).refs;
-  const currentCheckoutBranch = worktreeRefs.find((ref) => ref.current)?.name ?? null;
+  const worktreeRefsQuery = useMemo(
+    () =>
+      canSelectExistingWorktree && projectWorkspaceRoot
+        ? vcsEnvironment.listRefs({
+            environmentId,
+            input: {
+              cwd: projectWorkspaceRoot,
+              refKind: "local",
+              worktreesOnly: true,
+              refresh: true,
+            },
+          })
+        : null,
+    [canSelectExistingWorktree, environmentId, projectWorkspaceRoot],
+  );
+  const worktreeRefs = useEnvironmentQuery(worktreeRefsQuery).data?.refs;
+  const currentCheckoutBranch = worktreeRefs?.find((ref) => ref.current)?.name ?? null;
   const existingWorktrees = useMemo(
     () =>
       projectWorkspaceRoot === null
         ? []
         : resolveExistingWorktreeOptions({
-            refs: worktreeRefs,
+            refs: worktreeRefs ?? [],
             workspaceRoot: projectWorkspaceRoot,
             repositoryRoot,
           }),
@@ -680,6 +698,7 @@ export const BranchToolbar = memo(function BranchToolbar({
             onEnvironmentChange={onEnvironmentChange}
             effectiveEnvMode={effectiveEnvMode}
             activeWorktreePath={activeWorktreePath}
+            activeThreadBranch={activeThreadBranch}
             currentCheckoutBranch={currentCheckoutBranch}
             onEnvModeChange={onEnvModeChange}
             existingWorktrees={existingWorktrees}
@@ -720,6 +739,7 @@ export const BranchToolbar = memo(function BranchToolbar({
               envLocked={envModeLocked}
               effectiveEnvMode={effectiveEnvMode}
               activeWorktreePath={activeWorktreePath}
+              activeThreadBranch={activeThreadBranch}
               currentCheckoutBranch={currentCheckoutBranch}
               onEnvModeChange={onEnvModeChange}
               existingWorktrees={existingWorktrees}

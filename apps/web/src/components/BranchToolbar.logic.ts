@@ -115,6 +115,22 @@ export interface ExistingWorktreeOption {
   readonly label: string;
 }
 
+export function resolveWorktreeDisplayLabel(
+  path: string,
+  branch: string | null,
+  options: ReadonlyArray<ExistingWorktreeOption>,
+): string {
+  return (
+    options.find((option) => option.worktreePath === path)?.label ??
+    branch ??
+    path
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .pop() ??
+    "Worktree"
+  );
+}
+
 export function resolveExistingWorktreeOptions(input: {
   readonly refs: ReadonlyArray<Pick<VcsRef, "name" | "worktreePath">>;
   readonly workspaceRoot: string;

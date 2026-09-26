@@ -252,6 +252,7 @@ import {
 } from "../worktreeServerStatus";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Button } from "./ui/button";
+import { WorktreeDeleteDialog } from "./WorktreeDeleteDialog";
 import {
   Combobox,
   ComboboxEmpty,
@@ -335,6 +336,7 @@ export function buildWorktreeActionMenuItems(input: {
   readonly primary: boolean;
   readonly scripts: readonly ProjectScript[];
   readonly deletionBlocked: boolean;
+  readonly deletionBlockReason?: string | null;
 }): readonly ContextMenuItem<WorktreeActionMenuId>[] {
   return [
     { id: "new-thread", label: "New thread in worktree", icon: "plus" },
@@ -366,7 +368,9 @@ export function buildWorktreeActionMenuItems(input: {
       : [
           {
             id: "delete-worktree" as const,
-            label: "Delete worktree…",
+            label: input.deletionBlockReason
+              ? `Delete worktree (${input.deletionBlockReason})`
+              : "Delete worktree…",
             icon: "trash",
             destructive: true,
             disabled: input.deletionBlocked,
@@ -374,6 +378,43 @@ export function buildWorktreeActionMenuItems(input: {
           },
         ]),
   ];
+}
+
+function worktreeDeletionBlockReason(worktree: SidebarWorktreeGroup): string | null {
+  if (
+    worktree.threads.some(
+      (thread) => thread.session?.status === "running" || thread.session?.status === "starting",
+    )
+  ) {
+    return "agent running";
+  }
+  return worktree.issues.length > 0 ? "linked issue" : null;
+}
+
+export function findWorktreeThreads<
+  Thread extends Pick<EnvironmentThreadShell, "environmentId" | "worktreePath">,
+>(
+  threads: ReadonlyArray<Thread>,
+  environmentId: EnvironmentId,
+  path: string,
+): ReadonlyArray<Thread> {
+  const normalizedPath = normalizeProjectPathForComparison(path);
+  return threads.filter(
+    (thread) =>
+      thread.environmentId === environmentId &&
+      thread.worktreePath !== null &&
+      normalizeProjectPathForComparison(thread.worktreePath) === normalizedPath,
+  );
+}
+
+function worktreeThreadMenuItems(
+  items: readonly ContextMenuItem<WorktreeActionMenuId>[],
+): ContextMenuItem<string>[] {
+  return items.map((item) => ({
+    ...item,
+    id: `worktree:${item.id}`,
+    ...(item.children ? { children: worktreeThreadMenuItems(item.children) } : {}),
+  }));
 }
 
 function WorktreeActionMenuItems(props: {
@@ -2954,6 +2995,10 @@ export default function Sidebar() {
   const removeWorktree = useAtomCommand(vcsEnvironment.removeWorktree, {
     reportFailure: false,
   });
+  const [pendingWorktreeDelete, setPendingWorktreeDelete] = useState<{
+    repository: SidebarRepositoryGroup;
+    worktree: SidebarWorktreeGroup;
+  } | null>(null);
   const startWorktreeRun = useAtomCommand(worktreeRunEnvironment.start, {
     reportFailure: false,
   });
@@ -3618,6 +3663,8 @@ export default function Sidebar() {
       }),
     [activeThreads, discoveredWorktrees, pinnedThreads, projectGroups, scopedProjectKeys],
   );
+  const repositoryGroupsRef = useRef(repositoryGroups);
+  repositoryGroupsRef.current = repositoryGroups;
   const groupedVisibleThreads = useMemo(
     () =>
       repositoryGroups
@@ -3703,11 +3750,7 @@ export default function Sidebar() {
               (script) => script.scope === "worktree",
             )
           : [];
-        const deletionBlocked =
-          worktree.threads.some(
-            (thread) =>
-              thread.session?.status === "running" || thread.session?.status === "starting",
-          ) || worktree.issues.length > 0;
+        const deletionBlocked = worktreeDeletionBlockReason(worktree) !== null;
         if (action === "run-actions") return;
         if (action === "new-thread") {
           await handleNewThreadRef.current(
@@ -3766,49 +3809,60 @@ export default function Sidebar() {
           return;
         }
         if (action !== "delete-worktree" || worktree.primary || deletionBlocked) return;
-        const confirmation = requestConfirmDialog(
-          [
-            `Delete worktree "${worktree.label}"?`,
-            worktree.path,
-            "",
-            worktree.threads.length > 0
-              ? `${worktree.threads.length} linked ${worktree.threads.length === 1 ? "thread" : "threads"} will keep their history and move to the current checkout.`
-              : "The branch will remain available.",
-            "Git will refuse to delete the worktree if it contains local changes.",
-          ].join("\n"),
-          { variant: "destructive" },
+        setPendingWorktreeDelete({ repository, worktree });
+      })();
+    },
+    [
+      copyBranchToClipboard,
+      copyPathToClipboard,
+      openProjectSettings,
+      serverConfigs,
+      startWorktreeRun,
+    ],
+  );
+  const handleConfirmedWorktreeDelete = useCallback(
+    (repository: SidebarRepositoryGroup, worktree: SidebarWorktreeGroup) => {
+      void (async () => {
+        const project = repository.project.memberProjects.find(
+          (member) =>
+            member.environmentId === repository.environmentId && member.id === worktree.projectId,
         );
-        if (!confirmation || !(await confirmation)) return;
+        if (!project || worktreeDeletionBlockReason(worktree) !== null) return;
+        const linkedThreads = findWorktreeThreads(threads, repository.environmentId, worktree.path);
         const detachResults = await Promise.all(
-          worktree.threads.map((thread) =>
+          linkedThreads.map((thread) =>
             updateThreadMetadata({
               environmentId: thread.environmentId,
               input: { threadId: thread.id, branch: null, worktreePath: null },
             }),
           ),
         );
-        const detachedThreads = worktree.threads.filter(
+        const detachedThreads = linkedThreads.filter(
           (_thread, index) => detachResults[index]?._tag === "Success",
         );
-        const restoreThreads = () =>
-          Promise.all(
-            detachedThreads.map((thread) =>
-              updateThreadMetadata({
-                environmentId: thread.environmentId,
-                input: {
-                  threadId: thread.id,
-                  branch: thread.branch,
-                  worktreePath: worktree.path,
-                },
-              }),
-            ),
-          );
-        if (detachedThreads.length !== worktree.threads.length) {
-          await restoreThreads();
+        const restoreThreads = async () =>
+          (
+            await Promise.all(
+              detachedThreads.map((thread) =>
+                updateThreadMetadata({
+                  environmentId: thread.environmentId,
+                  input: {
+                    threadId: thread.id,
+                    branch: thread.branch,
+                    worktreePath: worktree.path,
+                  },
+                }),
+              ),
+            )
+          ).every((result) => result._tag === "Success");
+        if (detachedThreads.length !== linkedThreads.length) {
+          const restored = await restoreThreads();
           toastManager.add({
             type: "error",
             title: "Failed to delete worktree",
-            description: "Linked threads could not be moved to the current checkout.",
+            description: restored
+              ? "Linked threads could not be moved to the current checkout."
+              : "Some linked threads could not be restored to the worktree.",
           });
           return;
         }
@@ -3820,14 +3874,15 @@ export default function Sidebar() {
           },
         });
         if (result._tag === "Failure") {
-          await restoreThreads();
-          if (!isAtomCommandInterrupted(result)) {
-            const error = squashAtomCommandFailure(result);
+          const restored = await restoreThreads();
+          if (!restored || !isAtomCommandInterrupted(result)) {
             toastManager.add(
               stackedThreadToast({
                 type: "error",
                 title: "Failed to delete worktree",
-                description: error instanceof Error ? error.message : "An error occurred.",
+                description: restored
+                  ? "Removal could not be confirmed. Check Git status before retrying."
+                  : "Removal could not be confirmed; some linked threads could not be restored.",
               }),
             );
           }
@@ -3840,15 +3895,7 @@ export default function Sidebar() {
         });
       })();
     },
-    [
-      copyBranchToClipboard,
-      copyPathToClipboard,
-      openProjectSettings,
-      removeWorktree,
-      serverConfigs,
-      startWorktreeRun,
-      updateThreadMetadata,
-    ],
+    [removeWorktree, threads, updateThreadMetadata],
   );
   const settledThreadKeys = useMemo(
     () =>
@@ -5095,35 +5142,99 @@ export default function Sidebar() {
                 projectRef.projectId === thread.projectId,
             ),
           ) ?? null;
+        const worktreePath = thread.worktreePath;
+        const normalizedWorktreePath = worktreePath
+          ? normalizeProjectPathForComparison(worktreePath)
+          : null;
+        const repository =
+          sidebarLayout === "flat" && normalizedWorktreePath
+            ? repositoryGroupsRef.current.find(
+                (group) =>
+                  group.environmentId === thread.environmentId &&
+                  group.project.memberProjects.some((project) => project.id === thread.projectId) &&
+                  group.worktrees.some(
+                    (worktree) =>
+                      normalizeProjectPathForComparison(worktree.path) === normalizedWorktreePath,
+                  ),
+              )
+            : undefined;
+        const worktree = repository?.worktrees.find(
+          (candidate) =>
+            normalizeProjectPathForComparison(candidate.path) === normalizedWorktreePath,
+        );
+        const worktreeContext = repository && worktree ? { repository, worktree } : null;
+        const worktreeProject = worktreeContext?.repository.project.memberProjects.find(
+          (project) =>
+            project.environmentId === thread.environmentId &&
+            project.id === worktreeContext.worktree.projectId,
+        );
+        const worktreeConfig = serverConfigs.get(thread.environmentId);
+        const worktreeScripts =
+          worktreeProject && worktreeConfig?.environment.capabilities.worktreeRuns
+            ? resolveProjectScripts(worktreeConfig.settings, worktreeProject).filter(
+                (script) => script.scope === "worktree",
+              )
+            : [];
+        const worktreeBlockReason = worktreeContext
+          ? worktreeDeletionBlockReason(worktreeContext.worktree)
+          : null;
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
-            buildThreadActionMenuItems({
-              branch: thread.branch ?? null,
-              projectFilter: threadProjectGroup
-                ? {
-                    label: threadProjectGroup.displayName,
-                    isActive: projectScopeKey === threadProjectGroup.projectKey,
-                  }
-                : null,
-              isPinned,
-              isSettled,
-              isSnoozed,
-              canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
-              isRegeneratingTitle,
-              isRunning:
-                thread.session?.status === "running" && thread.session.activeTurnId != null,
-              supports: {
-                settlement: supportsSettlement,
-                snooze: supportsSnooze,
-                pinning: supportsPinning,
-                titleRegeneration: supportsTitleRegeneration,
-              },
-              snoozePresets,
-            }),
+            [
+              ...buildThreadActionMenuItems({
+                branch: thread.branch ?? null,
+                projectFilter: threadProjectGroup
+                  ? {
+                      label: threadProjectGroup.displayName,
+                      isActive: projectScopeKey === threadProjectGroup.projectKey,
+                    }
+                  : null,
+                isPinned,
+                isSettled,
+                isSnoozed,
+                canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
+                isRegeneratingTitle,
+                isRunning:
+                  thread.session?.status === "running" && thread.session.activeTurnId != null,
+                supports: {
+                  settlement: supportsSettlement,
+                  snooze: supportsSnooze,
+                  pinning: supportsPinning,
+                  titleRegeneration: supportsTitleRegeneration,
+                },
+                snoozePresets,
+              }),
+              ...(worktreeContext
+                ? [
+                    {
+                      id: "worktree-actions",
+                      label: "Worktree actions",
+                      icon: "folder",
+                      children: worktreeThreadMenuItems(
+                        buildWorktreeActionMenuItems({
+                          branch: worktreeContext.worktree.branch,
+                          primary: false,
+                          scripts: worktreeScripts,
+                          deletionBlocked: worktreeBlockReason !== null,
+                          deletionBlockReason: worktreeBlockReason,
+                        }),
+                      ),
+                    },
+                  ]
+                : []),
+            ],
             position,
           ),
         );
         if (clicked._tag === "Failure") return;
+        if (clicked.value?.startsWith("worktree:") && worktreeContext) {
+          handleWorktreeMenuAction(
+            worktreeContext.repository,
+            worktreeContext.worktree,
+            clicked.value.slice("worktree:".length) as WorktreeActionMenuId,
+          );
+          return;
+        }
         if (clicked.value?.startsWith("snooze:")) {
           const preset =
             clicked.value === "snooze:custom"
@@ -5305,11 +5416,13 @@ export default function Sidebar() {
       copyThreadIdToClipboard,
       deleteThread,
       handleMultiSelectContextMenu,
+      handleWorktreeMenuAction,
       markThreadUnread,
       openProjectSettings,
       projectScopeKey,
       projectByKey,
       serverConfigs,
+      sidebarLayout,
       setProjectScopeKey,
       startThreadRename,
       updateThreadMetadata,
@@ -5901,12 +6014,7 @@ export default function Sidebar() {
                                     worktreeProject,
                                   ).filter((script) => script.scope === "worktree")
                                 : [];
-                            const deletionBlocked =
-                              worktree.threads.some(
-                                (thread) =>
-                                  thread.session?.status === "running" ||
-                                  thread.session?.status === "starting",
-                              ) || worktree.issues.length > 0;
+                            const deletionBlockReason = worktreeDeletionBlockReason(worktree);
                             items.push(
                               <SidebarWorktreeHeader
                                 key={`worktree:${worktree.key}`}
@@ -5930,7 +6038,8 @@ export default function Sidebar() {
                                   branch: worktree.branch,
                                   primary: worktree.primary,
                                   scripts,
-                                  deletionBlocked,
+                                  deletionBlocked: deletionBlockReason !== null,
+                                  deletionBlockReason,
                                 })}
                                 onThreadActivate={navigateToThread}
                                 onCreateThread={() => {
@@ -6132,6 +6241,40 @@ export default function Sidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarChromeFooter />
+      {pendingWorktreeDelete ? (
+        <WorktreeDeleteDialog
+          environmentId={pendingWorktreeDelete.repository.environmentId}
+          path={pendingWorktreeDelete.worktree.path}
+          label={pendingWorktreeDelete.worktree.label}
+          threadCount={
+            findWorktreeThreads(
+              threads,
+              pendingWorktreeDelete.repository.environmentId,
+              pendingWorktreeDelete.worktree.path,
+            ).length
+          }
+          onClose={() => setPendingWorktreeDelete(null)}
+          onConfirm={() => {
+            const target = pendingWorktreeDelete;
+            setPendingWorktreeDelete(null);
+            const repository = repositoryGroupsRef.current.find(
+              (group) => group.key === target.repository.key,
+            );
+            const worktree = repository?.worktrees.find(
+              (group) => group.key === target.worktree.key,
+            );
+            if (!repository || !worktree || worktreeDeletionBlockReason(worktree) !== null) {
+              toastManager.add({
+                type: "error",
+                title: "Worktree changed",
+                description: "Review its current state before deleting.",
+              });
+              return;
+            }
+            handleConfirmedWorktreeDelete(repository, worktree);
+          }}
+        />
+      ) : null}
     </>
   );
 }
