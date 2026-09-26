@@ -6,7 +6,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { runMigrations } from "../Migrations.ts";
 
-const layer = it.layer(Layer.fresh(NodeSqliteClient.layerMemory()));
+const layer = it.layer(Layer.fresh(NodeSqliteClient.layer({ filename: ":memory:" })));
 
 interface WorktreePullRequestRow {
   readonly projectId: string;

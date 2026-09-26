@@ -341,7 +341,7 @@ export function HeaderUsageLimitsPopover({
           side="bottom"
           align="end"
           className="w-[min(30rem,calc(100vw-2rem))]"
-          viewportClassName="max-h-[min(34rem,calc(100dvh-6rem))] p-0"
+
           aria-label="Usage limits"
         >
           <div className="flex flex-col">

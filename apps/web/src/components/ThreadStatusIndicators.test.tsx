@@ -9,6 +9,7 @@ import {
   resolveThreadPullRequestBadgePresentation,
 } from "./ThreadStatusIndicators";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
+import { InlineButton } from "./ui/button";
 
 describe("ThreadWorktreeIndicator", () => {
   it("renders the worktree folder and branch in an accessible label", () => {
@@ -107,7 +108,7 @@ describe("linked pull request badges", () => {
   it("renders an aggregate badge as an in-app control", () => {
     const markup = renderToStaticMarkup(
       <ThreadPullRequestBadgeControl
-        variant="underline"
+        render={<InlineButton />}
         badge={{ kind: "pull-request", others: 1, state: "open" }}
         number={42}
         url="https://github.com/acme/repo/pull/42"

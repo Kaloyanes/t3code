@@ -2,7 +2,6 @@ import { siblingPullRequestUrl } from "@t3tools/shared/changeRequestUrl";
 import {
   CommandId,
   type OrchestrationProjectShell,
-  type OrchestrationThreadShell,
   type PullRequestSummary,
   type ThreadPullRequestKey,
   type ThreadPullRequestLink,
@@ -38,8 +37,8 @@ const SLOW_SYNC_INTERVAL_MS = 15 * 60 * 1_000;
 type SnapshotFields = Omit<ThreadPullRequestSnapshot, "syncedAt">;
 
 interface LinkEntry {
-  readonly thread?: OrchestrationThreadShell;
-  readonly project?: OrchestrationProjectShell;
+  readonly thread?: ProjectionSnapshotQuery.ProjectionThreadPullRequests;
+  readonly project?: Pick<OrchestrationProjectShell, "id" | "worktreePullRequests">;
   readonly link: ThreadPullRequestLink | WorktreePullRequestLink;
 }
 
@@ -107,12 +106,12 @@ function stacksEqual(
   );
 }
 
-function isUnsettled(thread: OrchestrationThreadShell): boolean {
+function isUnsettled(thread: ProjectionSnapshotQuery.ProjectionThreadPullRequests): boolean {
   return thread.settledOverride !== "settled" && thread.settledAt === null;
 }
 
 function isWorktreeEntry(entry: LinkEntry): entry is LinkEntry & {
-  readonly project: OrchestrationProjectShell;
+  readonly project: Pick<OrchestrationProjectShell, "id" | "worktreePullRequests">;
   readonly link: WorktreePullRequestLink;
 } {
   return entry.project !== undefined;
@@ -120,9 +119,9 @@ function isWorktreeEntry(entry: LinkEntry): entry is LinkEntry & {
 
 /**
  * Keeps every thread ↔ pull request link's host snapshot current. One sweep a minute reads
- * the shell snapshot, groups visible links by pull request so the host is asked once per PR
- * no matter how many threads share it, and writes back only what changed. Native stacks the
- * host reports are auto-linked to the thread as `source: "stack"`.
+ * only the active threads that have links, groups visible links by pull request so the host
+ * is asked once per PR no matter how many threads share it, and writes back only what
+ * changed. Native stacks the host reports are auto-linked to the thread as `source: "stack"`.
  */
 export class PullRequestSyncReactor extends Context.Service<
   PullRequestSyncReactor,
@@ -169,22 +168,26 @@ export const make = Effect.gen(function* () {
       Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.logWarning(message, fields);
 
   const sweep = Effect.fn("PullRequestSyncReactor.sweep")(function* (requestedKey?: string) {
-    const snapshot = yield* snapshots.getShellSnapshot();
+    const [threads, worktreeLinks] = yield* Effect.all([
+      snapshots.listThreadsWithPullRequests(),
+      snapshots.listProjectWorktreePullRequests(),
+    ]);
     const now = yield* DateTime.now;
     const nowMs = DateTime.toEpochMillis(now);
     const nowIso = DateTime.formatIso(now);
 
     const groups = new Map<string, Array<LinkEntry>>();
-    for (const project of snapshot.projects) {
-      for (const link of project.worktreePullRequests ?? []) {
+    const worktreeLinksByProject = Map.groupBy(worktreeLinks, (link) => link.projectId);
+    for (const [projectId, projectLinks] of worktreeLinksByProject) {
+      const project = { id: projectId, worktreePullRequests: projectLinks };
+      for (const link of projectLinks) {
         const key = threadPullRequestKeyOf(link);
         const entries = groups.get(key) ?? [];
         entries.push({ project, link });
         groups.set(key, entries);
       }
     }
-    for (const thread of snapshot.threads) {
-      if (thread.archivedAt !== null) continue;
+    for (const thread of threads) {
       for (const link of visibleThreadPullRequests(thread.pullRequests)) {
         const key = threadPullRequestKeyOf(link);
         const entries = groups.get(key) ?? [];
@@ -206,7 +209,7 @@ export const make = Effect.gen(function* () {
       entry: LinkEntry,
       fields: SnapshotFields,
       fetchedStack: { readonly stack: ThreadPullRequestStack | null } | null,
-      compatibilityThread: OrchestrationThreadShell | undefined,
+      compatibilityThread: ProjectionSnapshotQuery.ProjectionThreadPullRequests | undefined,
       worktreeScopedThread: boolean,
     ) {
       const { thread, project, link } = entry;
@@ -343,12 +346,12 @@ export const make = Effect.gen(function* () {
             Effect.map((stack) => ({
               stack: stack === null ? null : ({ kind: "native", ...stack } as const),
             })),
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.failCause(cause)
-                : Effect.logWarning("pull request stack lookup failed", {
-                    key,
-                  }).pipe(Effect.as(null)),
+            Effect.catchCauseIf(
+              (cause) => !Cause.hasInterruptsOnly(cause),
+              () =>
+                Effect.logWarning("pull request stack lookup failed", {
+                  key,
+                }).pipe(Effect.as(null)),
             ),
           )
         : null;
@@ -414,7 +417,9 @@ export const make = Effect.gen(function* () {
               Effect.catchCause(logSkipped("pull request sync skipped", { key })),
             )
           : Effect.void,
-      { concurrency: 8, discard: true },
+      // As wide as one batched summary read, so the sweep's reads on a host arrive together and
+      // GitHub answers them in one request rather than one `gh pr view` apiece.
+      { concurrency: 25, discard: true },
     );
   });
 

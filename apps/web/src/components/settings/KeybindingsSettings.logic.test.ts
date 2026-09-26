@@ -24,6 +24,7 @@ describe("KeybindingsSettings.logic", () => {
       "composer.effort",
       "composer.mode",
       "composer.workspace",
+      "composer.previousWorktree",
       "composer.branch",
       "modelPicker.previousProvider",
       "modelPicker.nextProvider",
@@ -45,6 +46,24 @@ describe("KeybindingsSettings.logic", () => {
       );
     },
   );
+  it("orders Usage bindings and command choices like the page", () => {
+    const expected = [
+      "usage.cost",
+      "usage.tokens",
+      "usage.limits",
+      "usage.open",
+      "usage.period.day",
+      "usage.period.week",
+      "usage.period.month",
+      "usage.period.quarter",
+    ];
+    const bindings = DEFAULT_RESOLVED_KEYBINDINGS.toReversed();
+    expect(buildKeybindingRows(bindings, "usage").map((row) => row.command)).toEqual(expected);
+    expect(
+      buildKeybindingCommandOptions(bindings).filter((command) => command.startsWith("usage.")),
+    ).toEqual(["usage.cost", "usage.open", "usage.tokens", "usage.limits", ...expected.slice(4)]);
+  });
+
   it("builds searchable rows with readable key and when values", () => {
     const rows = buildKeybindingRows(
       [
@@ -242,6 +261,7 @@ describe("KeybindingsSettings.logic", () => {
         "chat.new",
         "rightPanel.toggleMaximized",
         "thread.stop",
+        "usage.open",
         "script.setup-db.run",
       ]),
     );
@@ -257,7 +277,7 @@ describe("KeybindingsSettings.logic", () => {
     expect(unknownWhenVariables(parsed.ok ? parsed.value : undefined)).toEqual(["terminalFoc"]);
   });
 
-  it("marks each default shortcut for multi-binding commands as default", () => {
+  it("marks non-default shortcuts for a built-in command as custom", () => {
     const rows = buildKeybindingRows(
       [
         {
@@ -294,7 +314,7 @@ describe("KeybindingsSettings.logic", () => {
       "",
     );
 
-    expect(rows.map((row) => row.source)).toEqual(["Default", "Default"]);
+    expect(rows.map((row) => row.source)).toEqual(["Custom", "Custom"]);
   });
 
   it("reports conflicting shortcuts that share an active when context", () => {

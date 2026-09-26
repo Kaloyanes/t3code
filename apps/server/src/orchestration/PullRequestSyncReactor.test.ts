@@ -194,6 +194,7 @@ const makeHarness = Effect.fn("makePullRequestSyncHarness")(function* (options: 
   const snapshots = yield* Ref.make(options.snapshot);
   const events = yield* PubSub.unbounded<OrchestrationEvent>();
   const snapshotReads = yield* Queue.unbounded<void>();
+  const shellSnapshotReads = yield* Ref.make(0);
   const syncCommands = yield* Ref.make<ReadonlyArray<SyncCommand>>([]);
   const linkCommands = yield* Ref.make<ReadonlyArray<LinkCommand>>([]);
   const summaryCalls = yield* Ref.make<ReadonlyArray<PullRequestRef>>([]);
@@ -237,8 +238,22 @@ const makeHarness = Effect.fn("makePullRequestSyncHarness")(function* (options: 
 
   const dependencies = Layer.mergeAll(
     Layer.mock(ProjectionSnapshotQuery)({
+      listProjectWorktreePullRequests: () =>
+        Ref.get(snapshots).pipe(
+          Effect.map((snapshot) =>
+            snapshot.projects.flatMap((project) => project.worktreePullRequests ?? []),
+          ),
+        ),
+      listThreadsWithPullRequests: () =>
+        Queue.offer(snapshotReads, undefined).pipe(
+          Effect.andThen(Ref.get(snapshots)),
+          Effect.map((snapshot) => snapshot.threads),
+        ),
       getShellSnapshot: () =>
-        Queue.offer(snapshotReads, undefined).pipe(Effect.andThen(Ref.get(snapshots))),
+        Ref.update(shellSnapshotReads, (count) => count + 1).pipe(
+          Effect.andThen(Queue.offer(snapshotReads, undefined)),
+          Effect.andThen(Ref.get(snapshots)),
+        ),
     }),
     Layer.mock(PullRequestService)({
       summary,
@@ -263,6 +278,7 @@ const makeHarness = Effect.fn("makePullRequestSyncHarness")(function* (options: 
     activation,
     snapshots,
     snapshotReads,
+    shellSnapshotReads,
     syncCommands,
     linkCommands,
     summaryCalls,
@@ -589,6 +605,8 @@ describe("PullRequestSyncReactor", () => {
             ],
           );
           assert.strictEqual((yield* Ref.get(fixture.stackCalls)).length, 1);
+          // Reads only linked threads, never the full shell snapshot of every thread.
+          assert.strictEqual(yield* Ref.get(fixture.shellSnapshotReads), 0);
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),

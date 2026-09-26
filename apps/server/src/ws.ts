@@ -20,6 +20,7 @@ import * as Stream from "effect/Stream";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
   AuthAccessStreamError,
+  AutomationOperationError,
   type AuthAccessStreamEvent,
   type AuthEnvironmentScope,
   AuthSessionId,
@@ -957,27 +958,23 @@ const makeWsRpcLayer = (
           case "project.meta-updated":
             return projectUpsertOrRemove(ProjectId.make(event.aggregateId), event.sequence);
           case "project.deleted":
-            return Effect.succeed(
-              Option.some({
-                kind: "project-removed" as const,
-                sequence: event.sequence,
-                projectId: ProjectId.make(event.aggregateId),
-              }),
-            );
+            return Effect.succeedSome({
+              kind: "project-removed" as const,
+              sequence: event.sequence,
+              projectId: ProjectId.make(event.aggregateId),
+            });
           case "thread.deleted":
           case "thread.archived":
-            return Effect.succeed(
-              Option.some({
-                kind: "thread-removed" as const,
-                sequence: event.sequence,
-                threadId: ThreadId.make(event.aggregateId),
-              }),
-            );
+            return Effect.succeedSome({
+              kind: "thread-removed" as const,
+              sequence: event.sequence,
+              threadId: ThreadId.make(event.aggregateId),
+            });
           case "thread.unarchived":
             return threadUpsertOrRemove(ThreadId.make(event.aggregateId), event.sequence);
           default:
             if (event.aggregateKind !== "thread") {
-              return Effect.succeed(Option.none());
+              return Effect.succeedNone;
             }
             return threadUpsertOrRemove(ThreadId.make(event.aggregateId), event.sequence);
         }
@@ -995,7 +992,7 @@ const makeWsRpcLayer = (
       ): Effect.Effect<Option.Option<A>, never, never> =>
         read.pipe(
           Effect.retry({ times: 1 }),
-          Effect.map(Option.some),
+          Effect.asSome,
           Effect.tapError((error) =>
             Effect.logWarning("orchestration shell projection refetch failed", {
               aggregateKind,
@@ -2517,12 +2514,28 @@ const makeWsRpcLayer = (
               const snapshot = yield* automationService.getSnapshot();
               const run = snapshot.runs.find((candidate) => candidate.id === input.id);
               if (run?.threadId !== null && run?.threadId !== undefined) {
-                yield* orchestrationEngine.dispatch({
-                  type: "thread.turn.interrupt",
-                  commandId: yield* serverCommandId("automation-stop"),
-                  threadId: ThreadId.make(run.threadId),
-                  createdAt: yield* nowIso,
-                });
+                const commandId = yield* serverCommandId("automation-stop").pipe(
+                  Effect.mapError(
+                    (error) =>
+                      new AutomationOperationError({ operation: "stopRun", detail: String(error) }),
+                  ),
+                );
+                yield* orchestrationEngine
+                  .dispatch({
+                    type: "thread.turn.interrupt",
+                    commandId,
+                    threadId: ThreadId.make(run.threadId),
+                    createdAt: yield* nowIso,
+                  })
+                  .pipe(
+                    Effect.mapError(
+                      (error) =>
+                        new AutomationOperationError({
+                          operation: "stopRun",
+                          detail: String(error),
+                        }),
+                    ),
+                  );
               }
               return yield* automationService.stopRun(input);
             }),
@@ -2663,6 +2676,15 @@ const makeWsRpcLayer = (
             WS_METHODS.providerAuthStart,
             providerAuth.start(input, currentSessionId),
             { "rpc.aggregate": "provider" },
+          ),
+        [WS_METHODS.providerAuthRespond]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.providerAuthRespond,
+            providerAuth.respond(input, currentSessionId),
+            {
+              "rpc.aggregate": "provider",
+              instanceId: input.instanceId,
+            },
           ),
         [WS_METHODS.providerAuthComplete]: (input) =>
           observeRpcEffect(
@@ -3340,9 +3362,13 @@ const makeWsRpcLayer = (
         [WS_METHODS.sourceControlPublishRepository]: (input) =>
           observeRpcEffect(
             WS_METHODS.sourceControlPublishRepository,
-            sourceControlRepositories
-              .publishRepository(input)
-              .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            sourceControlRepositories.publishRepository(input).pipe(
+              // A new remote can change the cached identity. Only the `cwd` entry
+              // refreshes, so after a publish from a linked worktree the project
+              // root entry waits for its TTL.
+              Effect.tap(() => repositoryIdentityResolver.resolve(input.cwd, { refresh: true })),
+              Effect.tap(() => refreshGitStatus(input.cwd)),
+            ),
             {
               "rpc.aggregate": "source-control",
             },
