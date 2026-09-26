@@ -49,6 +49,10 @@ checkouts and removal. Actions belong to a project: editing them creates the pro
 on each selected environment, and reset returns to the environment's shared list. A project's
 `t3.json` actions can be imported there.
 
+Choose **Main worktree** in the Project category to set which checkout new local threads use.
+The menu lists each available worktree by branch and path. For a project on multiple environments,
+choose the main worktree separately on each environment.
+
 Actions normally run in the current thread terminal. Set **Run in** to **Worktree** for a
 long-lived action such as a development server. Web and desktop show these actions on each
 worktree in the sidebar and open their output in a worktree console. There is one run per action

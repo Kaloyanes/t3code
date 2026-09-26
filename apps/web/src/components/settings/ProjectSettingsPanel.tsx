@@ -39,6 +39,7 @@ import {
   ProjectFaviconPickerDialog,
 } from "./ProjectFaviconPickerDialog";
 import { ProjectActionsSettings } from "./ProjectActionsSettings";
+import { ProjectMainWorktreeSetting } from "./ProjectMainWorktreeSetting";
 import { projectGroupTitleNeedsUpdate } from "./ProjectSettingsPanel.logic";
 import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
 
@@ -479,6 +480,15 @@ function ProjectDetail({
               </div>
             }
           />
+        </SettingsSection>
+        <SettingsSection title="Main worktree">
+          {group.memberProjects.map((member) => (
+            <ProjectMainWorktreeSetting
+              key={`${member.environmentId}:${member.id}`}
+              member={member}
+              showEnvironment={hasMultipleCheckouts}
+            />
+          ))}
         </SettingsSection>
         <ProjectActionsSettings />
         {hasMultipleCheckouts ? checkoutChoices : null}
