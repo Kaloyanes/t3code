@@ -1268,10 +1268,25 @@ const SidebarRepositoryHeader = memo(function SidebarRepositoryHeader(props: {
   readonly project: SidebarProjectSnapshot;
   readonly environmentLabel: string | null;
   readonly showEnvironment: boolean;
+  readonly expanded: boolean;
+  readonly onToggle: () => void;
 }) {
   return (
     <li className="list-none px-1 pb-1 pt-3 first:pt-1">
-      <div className="flex h-7 min-w-0 items-center gap-2 px-1.5 text-sidebar-foreground">
+      <button
+        type="button"
+        aria-expanded={props.expanded}
+        aria-label={`${props.expanded ? "Collapse" : "Expand"} ${props.project.displayName}`}
+        onClick={props.onToggle}
+        className="flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-1.5 text-left text-sidebar-foreground outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <ChevronDownIcon
+          aria-hidden
+          className={cn(
+            "size-3.5 shrink-0 text-sidebar-muted-foreground",
+            !props.expanded && "-rotate-90",
+          )}
+        />
         <ProjectFavicon project={props.project} className="size-4 shrink-0" />
         <span className="min-w-0 truncate text-sm font-semibold">{props.project.displayName}</span>
         {props.showEnvironment && props.environmentLabel ? (
@@ -1279,7 +1294,7 @@ const SidebarRepositoryHeader = memo(function SidebarRepositoryHeader(props: {
             {props.environmentLabel}
           </span>
         ) : null}
-      </div>
+      </button>
     </li>
   );
 });
@@ -2917,8 +2932,8 @@ export default function Sidebar() {
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const [sidebarLayout] = useSidebarLayoutPreference();
-  const worktreeExpandedByKey = useUiStateStore((store) => store.projectExpandedById);
-  const setWorktreeExpanded = useUiStateStore((store) => store.setProjectExpanded);
+  const groupExpandedByKey = useUiStateStore((store) => store.projectExpandedById);
+  const setGroupExpanded = useUiStateStore((store) => store.setProjectExpanded);
   const threadLastVisitedAtById = useUiStateStore((store) => store.threadLastVisitedAtById);
   const {
     settleThread,
@@ -3605,18 +3620,20 @@ export default function Sidebar() {
   );
   const groupedVisibleThreads = useMemo(
     () =>
-      repositoryGroups.flatMap((repository) =>
-        repository.worktrees.flatMap((worktree) => {
-          const containsRoute = worktree.threads.some(
-            (thread) =>
-              scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
-          );
-          return worktreeExpandedByKey[worktree.key] !== false || containsRoute
-            ? worktree.threads
-            : [];
-        }),
-      ),
-    [repositoryGroups, routeThreadKey, worktreeExpandedByKey],
+      repositoryGroups
+        .filter((repository) => groupExpandedByKey[`repository:${repository.key}`] !== false)
+        .flatMap((repository) =>
+          repository.worktrees.flatMap((worktree) => {
+            const containsRoute = worktree.threads.some(
+              (thread) =>
+                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
+            );
+            return groupExpandedByKey[worktree.key] !== false || containsRoute
+              ? worktree.threads
+              : [];
+          }),
+        ),
+    [repositoryGroups, routeThreadKey, groupExpandedByKey],
   );
 
   const orderedThreads = useMemo(
@@ -5822,14 +5839,19 @@ export default function Sidebar() {
                       ];
                       if (sidebarLayout === "grouped") {
                         for (const repository of repositoryGroups) {
+                          const repositoryKey = `repository:${repository.key}`;
+                          const repositoryExpanded = groupExpandedByKey[repositoryKey] !== false;
                           items.push(
                             <SidebarRepositoryHeader
                               key={`repository:${repository.key}`}
                               project={repository.project}
                               environmentLabel={repository.environmentLabel}
                               showEnvironment={showProjectEnvironments}
+                              expanded={repositoryExpanded}
+                              onToggle={() => setGroupExpanded(repositoryKey, !repositoryExpanded)}
                             />,
                           );
+                          if (!repositoryExpanded) continue;
                           for (const worktree of repository.worktrees) {
                             const containsRoute = worktree.threads.some(
                               (thread) =>
@@ -5837,7 +5859,7 @@ export default function Sidebar() {
                                 routeThreadKey,
                             );
                             const expanded =
-                              worktreeExpandedByKey[worktree.key] !== false || containsRoute;
+                              groupExpandedByKey[worktree.key] !== false || containsRoute;
                             const hasUnread = worktree.threads.some((thread) => {
                               const key = scopedThreadKey(
                                 scopeThreadRef(thread.environmentId, thread.id),
@@ -5925,7 +5947,7 @@ export default function Sidebar() {
                                 onMenuAction={(action) =>
                                   handleWorktreeMenuAction(repository, worktree, action)
                                 }
-                                onToggle={() => setWorktreeExpanded(worktree.key, !expanded)}
+                                onToggle={() => setGroupExpanded(worktree.key, !expanded)}
                               />,
                             );
                             if (expanded) {
