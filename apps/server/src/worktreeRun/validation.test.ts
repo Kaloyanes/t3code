@@ -6,6 +6,21 @@ import { expect } from "vite-plus/test";
 import { isProjectWorktreePath } from "./validation.ts";
 
 it.layer(Path.layer)("isProjectWorktreePath", (it) => {
+  it.effect("accepts a linked worktree root for a nested project", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      expect(
+        isProjectWorktreePath({
+          path,
+          repositoryRoot: "/repo",
+          projectRoot: "/repo/packages/ui",
+          worktreeRoot: "/worktrees/feature",
+          workspacePath: "/worktrees/feature",
+        }),
+      ).toBe(true);
+    }),
+  );
+
   it.effect("accepts a nested project path inside a linked worktree", () =>
     Effect.gen(function* () {
       const path = yield* Path.Path;

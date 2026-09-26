@@ -24,5 +24,8 @@ export function isProjectWorktreePath(input: {
   if (!isWithin(input.path, repositoryRoot, projectRoot)) return false;
 
   const projectRelativePath = input.path.relative(repositoryRoot, projectRoot);
-  return input.path.resolve(worktreeRoot, projectRelativePath) === workspacePath;
+  return (
+    workspacePath === worktreeRoot ||
+    input.path.resolve(worktreeRoot, projectRelativePath) === workspacePath
+  );
 }
