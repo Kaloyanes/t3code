@@ -9,6 +9,10 @@ import type {
   IssueWorktreePrepareResult,
 } from "@t3tools/contracts";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { useAtomValue } from "@effect/atom-react";
+import { resolveDefaultProviderModelSelection } from "~/providerInstances";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
 import * as Cause from "effect/Cause";
 import {
   CheckIcon,
@@ -60,7 +64,10 @@ import { Input } from "../ui/input";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
 import { Textarea } from "../ui/textarea";
-import { cn } from "~/lib/utils";
+import { cn, newThreadId } from "~/lib/utils";
+import { threadEnvironment } from "~/state/threads";
+import { useEnvironmentSettings } from "~/hooks/useSettings";
+import { serverEnvironment } from "~/state/server";
 import { readLocalApi } from "~/localApi";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { issueWorktreeIsLinked, issueWorktreePrimaryAction } from "./issue.logic";
@@ -1034,10 +1041,22 @@ export function IssueWorktreeDialog({
 }: IssueWorktreeDialogProps) {
   const threads = useThreadShells();
   const project = useProject(scopeProjectRef(environmentId, reference.projectId));
-  const refs = usePaginatedBranches({
+  const branches = usePaginatedBranches({
     environmentId: open ? environmentId : null,
     cwd: open ? (project?.workspaceRoot ?? null) : null,
-  }).refs;
+  });
+  const { refs, loadNext, isPending, error, data } = branches;
+  useEffect(() => {
+    if (open && !isPending && !error && data?.nextCursor != null) loadNext();
+  }, [open, isPending, error, data?.nextCursor, loadNext]);
+  const settings = useEnvironmentSettings(environmentId);
+  const providers = useAtomValue(serverEnvironment.providersValueAtom(environmentId));
+  const defaults = resolveProjectSettings(settings, reference.projectId, project).settings;
+  const modelSelection = resolveDefaultProviderModelSelection(
+    providers ?? [],
+    defaults.defaultModelSelection,
+  );
+  const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const prepare = useAtomCommand(issueEnvironment.worktreePrepare, { reportFailure: false });
   const preflight = useAtomCommand(issueEnvironment.worktreeDeletePreflight, {
     reportFailure: false,
@@ -1070,11 +1089,13 @@ export function IssueWorktreeDialog({
               (item) =>
                 item.environmentId === environmentId &&
                 item.projectId === reference.projectId &&
-                item.worktreePath === option.worktreePath,
+                item.worktreePath !== null &&
+                normalizeProjectPathForComparison(item.worktreePath) ===
+                  normalizeProjectPathForComparison(option.worktreePath),
             );
             return {
               ...option,
-              id: thread?.id ?? option.worktreePath,
+              id: option.worktreePath,
               projectId: reference.projectId,
               title: option.label,
               threadId: thread?.id ?? null,
@@ -1112,6 +1133,25 @@ export function IssueWorktreeDialog({
     hasLinkedWork: linkedWork !== null,
   });
 
+  const createWorktreeThread = async (worktree: { branch: string; worktreePath: string }) => {
+    const threadId = newThreadId();
+    if (!modelSelection) throw new Error("Enable a provider to link an issue to a new thread");
+    const result = await createThread({
+      environmentId,
+      input: {
+        threadId,
+        projectId: reference.projectId,
+        title: `Issue #${reference.number}`,
+        modelSelection,
+        runtimeMode: defaults.defaultRuntimeMode,
+        interactionMode: "default",
+        ...worktree,
+      },
+    });
+    if (result._tag === "Failure") throw Cause.squash(result.cause);
+    return threadId;
+  };
+
   const prepareWorktree = () => {
     const trimmedName = name.trim();
     if (trimmedName.length === 0 || createPending) return;
@@ -1120,27 +1160,25 @@ export function IssueWorktreeDialog({
       "create",
       "Unable to create worktree",
       async () => {
-        const projectRef = scopeProjectRef(environmentId, reference.projectId);
-        const opened = canLink ? await newThread(projectRef) : null;
-        if (canLink && opened === null) throw new Error("Unable to open a thread for the worktree");
+        if (canLink && !modelSelection)
+          throw new Error("Enable a provider to link an issue to a new thread");
         const result = await prepare({
           environmentId,
           input: {
             ...reference,
             name: trimmedName,
             ...(baseBranch.trim() ? { baseBranch: baseBranch.trim() } : {}),
-            ...(opened ? { threadId: opened.threadId } : {}),
           },
         });
-        if (result._tag === "Failure" || !opened) return result;
+        if (result._tag === "Failure") return result;
+        branches.refresh();
+        if (!canLink) return result;
         const { worktree } = result.value as IssueWorktreePrepareResult;
-        const pointed = await newThread(projectRef, {
+        const threadId = await createWorktreeThread({
           branch: worktree.branch,
           worktreePath: worktree.worktreePath,
-          envMode: "worktree",
         });
-        if (pointed === null) throw new Error("Worktree created, but the new thread did not open");
-        return result;
+        return link({ environmentId, input: { ...reference, threadId, source: "created" } });
       },
       () => {
         setNotice(canLink ? "Worktree created and linked." : "Worktree created.");
@@ -1186,6 +1224,7 @@ export function IssueWorktreeDialog({
         }),
       (value) => {
         setDeleteResult(value as IssueWorktreeDeleteResult);
+        branches.refresh();
         setNotice("Worktree deletion finished.");
         onActed?.();
       },
@@ -1210,6 +1249,7 @@ export function IssueWorktreeDialog({
           },
         }),
       () => {
+        branches.refresh();
         setNotice("Linked worktree replaced.");
         onActed?.();
       },
@@ -1248,14 +1288,10 @@ export function IssueWorktreeDialog({
         async () => {
           const threadId =
             target.threadId ??
-            (
-              await newThread(scopeProjectRef(environmentId, target.projectId), {
-                branch: target.branch,
-                worktreePath: target.worktreePath,
-                envMode: "worktree",
-              })
-            )?.threadId;
-          if (!threadId) throw new Error("Unable to open a thread for the worktree");
+            (await createWorktreeThread({
+              branch: target.branch,
+              worktreePath: target.worktreePath,
+            }));
           return link({
             environmentId,
             input: {
@@ -1351,6 +1387,7 @@ export function IssueWorktreeDialog({
               error={actions.errorFor("replace")}
             />
           </section>
+          <ActionFeedback pending={isPending} pendingLabel="Loading worktrees…" error={error} />
           {worktrees.length > 0 ? (
             <section className="space-y-2">
               <div>
@@ -1402,7 +1439,7 @@ export function IssueWorktreeDialog({
                       <label htmlFor={checkboxId} className="min-w-0 flex-1 cursor-pointer">
                         <span className="block truncate">{thread.title}</span>
                         <span className="block truncate text-xs text-muted-foreground">
-                          {thread.branch ?? thread.worktreePath}
+                          {thread.worktreePath}
                         </span>
                       </label>
                       {linked ? (
