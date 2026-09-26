@@ -129,10 +129,36 @@ describe("sidebar worktree grouping", () => {
     expect(
       groups[0]?.worktrees.map(({ label, primary, threads }) => [label, primary, threads.length]),
     ).toEqual([
-      ["main", true, 0],
+      ["Local checkout", true, 0],
       ["feature", false, 1],
       ["feature/empty", false, 0],
     ]);
+  });
+
+  it("keeps local branches in one local checkout group alongside actual worktrees", () => {
+    const first = { ...thread("local-first"), branch: "main", worktreePath: null };
+    const second = { ...thread("local-second"), branch: "feature/local", worktreePath: null };
+    const groups = buildSidebarRepositoryGroups({
+      projectGroups: [projectGroup],
+      pinnedThreads: [first],
+      activeThreads: [second, thread("worktree")],
+      discoveredWorktrees: [
+        { environmentId, projectId, path: "/repo", branch: "main", primary: true },
+      ],
+    });
+
+    expect(groups[0]?.worktrees).toHaveLength(2);
+    expect(groups[0]?.worktrees[0]).toMatchObject({
+      label: "Local checkout",
+      path: "/repo",
+      primary: true,
+      threads: [first, second],
+    });
+    expect(groups[0]?.worktrees[1]).toMatchObject({
+      label: "feature",
+      path: "/worktrees/feature",
+      primary: false,
+    });
   });
 
   it("hides discovered worktrees outside the selected project scope", () => {

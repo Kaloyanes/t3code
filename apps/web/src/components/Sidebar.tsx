@@ -544,10 +544,11 @@ export function buildSidebarRepositoryGroups(input: {
             projectId,
             path,
             branch,
-            label:
-              branches.size > 1
+            label: primary
+              ? "Local checkout"
+              : branches.size > 1
                 ? fallbackLabel
-                : (branch ?? (primary ? "Current checkout" : fallbackLabel)),
+                : (branch ?? fallbackLabel),
             primary,
             threads: entry.threads,
             pullRequests,
