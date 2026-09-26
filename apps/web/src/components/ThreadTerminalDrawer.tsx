@@ -96,6 +96,7 @@ import {
 } from "../appearanceFonts";
 import { WorktreeRunTerminal } from "./WorktreeRunTerminal";
 import type { WorktreeRunTerminalTarget } from "../worktreeRunTerminalStore";
+import { createTerminalInputQueue } from "../terminalInputQueue";
 
 export function terminalGroupLabel(
   terminalIds: ReadonlyArray<string>,
@@ -397,6 +398,9 @@ export function TerminalViewport({
 }: TerminalViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<GhosttyTerminalSurface | null>(null);
+  const inputQueueRef = useRef<ReturnType<
+    typeof createTerminalInputQueue<{ data: string; fallbackError: string }>
+  > | null>(null);
   const visibleRef = useRef(visible);
   const environmentId = threadRef.environmentId;
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
@@ -462,6 +466,31 @@ export function TerminalViewport({
       input: { threadId, terminalId, data },
     }),
   );
+  useEffect(() => {
+    const queue = createTerminalInputQueue(
+      async ({ data, fallbackError }: { data: string; fallbackError: string }) => {
+        const result = await writeTerminal(data);
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          const terminal = terminalRef.current;
+          if (terminal) {
+            writeSystemMessage(terminal, error instanceof Error ? error.message : fallbackError);
+          }
+        }
+      },
+    );
+    inputQueueRef.current = queue;
+    return () => {
+      queue.dispose();
+      if (inputQueueRef.current === queue) inputQueueRef.current = null;
+    };
+  }, [threadId, terminalId]);
+  useEffect(() => {
+    void inputQueueRef.current?.setReady(
+      terminalSession.version > 0 &&
+        (terminalSession.status === "running" || terminalSession.status === "exited"),
+    );
+  }, [terminalSession.version, terminalSession.status]);
   const resizeTerminal = useEffectEvent((cols: number, rows: number) =>
     runTerminalResize({
       environmentId,
@@ -773,17 +802,8 @@ export function TerminalViewport({
         }
       };
 
-      const sendTerminalInput = async (data: string, fallbackError: string) => {
-        const activeTerminal = terminalRef.current;
-        if (!activeTerminal) return;
-        const result = await writeTerminal(data);
-        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          writeSystemMessage(
-            activeTerminal,
-            error instanceof Error ? error.message : fallbackError,
-          );
-        }
+      const sendTerminalInput = (data: string, fallbackError: string) => {
+        inputQueueRef.current?.push({ data, fallbackError });
       };
 
       function handleBeforeKey(event: KeyboardEvent): boolean {
@@ -873,15 +893,7 @@ export function TerminalViewport({
       }
 
       function handleData(data: string): void {
-        void (async () => {
-          const result = await writeTerminal(data);
-          if (result._tag === "Success" || isAtomCommandInterrupted(result)) return;
-          const error = squashAtomCommandFailure(result);
-          writeSystemMessage(
-            terminal,
-            error instanceof Error ? error.message : "Terminal write failed",
-          );
-        })();
+        inputQueueRef.current?.push({ data, fallbackError: "Terminal write failed" });
       }
 
       function handleSelectionChange(): void {
