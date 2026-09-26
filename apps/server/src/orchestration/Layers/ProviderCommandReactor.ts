@@ -1611,6 +1611,10 @@ const make = Effect.gen(function* () {
 
   const resumeNextQueuedTurn = Effect.fn("resumeNextQueuedTurn")(function* (threadId: ThreadId) {
     const queued = queuedTurnStarts.get(threadId);
+    if (!queued?.length) return;
+    // A ready event can outlive the idle session it describes in the worker queue.
+    const thread = yield* resolveThreadShell(threadId);
+    if (thread?.session?.status !== "ready") return;
     const next = queued?.shift();
     if (!next) return;
     if (queued?.length === 0) queuedTurnStarts.delete(threadId);

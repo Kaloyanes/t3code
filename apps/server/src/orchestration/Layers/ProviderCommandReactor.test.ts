@@ -722,24 +722,27 @@ describe("ProviderCommandReactor", () => {
       { messageId: "queued-follow-up-2" },
     ]);
 
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-active-turn-settled"),
-        threadId,
-        session: {
+    // Providers can report readiness more than once before the reactor drains.
+    for (const commandId of ["cmd-active-turn-settled", "cmd-active-turn-ready-again"]) {
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make(commandId),
           threadId,
-          providerInstanceId: ProviderInstanceId.make("codex"),
-          providerName: "codex",
-          status: "ready",
-          runtimeMode: "approval-required",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: "2026-01-01T00:00:03.000Z",
-        },
-        createdAt: "2026-01-01T00:00:03.000Z",
-      }),
-    );
+          session: {
+            threadId,
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            providerName: "codex",
+            status: "ready",
+            runtimeMode: "approval-required",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: "2026-01-01T00:00:03.000Z",
+          },
+          createdAt: "2026-01-01T00:00:03.000Z",
+        }),
+      );
+    }
     await harness.drain();
 
     expect(harness.sendTurn).toHaveBeenCalledTimes(1);
