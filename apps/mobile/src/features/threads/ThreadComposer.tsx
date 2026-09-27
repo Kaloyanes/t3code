@@ -208,6 +208,7 @@ export function ComposerSurface(props: {
   readonly style: ViewStyle;
   /** Morphs between the compact and expanded composer layouts. */
   readonly animateLayout?: boolean;
+  readonly bashMode?: boolean;
 }) {
   const colors = useUniwindTheme();
   const targetBorderRadius =
@@ -232,7 +233,11 @@ export function ComposerSurface(props: {
   return (
     <Animated.View
       className={
-        Platform.OS === "android" ? undefined : "shadow-[0_6px_28px] shadow-adaptive-black-a15-a35"
+        props.bashMode
+          ? "shadow-composer-bash shadow-danger-foreground/25"
+          : Platform.OS === "android"
+            ? undefined
+            : "shadow-[0_6px_28px] shadow-adaptive-black-a15-a35"
       }
       layout={layoutTransition}
       style={[
@@ -261,6 +266,14 @@ export function ComposerSurface(props: {
         layout={layoutTransition}
         style={[props.style, animatedShapeStyle]}
       >
+        {props.bashMode && (
+          <Text
+            accessibilityLiveRegion="polite"
+            className="px-3.5 pt-2 text-xs text-danger-foreground"
+          >
+            Bash
+          </Text>
+        )}
         {props.children}
       </Animated.View>
     </Animated.View>
@@ -675,6 +688,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         ) : null}
 
         <ComposerSurface
+          bashMode={props.draftMessage.startsWith("!")}
           style={
             isExpanded
               ? {

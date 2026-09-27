@@ -5,7 +5,6 @@ import {
 import type { ReactNode } from "react";
 import { Pressable, ScrollView, View, type ColorValue } from "react-native";
 import { AppText as Text } from "../../components/AppText";
-import { cn } from "../../lib/cn";
 import { ThreadDisclosureChevron } from "./thread-work-log";
 
 export function BashMessageDisclosure({
@@ -24,12 +23,7 @@ export function BashMessageDisclosure({
   if (!command) return children;
 
   return (
-    <View
-      className={cn(
-        "min-w-0 gap-2 rounded-xl",
-        command.status === "completed" && "shadow-2xl shadow-danger-foreground/20",
-      )}
-    >
+    <View className="min-w-0 gap-2 rounded-xl">
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={composerBashStatusLabel(command)}

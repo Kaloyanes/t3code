@@ -2110,12 +2110,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div
-        className={cn(
-          "relative min-w-0 max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground",
-          row.bashCommand?.status === "completed" && "shadow-2xl shadow-destructive/20",
-        )}
-      >
+      <div className="relative min-w-0 max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
         <MessageAuthorHeading>You</MessageAuthorHeading>
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[210px] grid-cols-2 gap-2">

@@ -285,7 +285,7 @@ function buildSnapShotTimelineEntry(previewUrl?: string) {
 }
 
 describe("MessagesTimeline", () => {
-  it("opens the result from its Bash message and marks only successful commands", async () => {
+  it("opens the result from its Bash message without adding a message glow", async () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     vi.stubGlobal("requestAnimationFrame", () => 0);
     vi.stubGlobal("cancelAnimationFrame", () => {});
@@ -350,7 +350,7 @@ describe("MessagesTimeline", () => {
           ),
         );
         expect(bashStatuses()).toHaveLength(1);
-        expect(glows()).toHaveLength(status === "completed" ? 1 : 0);
+        expect(glows()).toHaveLength(0);
         const disclosure = bashStatuses()[0]!.parent!;
         if (status === "inProgress") await act(() => disclosure.props.onClick());
         expect(disclosure.props["aria-expanded"]).toBe(true);

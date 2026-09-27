@@ -6322,6 +6322,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ],
   );
 
+  const isBashMode = prompt.startsWith("!") && !activePendingUserInput && !isComposerApprovalState;
+
   // Render
   // ------------------------------------------------------------------
   return (
@@ -6579,7 +6581,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           />
         ) : null}
       </ComposerBanner.Dock>
-      <div className="relative">
+      <div
+        className={cn(
+          "relative rounded-3xl",
+          isBashMode && "shadow-composer-bash shadow-destructive/25",
+        )}
+      >
         <span
           aria-hidden="true"
           className={cn(
@@ -6602,6 +6609,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               composerProviderState.composerSurfaceClassName,
             )}
           >
+            {isBashMode && (
+              <div role="status" className="px-4 pt-2 text-xs text-destructive">
+                Bash
+              </div>
+            )}
             {showCollapsedMobilePromptRow ? (
               <div className="flex items-center justify-between gap-2 px-3 py-2">
                 <button
