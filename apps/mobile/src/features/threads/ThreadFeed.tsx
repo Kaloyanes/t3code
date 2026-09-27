@@ -1,3 +1,4 @@
+import { BashMessageDisclosure } from "./BashMessageDisclosure";
 import {
   WorktreeWorkingHeader,
   WorktreeSetupCard,
@@ -1559,7 +1560,8 @@ function renderFeedEntry(
               maxWidth: props.userBubbleMaxWidth,
               ...(hasReviewCommentContext
                 ? { width: props.reviewCommentBubbleWidth }
-                : hasWideBlock
+                : hasWideBlock ||
+                    (entry.bashCommand && props.expandedWorkRows[`bash:${message.id}`])
                   ? { width: props.userBubbleMaxWidth }
                   : null),
             }}
@@ -1618,22 +1620,29 @@ function renderFeedEntry(
                 })}
               </View>
             ) : null}
-            {message.text.trim().length > 0 ? (
-              <MarkdownImageAvailableWidthContext
-                value={props.userBubbleMaxWidth - USER_BUBBLE_HORIZONTAL_PADDING * 2}
-              >
-                <UserMessageContent
-                  text={renderedText}
-                  environmentId={props.environmentId}
-                  context={message.context}
-                  markdownStyles={styles}
-                  reviewCommentColors={props.reviewCommentColors}
-                  skills={props.skills}
-                  linkHandlers={props.markdownLinkHandlers}
-                  renderImage={props.renderMarkdownImage}
-                />
-              </MarkdownImageAvailableWidthContext>
-            ) : null}
+            <BashMessageDisclosure
+              command={entry.bashCommand}
+              chevronColor={iconSubtleColor}
+              expanded={!props.expandedWorkRows[`bash-collapsed:${message.id}`]}
+              onToggle={() => props.onToggleWorkRow(`bash-collapsed:${message.id}`, entry.id)}
+            >
+              {message.text.trim().length > 0 ? (
+                <MarkdownImageAvailableWidthContext
+                  value={props.userBubbleMaxWidth - USER_BUBBLE_HORIZONTAL_PADDING * 2}
+                >
+                  <UserMessageContent
+                    text={renderedText}
+                    environmentId={props.environmentId}
+                    context={message.context}
+                    markdownStyles={styles}
+                    reviewCommentColors={props.reviewCommentColors}
+                    skills={props.skills}
+                    linkHandlers={props.markdownLinkHandlers}
+                    renderImage={props.renderMarkdownImage}
+                  />
+                </MarkdownImageAvailableWidthContext>
+              ) : null}
+            </BashMessageDisclosure>
           </View>
           <View className="mt-1 flex-row items-center justify-end gap-1 pr-0.5">
             <Text className="font-t3-medium text-xs tabular-nums text-foreground-secondary">

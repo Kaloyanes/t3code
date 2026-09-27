@@ -3748,3 +3748,90 @@ it("keeps attachment-only question answers expandable outside mobile work groups
   expect(running[1]).toBe(group);
   expect(running[2]?.type).toBe("work-toggle");
 });
+
+describe("composer Bash message results", () => {
+  it("refreshes a cached message when its command finishes, preserving ordinary rows", () => {
+    const createdAt = "2026-09-01T00:00:00.000Z";
+    const thread = makeThread({
+      id: ThreadId.make("bash-thread"),
+      projectId: ProjectId.make("project"),
+      title: "Bash",
+      messages: [
+        {
+          id: MessageId.make("bash-user"),
+          role: "user",
+          text: "!ls",
+          turnId: null,
+          createdAt,
+          updatedAt: createdAt,
+          streaming: false,
+        },
+        {
+          id: MessageId.make("ordinary-user"),
+          role: "user",
+          text: "Explain this",
+          turnId: null,
+          createdAt,
+          updatedAt: createdAt,
+          streaming: false,
+        },
+        {
+          id: MessageId.make("other-bash-user"),
+          role: "user",
+          text: "!pwd",
+          turnId: null,
+          createdAt,
+          updatedAt: createdAt,
+          streaming: false,
+        },
+      ],
+    });
+    const activity = makeActivity({
+      id: EventId.make("bash-activity"),
+      kind: "tool.updated",
+      summary: "Running Bash command",
+      tone: "tool",
+      createdAt,
+      payload: {
+        toolCallId: "composer-bash:bash-user",
+        itemType: "command_execution",
+        status: "inProgress",
+        data: { command: "ls" },
+      },
+    });
+    const messageRows = (feed: ThreadFeedEntry[]) =>
+      feed.filter((entry) => entry.type === "message");
+    const initial = messageRows(buildThreadFeed(thread));
+    expect(initial.every((entry) => entry.bashCommand === undefined)).toBe(true);
+    const running = messageRows(buildThreadFeed({ ...thread, activities: [activity] }));
+    expect(running[0]?.bashCommand).toEqual({ status: "running", output: null });
+    for (const status of ["completed", "failed"] as const) {
+      const detail =
+        status === "completed" ? "Exit code: 0\nfile.txt" : "Exit code: 1\nBuild failed";
+      const finishedThread = {
+        ...thread,
+        activities: [
+          {
+            ...activity,
+            kind: "tool.completed" as const,
+            payload: {
+              toolCallId: "composer-bash:bash-user",
+              itemType: "command_execution",
+              status,
+              detail,
+              data: { command: "ls", rawOutput: detail },
+            },
+          },
+        ],
+      };
+      const finished = messageRows(buildThreadFeed(finishedThread));
+      expect(finished[0]?.bashCommand).toEqual({ status, output: detail });
+      expect(finished[0]).not.toBe(running[0]);
+      expect(messageRows(buildThreadFeed(finishedThread))[0]).toBe(finished[0]);
+      for (const index of [1, 2]) {
+        expect(finished[index]).toBe(initial[index]);
+        expect(finished[index]?.bashCommand).toBeUndefined();
+      }
+    }
+  });
+});

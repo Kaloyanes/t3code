@@ -153,6 +153,19 @@ Provider commands must start the message to run. T3 Code commands such as
 Send `/compact` in an existing conversation to reduce context usage when the
 provider supports it. Web and desktop also offer compaction from the context meter.
 
+## One-off Bash commands
+
+Send `!` followed by a command, such as `!npm run build`, to run it in the thread's
+workspace on the connected environment. T3 Code shows its result in the conversation
+and sends the command, exit status, and output to the selected agent as context.
+Failed commands include their output so the agent can help diagnose the failure.
+
+Commands require Bash and run without an interactive terminal or shell startup files.
+Each command has a 60-second limit and captures up to 16 KiB each of stdout and stderr.
+Truncated output and empty output are labeled. Stop cancels a running command; a
+timeout ends it without preserving partial output. Known credentials are redacted,
+but avoid commands that print secrets.
+
 ## Context in your message
 
 Context you attach lands where your cursor is, as a chip inside your text: a terminal excerpt,

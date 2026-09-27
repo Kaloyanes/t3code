@@ -21,6 +21,19 @@ function activity(payload: Record<string, unknown>): OrchestrationThreadActivity
  * assertions are the tripwire.
  */
 describe("projectActivityPayload", () => {
+  it("keeps composer Bash output whole in detail for the message result", () => {
+    const output = "Exit code: 0\nstdout:\nAGENTS.md\napps\ndocs";
+    const projected = projectActivityPayload(
+      activity({
+        itemType: "command_execution",
+        toolCallId: "composer-bash:message-1",
+        detail: output,
+        data: { command: "ls", rawOutput: output },
+      }),
+    );
+    expect((projected.payload as Record<string, unknown>).detail).toBe(output);
+  });
+
   it("preserves tool attribution (agentId/parentToolUseId) through data slimming", () => {
     const projected = projectActivityPayload(
       activity({

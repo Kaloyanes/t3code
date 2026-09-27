@@ -1,3 +1,8 @@
+import {
+  indexComposerBashCommands,
+  isComposerBashEntry,
+  type ComposerBashCommand,
+} from "@t3tools/client-runtime/composer-bash";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 export { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import * as Equal from "effect/Equal";
@@ -410,6 +415,7 @@ export type MessagesTimelineRow =
       id: string;
       createdAt: string;
       message: ChatMessage;
+      bashCommand?: ComposerBashCommand | undefined;
       durationStart: string;
       showAssistantMeta: boolean;
       showAssistantCopyButton: boolean;
@@ -976,6 +982,17 @@ export function deriveMessagesTimelineRows(input: {
   /** Messages sent during the running turn, rendered after the live rows. */
   queuedMessages?: ReadonlyArray<QueuedComposerMessage>;
 }): MessagesTimelineRow[] {
+  const bashCommands = indexComposerBashCommands(
+    input.timelineEntries.flatMap((entry) => (entry.kind === "work" ? [entry.entry] : [])),
+  );
+  if (bashCommands.size > 0) {
+    input = {
+      ...input,
+      timelineEntries: input.timelineEntries.filter(
+        (entry) => entry.kind !== "work" || !isComposerBashEntry(entry.entry),
+      ),
+    };
+  }
   const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>();
   for (const summary of input.turnDiffSummaries) {
     if (summary.assistantMessageId) {
@@ -1396,6 +1413,10 @@ export function deriveMessagesTimelineRows(input: {
       id: timelineEntry.id,
       createdAt: timelineEntry.createdAt,
       message: timelineEntry.message,
+      bashCommand:
+        timelineEntry.message.role === "user" && timelineEntry.message.text.startsWith("!")
+          ? bashCommands.get(timelineEntry.message.id)
+          : undefined,
       durationStart,
       showAssistantMeta,
       showAssistantCopyButton: showAssistantMeta,
@@ -1684,6 +1705,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       const bm = b as typeof a;
       return (
         a.message === bm.message &&
+        a.bashCommand?.status === bm.bashCommand?.status &&
+        a.bashCommand?.output === bm.bashCommand?.output &&
         a.durationStart === bm.durationStart &&
         a.showAssistantMeta === bm.showAssistantMeta &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&

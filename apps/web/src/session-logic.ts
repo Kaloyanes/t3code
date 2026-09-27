@@ -608,6 +608,12 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       entry.detail = message;
     }
   }
+  // Composer Bash output is shown whole on its message. The client projection
+  // trims `data.rawOutput` to one line, so read the untrimmed `detail`.
+  const composerBashOutput = payload?.detail;
+  if (toolCallId?.startsWith("composer-bash:") && typeof composerBashOutput === "string") {
+    entry.detail = composerBashOutput;
+  }
   if (viewedImagePath) {
     entry.viewedImagePath = viewedImagePath;
   }

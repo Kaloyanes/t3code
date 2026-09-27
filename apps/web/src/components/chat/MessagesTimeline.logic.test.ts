@@ -3895,3 +3895,103 @@ describe("computeStableMessagesTimelineRows", () => {
     expect(reordered.result).toEqual([initial.result[1], initial.result[0]]);
   });
 });
+
+describe("composer Bash message projection", () => {
+  const createdAt = "2026-09-01T00:00:00.000Z";
+  const messages: ChatMessage[] = [
+    {
+      id: MessageId.make("bash-user"),
+      role: "user",
+      text: "!ls",
+      turnId: null,
+      createdAt,
+      updatedAt: createdAt,
+      streaming: false,
+    },
+    {
+      id: MessageId.make("ordinary-user"),
+      role: "user",
+      text: "Explain this",
+      turnId: null,
+      createdAt,
+      updatedAt: createdAt,
+      streaming: false,
+    },
+    {
+      id: MessageId.make("other-bash-user"),
+      role: "user",
+      text: "!pwd",
+      turnId: null,
+      createdAt,
+      updatedAt: createdAt,
+      streaming: false,
+    },
+  ];
+  const project = (work: WorkLogEntry[]) =>
+    deriveMessagesTimelineRows({
+      timelineEntries: deriveTimelineEntries(messages, [], work),
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    });
+  const work: WorkLogEntry = {
+    id: "bash-activity",
+    createdAt,
+    label: "Bash command",
+    tone: "tool",
+    toolCallId: "composer-bash:bash-user",
+    itemType: "command_execution",
+    sourceActivityKind: "tool.updated",
+    toolLifecycleStatus: "inProgress",
+  };
+
+  it("requires a matching server command and refreshes the message when its result arrives", () => {
+    const initial = computeStableMessagesTimelineRows(project([]), { byId: new Map(), result: [] });
+    const running = computeStableMessagesTimelineRows(project([work]), initial);
+    const completedWork: WorkLogEntry = {
+      ...work,
+      sourceActivityKind: "tool.completed",
+      toolLifecycleStatus: "completed",
+      detail: "Exit code: 0\nfile.txt",
+    };
+    const completed = computeStableMessagesTimelineRows(project([completedWork]), running);
+    const messageRows = (rows: ReadonlyArray<MessagesTimelineRow>) =>
+      rows.filter((row) => row.kind === "message");
+    expect(messageRows(initial.result).every((row) => row.bashCommand === undefined)).toBe(true);
+    expect(messageRows(running.result)[0]?.bashCommand).toEqual({
+      status: "running",
+      output: null,
+    });
+    expect(messageRows(completed.result)[0]?.bashCommand).toEqual({
+      status: "completed",
+      output: "Exit code: 0\nfile.txt",
+    });
+    expect(messageRows(completed.result)[0]).not.toBe(messageRows(running.result)[0]);
+    for (const index of [1, 2]) {
+      expect(messageRows(completed.result)[index]).toBe(messageRows(initial.result)[index]);
+      expect(messageRows(completed.result)[index]?.bashCommand).toBeUndefined();
+    }
+    expect(computeStableMessagesTimelineRows(project([completedWork]), completed).result).toBe(
+      completed.result,
+    );
+  });
+
+  it("shows the command on its message instead of a separate work row", () => {
+    expect(project([work]).some((row) => row.kind === "work")).toBe(false);
+  });
+
+  it("preserves failed output without a completed state", () => {
+    const rows = project([
+      {
+        ...work,
+        sourceActivityKind: "tool.completed",
+        toolLifecycleStatus: "failed",
+        detail: "Exit code: 1\nBuild failed",
+      },
+    ]);
+    expect(
+      rows.find((row) => row.kind === "message" && row.message.id === "bash-user"),
+    ).toMatchObject({ bashCommand: { status: "failed", output: "Exit code: 1\nBuild failed" } });
+  });
+});
