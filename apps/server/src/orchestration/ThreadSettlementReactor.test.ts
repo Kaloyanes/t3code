@@ -1595,6 +1595,11 @@ describe("storage cleanup", () => {
     "terminal-worktree",
     "recent",
     "merged",
+    "merged-event",
+    "merged-event-dirty",
+    "merged-event-diverged",
+    "merged-event-open",
+    "merged-event-project-off",
     "unmerged",
     "unchanged",
     "unchanged-two-worktrees",
@@ -1682,10 +1687,15 @@ describe("storage cleanup", () => {
           const deletionStopped = yield* Deferred.make<void>();
           if (protection !== "deleted-event") yield* Deferred.succeed(deletionStopped, undefined);
           const domainEvents = yield* PubSub.unbounded<OrchestrationEvent>();
+          const mergeEvent = yield* Deferred.make<PullRequestMergeEvent>();
+          const mergeConsumed = yield* Deferred.make<void>();
+          let mergeSubscribed = false;
+          let mergeConfirmed = false;
+          const mergeEventCase = protection.startsWith("merged-event");
           const deleteRule = protection.startsWith("deleted");
           let tombstoned = deleteRule && protection !== "deleted-event";
           const removals: string[] = [];
-          const mergeRule = protection === "merged" || protection === "unmerged";
+          const mergeRule = protection === "merged" || protection === "unmerged" || mergeEventCase;
           const unchangedRule =
             protection === "unchanged" ||
             protection === "unchanged-two-worktrees" ||
@@ -1700,7 +1710,9 @@ describe("storage cleanup", () => {
               ServerSettingsService.layerTest({
                 projectSettingsOverrides: {
                   [PROJECT_ID]:
-                    protection === "project-off" || protection === "deleted-project-off"
+                    protection === "project-off" ||
+                    protection === "deleted-project-off" ||
+                    protection === "merged-event-project-off"
                       ? { worktreeCleanup: { mode: "off" as const } }
                       : protection === "project-custom" || protection === "deleted-project-custom"
                         ? {
@@ -1844,9 +1856,23 @@ describe("storage cleanup", () => {
                   branchPullRequest: (_input, options) => {
                     assert.strictEqual(options?.refresh, true);
                     return Effect.succeed(
-                      makeBranchPullRequest(protection === "unmerged" ? "open" : "merged"),
+                      makeBranchPullRequest(
+                        protection === "unmerged" ||
+                          protection === "merged-event-open" ||
+                          (mergeEventCase && !mergeConfirmed)
+                          ? "open"
+                          : "merged",
+                      ),
                     );
                   },
+                }),
+                Layer.mock(PullRequestService)({
+                  subscribeMerges: Effect.sync(() => {
+                    mergeSubscribed = true;
+                    return Stream.fromEffect(Deferred.await(mergeEvent)).pipe(
+                      Stream.ensuring(Deferred.succeed(mergeConsumed, undefined)),
+                    );
+                  }),
                 }),
                 Layer.mock(OrchestrationEngineService)({
                   subscribeDomainEvents: PubSub.subscribe(domainEvents).pipe(
@@ -1912,7 +1938,9 @@ describe("storage cleanup", () => {
                       branch: cwd === secondWorktreePath ? "feature-two" : "feature",
                       upstreamRef: null,
                       hasWorkingTreeChanges:
-                        protection === "dirty" || protection === "deleted-dirty",
+                        protection === "dirty" ||
+                        protection === "deleted-dirty" ||
+                        protection === "merged-event-dirty",
                       workingTree: { files: [], insertions: 0, deletions: 0 },
                       hasUpstream: false,
                       aheadCount: 0,
@@ -1923,7 +1951,9 @@ describe("storage cleanup", () => {
                     Effect.succeed({
                       exitCode: ChildProcessSpawner.ExitCode(
                         input.operation === "StorageCleanup.integratedBranch" &&
-                          (protection === "diverged" || input.args.at(-1) !== "b".repeat(40))
+                          (protection === "diverged" ||
+                            protection === "merged-event-diverged" ||
+                            input.args.at(-1) !== "b".repeat(40))
                           ? 1
                           : 0,
                       ),
@@ -2008,6 +2038,19 @@ describe("storage cleanup", () => {
           yield* cleanup.start();
           yield* Deferred.await(snapshotRead);
           yield* cleanup.drain;
+          if (mergeEventCase) {
+            assert.strictEqual(yield* fs.exists(worktreePath), true);
+            assert.strictEqual(mergeSubscribed, true, "cleanup must observe confirmed merges");
+            mergeConfirmed = true;
+            yield* Deferred.succeed(mergeEvent, {
+              projectId: PROJECT_ID,
+              repository: "acme/web",
+              number: 1,
+              mergedAt: NOW,
+            });
+            yield* Deferred.await(mergeConsumed);
+            yield* cleanup.drain;
+          }
           if (protection === "deleted-event") {
             assert.strictEqual(yield* fs.exists(worktreePath), true);
             tombstoned = true;
@@ -2039,6 +2082,7 @@ describe("storage cleanup", () => {
             protection === "files-disabled" ||
             protection === "files-extended" ||
             protection === "merged" ||
+            protection === "merged-event" ||
             protection === "unchanged" ||
             protection === "unchanged-two-worktrees";
           assert.strictEqual(yield* fs.exists(worktreePath), !removed);
@@ -2050,7 +2094,16 @@ describe("storage cleanup", () => {
                 ? [worktreePath]
                 : [],
           );
-          assert.strictEqual(fetches, mergeRule || unchangedRule ? 1 : 0);
+          assert.strictEqual(
+            fetches,
+            protection === "merged-event-dirty" || protection === "merged-event-project-off"
+              ? 0
+              : mergeEventCase
+                ? 2
+                : mergeRule || unchangedRule
+                  ? 1
+                  : 0,
+          );
           assert.strictEqual(thread.worktreePath, worktreePath);
           assert.strictEqual(thread.branch, "feature");
           assert.strictEqual(yield* fs.exists(oldImage), protection.startsWith("files-"));

@@ -80,7 +80,8 @@ applies when the project and environment are both on **Inherit**.
 
 Open **Settings → Storage** to enable automatic cleanup on one machine or all connected
 environments. Policies are off by default and run on the server at startup, when changed, and
-hourly. Offline machines keep their existing policies.
+hourly. Merge cleanup also runs after a merge in T3 Code is confirmed. Offline machines keep
+their existing policies.
 
 Select a project to set **Automatic worktree cleanup** to **Inherit**, **Off**, or **Custom**.
 Inherit follows each machine's rules; Off keeps that project's worktrees until you remove them

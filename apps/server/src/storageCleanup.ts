@@ -29,6 +29,7 @@ import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSna
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ThreadDeletionReactor from "./orchestration/Services/ThreadDeletionReactor.ts";
 import * as ProviderService from "./provider/Services/ProviderService.ts";
+import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import { threadHasQueuedTurnStart } from "./orchestration/ThreadSettlementPolicy.ts";
 import { forkParked } from "./serverActivation.ts";
 import * as Settings from "./serverSettings.ts";
@@ -113,6 +114,7 @@ export const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
   const threadDeletion = yield* ThreadDeletionReactor.ThreadDeletionReactor;
   const providers = yield* ProviderService.ProviderService;
+  const pullRequests = yield* PullRequestService.PullRequestService;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const gitManager = yield* GitManager.GitManager;
   const terminals = yield* TerminalManager.TerminalManager;
@@ -453,6 +455,7 @@ export const make = Effect.gen(function* () {
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
     const changes = yield* settingsService.subscribeChanges;
     const events = yield* engine.subscribeDomainEvents;
+    const merges = yield* pullRequests.subscribeMerges;
     let lastSettings = yield* settingsService.getSettings.pipe(Effect.orDie);
     yield* forkParked(
       worker
@@ -474,6 +477,13 @@ export const make = Effect.gen(function* () {
         lastSettings = settings;
         return worker.enqueue(undefined);
       }),
+    );
+    yield* forkParked(
+      Stream.runForEach(merges, () =>
+        anyWorktreePolicy(lastSettings, (rules) => rules.worktreeOnMerge)
+          ? worker.enqueue(undefined)
+          : Effect.void,
+      ),
     );
     yield* forkParked(
       Stream.runForEach(events, (event) =>
