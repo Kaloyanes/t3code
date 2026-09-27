@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { indexComposerBashCommands } from "./composerBash.ts";
+import { indexComposerBashCommands, parseComposerBashOutput } from "./composerBash.ts";
 
 const activity = {
   toolCallId: "composer-bash:message-1",
@@ -57,5 +57,30 @@ describe("composer Bash message results", () => {
         },
       ]).size,
     ).toBe(0);
+  });
+});
+
+describe("parseComposerBashOutput", () => {
+  it("splits exit code, stdout and stderr", () => {
+    expect(parseComposerBashOutput("Exit code: 1\nstdout:\na\nb\nstderr:\nboom")).toEqual({
+      exitCode: "1",
+      stdout: "a\nb",
+      stderr: "boom",
+    });
+    expect(parseComposerBashOutput("Exit code: 2\nstderr:\nboom")).toEqual({
+      exitCode: "2",
+      stdout: "",
+      stderr: "boom",
+    });
+    expect(parseComposerBashOutput("Exit code: 0\n(no output)")).toEqual({
+      exitCode: "0",
+      stdout: "",
+      stderr: "",
+    });
+    expect(parseComposerBashOutput("Bash command timed out.")).toEqual({
+      exitCode: null,
+      stdout: "Bash command timed out.",
+      stderr: "",
+    });
   });
 });

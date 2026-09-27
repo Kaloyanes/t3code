@@ -267,12 +267,23 @@ export function ComposerSurface(props: {
         style={[props.style, animatedShapeStyle]}
       >
         {props.bashMode && (
-          <Text
-            accessibilityLiveRegion="polite"
-            className="px-3.5 pt-2 text-xs text-danger-foreground"
+          <Animated.View
+            entering={FadeIn.duration(180)}
+            exiting={FadeOut.duration(120)}
+            className="flex-row items-center gap-2 px-3.5 pt-2.5"
           >
-            Bash
-          </Text>
+            <View className="rounded-full border border-danger-border bg-danger px-2 py-0.5">
+              <Text
+                accessibilityLiveRegion="polite"
+                className="font-t3-medium text-xs text-danger-foreground"
+              >
+                Bash mode
+              </Text>
+            </View>
+            <Text numberOfLines={1} className="shrink text-xs text-foreground-secondary">
+              Output goes to the agent
+            </Text>
+          </Animated.View>
         )}
         {props.children}
       </Animated.View>

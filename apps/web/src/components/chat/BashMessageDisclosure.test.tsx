@@ -1,5 +1,5 @@
 import { act } from "react";
-import { create, type ReactTestRenderer } from "react-test-renderer";
+import { create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { BashMessageDisclosure } from "./BashMessageDisclosure";
 
@@ -23,54 +23,51 @@ describe("Bash message disclosure", () => {
     expect(renderer.root.findByType("p").children).toEqual(["!ls"]);
   });
 
-  it.each(["completed", "failed"] as const)(
-    "expands and collapses a %s command result",
-    async (status) => {
-      const output =
-        status === "completed" ? "Exit code: 0\nfile.txt" : "Exit code: 1\nBuild failed";
-      await act(() => {
-        renderer = create(
-          <BashMessageDisclosure command={{ status, output }}>
-            <p>!build</p>
-          </BashMessageDisclosure>,
-        );
-      });
-      const button = renderer.root.findByType("button");
-      expect(button.props["aria-expanded"]).toBe(false);
-      expect(renderer.root.findAllByType("pre")).toHaveLength(0);
-      await act(() => button.props.onClick());
-      expect(button.props["aria-expanded"]).toBe(true);
-      expect(renderer.root.findByType("pre").children).toEqual([output]);
-      expect(renderer.root.findByProps({ id: button.props["aria-controls"] }).props.hidden).toBe(
-        false,
-      );
-      await act(() => button.props.onClick());
-      expect(button.props["aria-expanded"]).toBe(false);
-      expect(renderer.root.findAllByType("pre")).toHaveLength(0);
-    },
-  );
+  const textOf = (node: ReactTestInstance | string): string =>
+    typeof node === "string" ? node : node.children.map(textOf).join("");
+  const resultText = () => textOf(renderer.root.findByType("pre"));
 
-  it("updates an open running command with the server result", async () => {
+  it("shows stdout and stderr inline and collapses on demand", async () => {
     await act(() => {
       renderer = create(
-        <BashMessageDisclosure command={{ status: "running", output: null }}>
-          !true
+        <BashMessageDisclosure
+          command={{ status: "failed", output: "Exit code: 1\nstdout:\nbuilding\nstderr:\nboom" }}
+        >
+          <p>!build</p>
         </BashMessageDisclosure>,
       );
     });
-    await act(() => renderer.root.findByType("button").props.onClick());
-    expect(renderer.root.findByType("pre").children).toEqual(["Running command…"]);
+    const button = renderer.root.findByType("button");
+    expect(button.props["aria-expanded"]).toBe(true);
+    expect(resultText()).toContain("building");
+    expect(resultText()).toContain("boom");
+    expect(resultText()).not.toContain("stdout:");
+    await act(() => button.props.onClick());
+    expect(button.props["aria-expanded"]).toBe(false);
+    expect(renderer.root.findByProps({ id: button.props["aria-controls"] }).props.inert).toBe(true);
+  });
+
+  it("updates a running command with the server result", async () => {
+    await act(() => {
+      renderer = create(
+        <BashMessageDisclosure command={{ status: "running", output: null }}>
+          !ls
+        </BashMessageDisclosure>,
+      );
+    });
+    expect(renderer.root.findByType("p").children).toEqual(["Running command…"]);
     await act(() =>
       renderer.update(
         <BashMessageDisclosure
-          command={{ status: "completed", output: "Exit code: 0\n(no output)" }}
+          command={{ status: "completed", output: "Exit code: 0\nstdout:\nfile.txt" }}
         >
-          !true
+          !ls
         </BashMessageDisclosure>,
       ),
     );
-    expect(renderer.root.findByType("button").props["aria-expanded"]).toBe(true);
-    expect(renderer.root.findByType("pre").children).toEqual(["Exit code: 0\n(no output)"]);
-    expect(renderer.root.findByProps({ role: "status" }).children).toEqual(["Bash · Completed"]);
+    expect(resultText()).toContain("file.txt");
+    expect(renderer.root.findByProps({ role: "status" }).props["aria-label"]).toBe(
+      "Bash · Completed",
+    );
   });
 });

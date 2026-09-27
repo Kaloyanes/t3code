@@ -953,6 +953,7 @@ import {
   ShieldIcon,
   WandSparklesIcon,
   XIcon,
+  TerminalIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
 import { hasProviderSetup } from "./ProviderStatusBanner";
@@ -6581,12 +6582,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           />
         ) : null}
       </ComposerBanner.Dock>
-      <div
-        className={cn(
-          "relative rounded-3xl",
-          isBashMode && "shadow-composer-bash shadow-destructive/25",
-        )}
-      >
+      <div className="relative rounded-3xl">
+        {/* One-shot fade/scale on opacity+transform only, so the glow never repaints while idle. */}
+        <span
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute inset-0 rounded-3xl shadow-composer-bash shadow-destructive/35 ring-1 ring-destructive/30 opacity-0 scale-[0.98] transition-[opacity,transform] duration-300 ease-drawer motion-reduce:scale-100",
+            isBashMode && "opacity-100 scale-100",
+          )}
+        />
         <span
           aria-hidden="true"
           className={cn(
@@ -6610,8 +6614,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             )}
           >
             {isBashMode && (
-              <div role="status" className="px-4 pt-2 text-xs text-destructive">
-                Bash
+              <div
+                role="status"
+                className="flex items-center gap-2 px-4 pt-2.5 text-xs transition-[opacity,translate] duration-200 ease-drawer starting:-translate-y-1 starting:opacity-0 motion-reduce:starting:translate-y-0"
+              >
+                <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 font-medium text-destructive">
+                  <TerminalIcon className="size-3" aria-hidden="true" />
+                  Bash mode
+                </span>
+                <span className="truncate text-muted-foreground">
+                  Runs in the workspace, output goes to the agent
+                </span>
               </div>
             )}
             {showCollapsedMobilePromptRow ? (

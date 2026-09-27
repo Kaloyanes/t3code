@@ -1,5 +1,6 @@
 import {
   indexComposerBashCommands,
+  isComposerBashEntry,
   type ComposerBashCommand,
 } from "@t3tools/client-runtime/composer-bash";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
@@ -984,6 +985,14 @@ export function deriveMessagesTimelineRows(input: {
   const bashCommands = indexComposerBashCommands(
     input.timelineEntries.flatMap((entry) => (entry.kind === "work" ? [entry.entry] : [])),
   );
+  if (bashCommands.size > 0) {
+    input = {
+      ...input,
+      timelineEntries: input.timelineEntries.filter(
+        (entry) => entry.kind !== "work" || !isComposerBashEntry(entry.entry),
+      ),
+    };
+  }
   const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>();
   for (const summary of input.turnDiffSummaries) {
     if (summary.assistantMessageId) {

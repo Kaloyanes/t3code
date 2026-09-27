@@ -1623,8 +1623,8 @@ function renderFeedEntry(
             <BashMessageDisclosure
               command={entry.bashCommand}
               chevronColor={iconSubtleColor}
-              expanded={Boolean(props.expandedWorkRows[`bash:${message.id}`])}
-              onToggle={() => props.onToggleWorkRow(`bash:${message.id}`, entry.id)}
+              expanded={!props.expandedWorkRows[`bash-collapsed:${message.id}`]}
+              onToggle={() => props.onToggleWorkRow(`bash-collapsed:${message.id}`, entry.id)}
             >
               {message.text.trim().length > 0 ? (
                 <MarkdownImageAvailableWidthContext

@@ -1,5 +1,6 @@
 import {
   indexComposerBashCommands,
+  isComposerBashEntry,
   type ComposerBashCommand,
 } from "@t3tools/client-runtime/composer-bash";
 import * as Option from "effect/Option";
@@ -578,6 +579,12 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (!entry.detail && (activity.kind === "runtime.error" || activity.kind === "runtime.warning")) {
     const message = asTrimmedString(payload?.message);
     if (message) entry.detail = message;
+  }
+  // Composer Bash output is shown whole on its message. The client projection
+  // trims `data.rawOutput` to one line, so read the untrimmed `detail`.
+  const composerBashOutput = payload?.detail;
+  if (toolCallId?.startsWith("composer-bash:") && typeof composerBashOutput === "string") {
+    entry.detail = composerBashOutput;
   }
   if (viewedImagePath) {
     entry.viewedImagePath = viewedImagePath;
@@ -2461,7 +2468,7 @@ export function buildThreadFeed(
           }
           return entry;
         }),
-      ...activityEntries,
+      ...activityEntries.filter((entry) => !isComposerBashEntry(entry.activity.workEntry)),
     ],
     (s) => new Date(s.createdAt),
     Order.Date,

@@ -306,7 +306,10 @@ describe("MessagesTimeline", () => {
       });
       const bashStatuses = () =>
         renderer!.root.findAll(
-          (node) => node.props.role === "status" && String(node.children[0]).startsWith("Bash ·"),
+          (node) =>
+            node.type === "span" &&
+            node.props.role === "status" &&
+            String(node.props["aria-label"]).startsWith("Bash ·"),
         );
       const glows = () =>
         renderer!.root.findAll(
@@ -352,15 +355,19 @@ describe("MessagesTimeline", () => {
         expect(bashStatuses()).toHaveLength(1);
         expect(glows()).toHaveLength(0);
         const disclosure = bashStatuses()[0]!.parent!;
-        if (status === "inProgress") await act(() => disclosure.props.onClick());
         expect(disclosure.props["aria-expanded"]).toBe(true);
-        expect(
-          renderer!.root.findByProps({ "aria-label": "Bash command result" }).children,
-        ).toEqual([detail ?? "Running command…"]);
+        const shown = JSON.stringify(
+          renderer!.root
+            .findByProps({ id: disclosure.props["aria-controls"] })
+            .findAll(() => true)
+            .flatMap((node) => node.children.filter((child) => typeof child === "string")),
+        );
+        expect(shown).toContain(detail ? detail.split("\n")[1]! : "Running command…");
       }
-      await act(() => bashStatuses()[0]!.parent!.props.onClick());
-      expect(renderer!.root.findAllByProps({ "aria-label": "Bash command result" })).toHaveLength(
-        0,
+      const toggle = bashStatuses()[0]!.parent!;
+      await act(() => toggle.props.onClick());
+      expect(renderer!.root.findByProps({ id: toggle.props["aria-controls"] }).props.inert).toBe(
+        true,
       );
     } finally {
       await act(() => renderer?.unmount());

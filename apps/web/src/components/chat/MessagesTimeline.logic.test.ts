@@ -3977,6 +3977,10 @@ describe("composer Bash message projection", () => {
     );
   });
 
+  it("shows the command on its message instead of a separate work row", () => {
+    expect(project([work]).some((row) => row.kind === "work")).toBe(false);
+  });
+
   it("preserves failed output without a completed state", () => {
     const rows = project([
       {
