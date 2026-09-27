@@ -171,6 +171,8 @@ describe("ProviderCommandReactor", () => {
 
   async function createHarness(input?: {
     readonly baseDir?: string;
+    readonly workspaceRoot?: string;
+    readonly onTurnSent?: () => Effect.Effect<void>;
     readonly initialTitle?: string;
     readonly deferReactorStart?: boolean;
     readonly threadModelSelection?: ModelSelection;
@@ -274,7 +276,7 @@ describe("ProviderCommandReactor", () => {
       Effect.succeed({
         threadId: ThreadId.make("thread-1"),
         turnId: asTurnId("turn-1"),
-      }),
+      }).pipe(Effect.tap(() => input?.onTurnSent?.() ?? Effect.void)),
     );
     const compactThread = vi.fn((_: ThreadId) => input?.compactThreadEffect?.() ?? Effect.void);
     const interruptTurn = vi.fn((_: unknown) => input?.interruptTurnEffect?.() ?? Effect.void);
@@ -525,7 +527,7 @@ describe("ProviderCommandReactor", () => {
         commandId: CommandId.make("cmd-project-create"),
         projectId: asProjectId("project-1"),
         title: "Provider Project",
-        workspaceRoot: "/tmp/provider-project",
+        workspaceRoot: input?.workspaceRoot ?? "/tmp/provider-project",
         defaultModelSelection: modelSelection,
         createdAt: now,
       }),
@@ -1023,6 +1025,126 @@ describe("ProviderCommandReactor", () => {
     }),
   );
 
+  effectIt.effect.each(["project", "worktree"])(
+    "runs a composer command once in the %s and sends failure output as context",
+    (workspace) =>
+      Effect.gen(function* () {
+        const sent = yield* Deferred.make<void>();
+        const workspaceRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-bash-"));
+        createdBaseDirs.add(workspaceRoot);
+        const harness = yield* Effect.promise(() =>
+          createHarness({
+            workspaceRoot,
+            onTurnSent: () => Deferred.succeed(sent, undefined).pipe(Effect.asVoid),
+          }),
+        );
+        const cwd =
+          workspace === "worktree" ? NodePath.join(workspaceRoot, "checkout") : workspaceRoot;
+        if (workspace === "worktree") {
+          NodeFS.mkdirSync(cwd);
+          yield* harness.engine.dispatch({
+            type: "thread.meta.update",
+            commandId: CommandId.make("cmd-bash-worktree"),
+            threadId: ThreadId.make("thread-1"),
+            worktreePath: cwd,
+          });
+        }
+        const command = {
+          type: "thread.turn.start" as const,
+          commandId: CommandId.make("cmd-bash"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("bash-message"),
+            role: "user" as const,
+            text: "!printf x >> count; printf 'failed build' >&2; exit 2",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required" as const,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        };
+        yield* harness.engine.dispatch(command);
+        yield* Deferred.await(sent);
+        yield* harness.engine.dispatch(command);
+        yield* Effect.promise(() => harness.drain());
+        expect(NodeFS.readFileSync(NodePath.join(cwd, "count"), "utf8")).toBe("x");
+        expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+        expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+          input: expect.stringContaining("Exit code: 2"),
+        });
+        expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+          input: expect.stringContaining("failed build"),
+        });
+        const snapshot = yield* Effect.promise(() => harness.readModel());
+        const activities = snapshot.threads[0]?.activities ?? [];
+        expect(activities).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ kind: "tool.updated", summary: "Running Bash command" }),
+            expect.objectContaining({
+              kind: "tool.completed",
+              tone: "error",
+              payload: expect.objectContaining({ detail: expect.stringContaining("failed build") }),
+            }),
+          ]),
+        );
+      }),
+  );
+
+  effectIt.effect("cancels a composer command without sending it to the provider", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() =>
+        createHarness({ workspaceRoot: NodeOS.tmpdir() }),
+      );
+      const running = yield* Deferred.make<void>();
+      const canceled = yield* Deferred.make<void>();
+      const events = yield* harness.engine.subscribeDomainEvents;
+      yield* Stream.runForEach(events, (event) => {
+        if (event.type !== "thread.activity-appended") return Effect.void;
+        const activity = event.payload.activity;
+        if (activity.summary === "Running Bash command")
+          return Deferred.succeed(running, undefined);
+        if (activity.kind === "provider.turn.start.failed")
+          return Deferred.succeed(canceled, undefined);
+        return Effect.void;
+      }).pipe(Effect.forkScoped);
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-bash-cancel-start"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("bash-cancel-message"),
+          role: "user",
+          text: "!sleep 60",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      yield* Deferred.await(running);
+      yield* harness.engine.dispatch({
+        type: "thread.turn.interrupt",
+        commandId: CommandId.make("cmd-bash-cancel"),
+        threadId: ThreadId.make("thread-1"),
+        createdAt: "2026-01-01T00:00:01.000Z",
+      });
+      yield* Deferred.await(canceled);
+      yield* Effect.promise(() => harness.drain());
+      expect(harness.sendTurn).not.toHaveBeenCalled();
+      expect(yield* Effect.promise(() => harness.readPendingTurnStarts())).toEqual([]);
+      const snapshot = yield* Effect.promise(() => harness.readModel());
+      expect(snapshot.threads[0]?.session?.status).toBe("ready");
+      expect(snapshot.threads[0]?.activities).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "tool.completed",
+            payload: expect.objectContaining({ detail: "Bash command canceled." }),
+          }),
+        ]),
+      );
+    }),
+  );
+
   it("reacts to thread.turn.start by ensuring session and sending provider turn", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
@@ -1046,6 +1168,7 @@ describe("ProviderCommandReactor", () => {
 
     await waitFor(() => harness.startSession.mock.calls.length === 1);
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({ input: "hello reactor" });
     expect(harness.startSession.mock.calls[0]?.[0]).toEqual(ThreadId.make("thread-1"));
     expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
       cwd: "/tmp/provider-project",

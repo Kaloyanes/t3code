@@ -20,6 +20,7 @@ import * as Stream from "effect/Stream";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
   AuthAccessStreamError,
+  AuthTerminalOperateScope,
   AutomationOperationError,
   type AuthAccessStreamEvent,
   type AuthEnvironmentScope,
@@ -195,6 +196,7 @@ import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
+const isEnvironmentAuthorizationError = Schema.is(EnvironmentAuthorizationError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
@@ -1994,6 +1996,12 @@ const makeWsRpcLayer = (
             Effect.gen(function* () {
               yield* ProjectCloneTracker.rejectCommandsDuringClone(projectCloneTracker, command);
               const normalizedCommand = yield* normalizeDispatchCommand(command);
+              if (
+                normalizedCommand.type === "thread.turn.start" &&
+                normalizedCommand.message.text.startsWith("!")
+              ) {
+                yield* authorizeEffect(AuthTerminalOperateScope, Effect.void);
+              }
               if (normalizedCommand.type === "project.delete") {
                 yield* worktreeRuns.stopProject(normalizedCommand.projectId);
               }
@@ -2068,7 +2076,7 @@ const makeWsRpcLayer = (
               return result;
             }).pipe(
               Effect.mapError((cause) =>
-                isOrchestrationDispatchCommandError(cause)
+                isEnvironmentAuthorizationError(cause) || isOrchestrationDispatchCommandError(cause)
                   ? cause
                   : new OrchestrationDispatchCommandError({
                       message: "Failed to dispatch orchestration command",
