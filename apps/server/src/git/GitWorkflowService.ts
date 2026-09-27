@@ -1,5 +1,6 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 
 import {
@@ -156,6 +157,7 @@ export const make = Effect.gen(function* () {
   const registry = yield* VcsDriverRegistry.VcsDriverRegistry;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const gitManager = yield* GitManager.GitManager;
+  const fs = yield* FileSystem.FileSystem;
 
   const ensureGit = Effect.fn("GitWorkflowService.ensureGit")(function* (
     operation: string,
@@ -300,7 +302,12 @@ export const make = Effect.gen(function* () {
     status: (input) =>
       detectGitRepositoryForStatus("GitWorkflowService.status", input.cwd).pipe(
         Effect.flatMap((isGitRepository) =>
-          isGitRepository ? gitManager.status(input) : Effect.succeed(nonRepositoryStatus()),
+          isGitRepository
+            ? gitManager.status(input)
+            : fs.exists(input.cwd).pipe(
+                Effect.orElseSucceed(() => true),
+                Effect.map((pathExists) => ({ ...nonRepositoryStatus(), pathExists })),
+              ),
         ),
       ),
     localStatus: (input) =>
@@ -308,7 +315,10 @@ export const make = Effect.gen(function* () {
         Effect.flatMap((isGitRepository) =>
           isGitRepository
             ? gitManager.localStatus(input)
-            : Effect.succeed(nonRepositoryLocalStatus()),
+            : fs.exists(input.cwd).pipe(
+                Effect.orElseSucceed(() => true),
+                Effect.map((pathExists) => ({ ...nonRepositoryLocalStatus(), pathExists })),
+              ),
         ),
       ),
     remoteStatus: (input, options) =>

@@ -28,4 +28,13 @@ describe("worktree deletion preflight", () => {
     expect(worktreeDeletionPreflightReason(cleanStatus, null)).toBeNull();
     expect(worktreeDeletionPreflightReason(null, "Connection lost")).toContain("Connection lost");
   });
+
+  it("allows removing an already deleted worktree path", () => {
+    expect(
+      worktreeDeletionPreflightReason({ ...cleanStatus, isRepo: false, pathExists: false }, null),
+    ).toBeNull();
+    expect(
+      worktreeDeletionPreflightReason({ ...cleanStatus, isRepo: false, pathExists: true }, null),
+    ).toContain("no longer a Git worktree");
+  });
 });

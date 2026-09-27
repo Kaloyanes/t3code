@@ -1,4 +1,5 @@
 import { assert, describe, expect, it, vi } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -22,6 +23,7 @@ function makeLayer(input: {
     ),
     Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
     Layer.provide(Layer.mock(GitManager.GitManager)({})),
+    Layer.provide(NodeServices.layer),
   );
 }
 
@@ -71,7 +73,10 @@ describe("GitWorkflowService", () => {
           insertions: 0,
           deletions: 0,
         },
+        pathExists: false,
       });
+      const existingPath = yield* workflow.localStatus({ cwd: process.cwd() });
+      assert.equal(existingPath.pathExists, true);
     }).pipe(
       Effect.provide(
         makeLayer({
@@ -102,6 +107,7 @@ describe("GitWorkflowService", () => {
         behindCount: 0,
         aheadOfDefaultCount: 0,
         pr: null,
+        pathExists: false,
       });
     }).pipe(
       Effect.provide(
@@ -131,6 +137,7 @@ describe("GitWorkflowService", () => {
           status,
         }),
       ),
+      Layer.provide(NodeServices.layer),
     );
 
     return Effect.gen(function* () {
