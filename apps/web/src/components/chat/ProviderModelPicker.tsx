@@ -5,9 +5,9 @@ import {
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { VariantProps } from "class-variance-authority";
 
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
@@ -67,6 +67,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
   const size = props.size ?? "sm";
+  const Trigger = props.triggerVariant ? Button : ComposerControl;
 
   // Resolve the active instance entry by exact routing key. The composer
   // resolves fallbacks before rendering this component; if the selected
@@ -209,11 +210,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     >
       <PopoverTrigger
         render={
-          <ComposerControl
+          <Trigger
             aria-label={props.triggerAriaLabel ?? allModelNames}
             aria-busy={props.triggerAriaBusy}
-
             size={size}
+            {...(props.triggerVariant ? { variant: props.triggerVariant } : {})}
             data-chat-provider-model-picker="true"
             data-toolbar-control={props.isToolbarControl ? "" : undefined}
             className={cn(
