@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./composer-bash": {
+      "types": "./src/composerBash.ts",
+      "default": "./src/composerBash.ts"
+    },
     "./device/stream": {
       "types": "./src/device/stream.ts",
       "default": "./src/device/stream.ts"

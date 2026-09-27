@@ -1,4 +1,5 @@
 import { ArrowUpIcon, ClockIcon } from "lucide-react";
+import { BashMessageDisclosure } from "./BashMessageDisclosure";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
 import {
@@ -2109,7 +2110,12 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+      <div
+        className={cn(
+          "relative min-w-0 max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground",
+          row.bashCommand?.status === "completed" && "shadow-2xl shadow-destructive/20",
+        )}
+      >
         <MessageAuthorHeading>You</MessageAuthorHeading>
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[210px] grid-cols-2 gap-2">
@@ -2213,14 +2219,16 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             ))}
           </div>
         ) : null}
-        <div onCopyCapture={onBodyCopyCapture}>
-          <CollapsibleUserMessageBody
-            text={resolvedContext.text}
-            renderContextReference={renderContextReference}
-            skills={ctx.skills}
-            markdownCwd={ctx.markdownCwd}
-          />
-        </div>
+        <BashMessageDisclosure command={row.bashCommand}>
+          <div onCopyCapture={onBodyCopyCapture}>
+            <CollapsibleUserMessageBody
+              text={resolvedContext.text}
+              renderContextReference={renderContextReference}
+              skills={ctx.skills}
+              markdownCwd={ctx.markdownCwd}
+            />
+          </div>
+        </BashMessageDisclosure>
       </div>
       <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover:opacity-100">
         <div className="flex shrink-0 items-center gap-2">

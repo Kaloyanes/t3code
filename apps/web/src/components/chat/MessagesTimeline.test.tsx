@@ -285,6 +285,89 @@ function buildSnapShotTimelineEntry(previewUrl?: string) {
 }
 
 describe("MessagesTimeline", () => {
+  it("opens the result from its Bash message and marks only successful commands", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const message = buildUserTimelineEntry("!ls");
+    const ordinary = {
+      ...buildUserTimelineEntry("Explain this"),
+      id: "ordinary-entry",
+      message: {
+        ...buildUserTimelineEntry("Explain this").message,
+        id: MessageId.make("ordinary-message"),
+      },
+    };
+    const props = buildProps();
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(() => {
+        renderer = create(<MessagesTimeline {...props} timelineEntries={[message, ordinary]} />);
+      });
+      const bashStatuses = () =>
+        renderer!.root.findAll(
+          (node) => node.props.role === "status" && String(node.children[0]).startsWith("Bash ·"),
+        );
+      const glows = () =>
+        renderer!.root.findAll(
+          (node) =>
+            node.type === "div" && String(node.props.className).includes("shadow-destructive/20"),
+        );
+      expect(bashStatuses()).toHaveLength(0);
+      expect(glows()).toHaveLength(0);
+      for (const status of ["inProgress", "completed", "failed"] as const) {
+        const detail =
+          status === "inProgress"
+            ? undefined
+            : status === "completed"
+              ? "Exit code: 0\nfile.txt"
+              : "Exit code: 1\nBuild failed";
+        await act(() =>
+          renderer!.update(
+            <MessagesTimeline
+              {...props}
+              timelineEntries={[
+                message,
+                ordinary,
+                {
+                  id: "bash-activity",
+                  kind: "work",
+                  createdAt: MESSAGE_CREATED_AT,
+                  entry: {
+                    id: "bash-work",
+                    createdAt: MESSAGE_CREATED_AT,
+                    label: "Bash command",
+                    tone: "tool",
+                    itemType: "command_execution",
+                    toolCallId: "composer-bash:message-1",
+                    sourceActivityKind: status === "inProgress" ? "tool.updated" : "tool.completed",
+                    toolLifecycleStatus: status,
+                    ...(detail ? { detail } : {}),
+                  },
+                },
+              ]}
+            />,
+          ),
+        );
+        expect(bashStatuses()).toHaveLength(1);
+        expect(glows()).toHaveLength(status === "completed" ? 1 : 0);
+        const disclosure = bashStatuses()[0]!.parent!;
+        if (status === "inProgress") await act(() => disclosure.props.onClick());
+        expect(disclosure.props["aria-expanded"]).toBe(true);
+        expect(
+          renderer!.root.findByProps({ "aria-label": "Bash command result" }).children,
+        ).toEqual([detail ?? "Running command…"]);
+      }
+      await act(() => bashStatuses()[0]!.parent!.props.onClick());
+      expect(renderer!.root.findAllByProps({ "aria-label": "Bash command result" })).toHaveLength(
+        0,
+      );
+    } finally {
+      await act(() => renderer?.unmount());
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("renders previous and next controls with the minimap", () => {
     const first = buildUserTimelineEntry("First turn");
     const secondBase = buildUserTimelineEntry("Second turn");
