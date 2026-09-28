@@ -222,6 +222,11 @@ describe("ProjectScriptsControl", () => {
 
     expect(renderer.root.findAllByProps({ "data-changing-state": "build:idle" })).toHaveLength(0);
     expect(renderer.root.findByProps({ "data-changing-state": "build:starting" })).toBeDefined();
-    expect(renderer.root.findAllByProps({ className: "changing-icon-content" })).toHaveLength(1);
+    expect(
+      renderer.root
+        .findByProps({ "data-changing-state": "build:starting" })
+        .findAllByType("span")
+        .filter((node) => node.props["data-icon"] === "loader"),
+    ).toHaveLength(1);
   });
 });

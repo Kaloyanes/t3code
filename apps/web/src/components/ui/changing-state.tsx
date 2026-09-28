@@ -6,7 +6,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type CSSProperties,
   type ElementType,
   type ReactNode,
   type RefCallback,
@@ -17,7 +16,6 @@ import { useUiAnimationSettings } from "../../uiAnimations";
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-type ChangingStateStyle = CSSProperties & { "--changing-state-duration": string };
 interface AnimatedTextValue {
   readonly changeKey: string;
   readonly value: string;
@@ -49,10 +47,6 @@ export const AnimatedText = memo(function AnimatedText({
       previous: active ? transition.current : null,
     });
   }
-  const style = {
-    "--changing-state-duration": `${durationMs}ms`,
-  } as ChangingStateStyle;
-
   const letters = active && transition.previous ? Array.from(graphemes.segment(value)) : [];
   // Keep joined scripts shaped as a run and bound the number of animated elements.
   const parts =
@@ -68,7 +62,7 @@ export const AnimatedText = memo(function AnimatedText({
     <Component className={cn("changing-text", className)}>
       <span className="sr-only select-none">{value}</span>
       {active && transition.previous ? (
-        <span
+        <motion.span
           key={JSON.stringify([
             transition.previous.changeKey,
             transition.previous.value,
@@ -77,23 +71,23 @@ export const AnimatedText = memo(function AnimatedText({
           aria-hidden="true"
           className="changing-text-content changing-text-exit"
           data-changing-text="outgoing"
-          onAnimationEnd={(event) => {
-            if (event.target !== event.currentTarget) return;
+          initial={{ opacity: 1, filter: "blur(0px)", transform: "translateY(0px)" }}
+          animate={{ opacity: 0, filter: "blur(2px)", transform: "translateY(-3px)" }}
+          transition={{ type: "tween", duration: durationMs / 1000, ease: "easeIn" }}
+          onAnimationComplete={() => {
             setTransition((current) =>
               current.previous === transition.previous ? { ...current, previous: null } : current,
             );
           }}
-          style={style}
         >
           {transition.previous.value}
-        </span>
+        </motion.span>
       ) : null}
       <span
         key={JSON.stringify([transition.current.changeKey, transition.current.value])}
         aria-hidden="true"
         className="changing-text-content"
         data-changing-text="incoming"
-        style={style}
       >
         {active && transition.previous
           ? parts.map(({ segment, index: offset }, index) => (
@@ -103,6 +97,7 @@ export const AnimatedText = memo(function AnimatedText({
                 initial={{ opacity: 0, filter: "blur(2px)", transform: "translateY(3px)" }}
                 animate={{ opacity: 1, filter: "blur(0px)", transform: "translateY(0px)" }}
                 transition={{
+                  type: "tween",
                   duration: (durationMs - staggerMs) / 1000,
                   delay: (staggerMs * index) / Math.max(1, parts.length - 1) / 1000,
                   ease: [0.23, 1, 0.32, 1],
@@ -128,16 +123,25 @@ export const AnimatedIcon = memo(function AnimatedIcon({
 }) {
   const { active, durationMs } = useUiAnimationSettings();
   const [state, setState] = useState({ key: stateKey, changed: false });
-  if (state.key !== stateKey) setState({ key: stateKey, changed: true });
-  const style = {
-    "--changing-state-duration": `${durationMs}ms`,
-  } as ChangingStateStyle;
+  if (state.key !== stateKey || (!active && state.changed)) {
+    setState({ key: stateKey, changed: active });
+  }
 
   return (
-    <span className={cn("changing-icon", className)} data-changing-state={stateKey} style={style}>
-      <span key={stateKey} className={cn(active && state.changed && "changing-icon-content")}>
-        {children}
-      </span>
+    <span className={cn("changing-icon", className)} data-changing-state={stateKey}>
+      {active && state.changed ? (
+        <motion.span
+          key={stateKey}
+          className="changing-icon-content"
+          initial={{ opacity: 0, filter: "blur(2px)", transform: "translateY(2px) scale(0.92)" }}
+          animate={{ opacity: 1, filter: "blur(0px)", transform: "translateY(0px) scale(1)" }}
+          transition={{ type: "tween", duration: durationMs / 1000, ease: [0.23, 1, 0.32, 1] }}
+        >
+          {children}
+        </motion.span>
+      ) : (
+        <span className="changing-icon-content">{children}</span>
+      )}
     </span>
   );
 });

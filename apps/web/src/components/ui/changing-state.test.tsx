@@ -23,8 +23,7 @@ function renderText(value: string, changeKey = "thread") {
   });
 }
 function finishExit(outgoing = renderer.root.findByProps({ "data-changing-text": "outgoing" })) {
-  const target = {};
-  act(() => outgoing.props.onAnimationEnd({ target, currentTarget: target }));
+  act(() => outgoing.props.onAnimationComplete());
 }
 function visibleLetters() {
   return renderer.root
@@ -38,9 +37,9 @@ describe("changing-state motion", () => {
     renderText("First thread");
     expect(visibleLetters()).toEqual([]);
     renderText("Second thread");
-    expect(renderer.root.findByProps({ "data-changing-text": "outgoing" }).children).toEqual([
+    expect(renderer.root.findByProps({ "data-changing-text": "outgoing" }).props.children).toBe(
       "First thread",
-    ]);
+    );
     expect(visibleLetters().join("")).toBe("Second thread");
     finishExit();
     expect(renderer.root.findAllByProps({ "data-changing-text": "outgoing" })).toHaveLength(0);
@@ -54,13 +53,12 @@ describe("changing-state motion", () => {
     renderText("First", "1");
     renderText("Second", "2");
     const staleExit = renderer.root.findByProps({ "data-changing-text": "outgoing" }).props
-      .onAnimationEnd;
+      .onAnimationComplete;
     renderText("Third", "3");
-    const target = {};
-    act(() => staleExit({ target, currentTarget: target }));
-    expect(renderer.root.findByProps({ "data-changing-text": "outgoing" }).children).toEqual([
+    act(() => staleExit());
+    expect(renderer.root.findByProps({ "data-changing-text": "outgoing" }).props.children).toBe(
       "Second",
-    ]);
+    );
     expect(visibleLetters().join("")).toBe("Third");
     finishExit();
     expect(renderer.root.findAllByProps({ "data-changing-text": "outgoing" })).toHaveLength(0);
