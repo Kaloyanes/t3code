@@ -17,11 +17,16 @@ export function WorktreeIssueDecisions(props: {
   if (issues.length === 0) return null;
   return (
     <div className="space-y-3 text-sm">
-      <p>Issue links and thread history will be kept.</p>
+      <p className="text-muted-foreground">Issue links and thread history will be kept.</p>
       {issues.map((issue) => {
         const key = worktreeIssueKey(issue);
         const label = `${issue.repository}#${issue.number}`;
         if (issue.state === "closed") return <p key={key}>{label} is closed.</p>;
+        const actions = [
+          { value: "keep-open", label: issue.state === null ? "Leave unchanged" : "Keep open" },
+          { value: "completed", label: "Close as completed" },
+          { value: "not-planned", label: "Close as not planned" },
+        ];
         return (
           <div key={key} className="space-y-1">
             <p>
@@ -31,6 +36,7 @@ export function WorktreeIssueDecisions(props: {
                 : " is open."}
             </p>
             <Select<IssueWorktreeDeleteDecision["action"]>
+              items={actions}
               value={
                 props.decisions.find((item) => worktreeIssueKey(item) === key)?.action ??
                 "keep-open"
@@ -48,11 +54,11 @@ export function WorktreeIssueDecisions(props: {
                 <SelectValue />
               </SelectTrigger>
               <SelectPopup>
-                <SelectItem value="keep-open">
-                  {issue.state === null ? "Leave unchanged" : "Keep open"}
-                </SelectItem>
-                <SelectItem value="completed">Close as completed</SelectItem>
-                <SelectItem value="not-planned">Close as not planned</SelectItem>
+                {actions.map((action) => (
+                  <SelectItem key={action.value} value={action.value}>
+                    {action.label}
+                  </SelectItem>
+                ))}
               </SelectPopup>
             </Select>
           </div>

@@ -110,12 +110,14 @@ function WorktreeDeleteDialogContent(props: {
             {reason ? <span className="mt-2 block">{reason}</span> : null}
           </AlertDialogDescription>
         </AlertDialogHeader>
-        {issueCheck ? (
-          <WorktreeIssueDecisions
-            issues={issueCheck.issues ?? []}
-            decisions={decisions}
-            onChange={setDecisions}
-          />
+        {issueCheck?.issues?.length ? (
+          <div className="px-6 pb-6">
+            <WorktreeIssueDecisions
+              issues={issueCheck.issues}
+              decisions={decisions}
+              onChange={setDecisions}
+            />
+          </div>
         ) : null}
         <AlertDialogFooter>
           <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
