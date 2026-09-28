@@ -62,7 +62,7 @@ import {
   THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
 } from "./chat/threadDetailsPanelStyles";
-import { AnimatedIcon, useAnimatedLayout } from "./ui/changing-state";
+import { AnimatedText, AnimatedIcon, useAnimatedLayout } from "./ui/changing-state";
 
 export type { NewProjectScriptInput, ProjectScriptActionResult };
 
@@ -392,7 +392,7 @@ export default function ProjectScriptsControl({
                   isPanel && cn("not-sr-only ml-0 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS),
                 )}
               >
-                {primaryScript.name}
+                <AnimatedText value={primaryScript.name} />
               </span>
             </TooltipTrigger>
             <TooltipPopup side="top">

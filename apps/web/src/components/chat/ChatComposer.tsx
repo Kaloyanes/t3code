@@ -1,5 +1,6 @@
 import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
+import { AnimatedText, AnimatedIcon } from "../ui/changing-state";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { runtimeModeConfig, runtimeModeOptions as runtimeModes } from "./runtimeModeConfig";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
@@ -1311,21 +1312,23 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             />
           }
         >
-          {props.interactionMode === "plan" ? (
-            <ComposerControlIcon
-              icon={PencilRulerIcon}
-              size={size}
-              className="text-current opacity-100"
-            />
-          ) : (
-            <ComposerControlIcon
-              icon={BotIcon}
-              size={size}
-              opticalSize={size === "xs" ? "default" : "large"}
-            />
-          )}
+          <AnimatedIcon stateKey={props.interactionMode}>
+            {props.interactionMode === "plan" ? (
+              <ComposerControlIcon
+                icon={PencilRulerIcon}
+                size={size}
+                className="text-current opacity-100"
+              />
+            ) : (
+              <ComposerControlIcon
+                icon={BotIcon}
+                size={size}
+                opticalSize={size === "xs" ? "default" : "large"}
+              />
+            )}
+          </AnimatedIcon>
           <span data-composer-control-label className="sr-only sm:not-sr-only">
-            {props.interactionMode === "plan" ? "Plan" : "Build"}
+            <AnimatedText value={props.interactionMode === "plan" ? "Plan" : "Build"} />
           </span>
         </TooltipTrigger>
         <TooltipPopup side="top">{interactionModeTooltip}</TooltipPopup>
@@ -1353,8 +1356,12 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
               />
             }
           >
-            <ComposerControlIcon icon={RuntimeModeIcon} size={size} />
-            <SelectValue data-composer-control-label>{runtimeModeOption.label}</SelectValue>
+            <AnimatedIcon stateKey={props.runtimeMode}>
+              <ComposerControlIcon icon={RuntimeModeIcon} size={size} />
+            </AnimatedIcon>
+            <SelectValue data-composer-control-label>
+              <AnimatedText value={runtimeModeOption.label} />
+            </SelectValue>
           </TooltipTrigger>
           <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
             {props.runtimeModeOptions.map((option) => {

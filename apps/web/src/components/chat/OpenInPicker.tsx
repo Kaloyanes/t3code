@@ -1,4 +1,5 @@
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
+import { AnimatedIcon } from "../ui/changing-state";
 import {
   AuthOrchestrationOperateScope,
   buildRemoteOpenUrl,
@@ -404,13 +405,15 @@ export const OpenInPicker = memo(function OpenInPicker({
         onClick={() => openInEditor(preferredEditor)}
       >
         {primaryOption?.Icon ? (
-          <primaryOption.Icon
-            aria-hidden="true"
-            className={cn(
-              isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3.5",
-              getOpenInIconClass(primaryOption.kind),
-            )}
-          />
+          <AnimatedIcon stateKey={primaryOption.value}>
+            <primaryOption.Icon
+              aria-hidden="true"
+              className={cn(
+                isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3.5",
+                getOpenInIconClass(primaryOption.kind),
+              )}
+            />
+          </AnimatedIcon>
         ) : isPanel ? (
           <SquareArrowOutUpRightIcon
             aria-hidden="true"

@@ -1,3 +1,4 @@
+import { AnimatedText, AnimatedIcon } from "../ui/changing-state";
 import { memo, type MouseEventHandler, type PointerEventHandler } from "react";
 import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, Minimize2Icon, PlayIcon } from "lucide-react";
 import { CornerUpRight, ListPlus } from "lucide";
@@ -197,12 +198,14 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             (pendingAction.isLastQuestion ? !pendingAction.isComplete : !pendingAction.canAdvance)
           }
         >
-          {formatPendingPrimaryActionLabel({
-            compact,
-            isLastQuestion: pendingAction.isLastQuestion,
-            isResponding: pendingAction.isResponding,
-            questionIndex: pendingAction.questionIndex,
-          })}
+          <AnimatedText
+            value={formatPendingPrimaryActionLabel({
+              compact,
+              isLastQuestion: pendingAction.isLastQuestion,
+              isResponding: pendingAction.isResponding,
+              questionIndex: pendingAction.questionIndex,
+            })}
+          />
         </button>
       </div>
     );
@@ -217,7 +220,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           {...pointerFocusProps}
           disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
         >
-          {isConnecting || isSendBusy ? "Sending..." : "Refine"}
+          <AnimatedText value={isConnecting || isSendBusy ? "Sending..." : "Refine"} />
         </button>
       );
     }
@@ -230,7 +233,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           {...pointerFocusProps}
           disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
         >
-          {isConnecting || isSendBusy ? "Sending..." : "Implement"}
+          <AnimatedText value={isConnecting || isSendBusy ? "Sending..." : "Implement"} />
         </button>
         <Menu>
           <MenuTrigger
@@ -332,25 +335,39 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           <StageBackdropButtonArt variant={stageBackdropVariant} />
         </span>
       ) : null}
-      {isConnecting || isSendBusy ? (
-        <Spinner size="sm" aria-hidden="true" />
-      ) : showResume ? (
-        <PlayIcon className="size-4 fill-current" aria-hidden="true" />
-      ) : isEditingQueuedMessage ? (
-        <CheckIcon className="size-4" aria-hidden="true" />
-      ) : isRunning ? (
-        <MorphIcon className="size-4" icon={isQueuing ? ListPlus : CornerUpRight} />
-      ) : (
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-          <path
-            d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      )}
+      <AnimatedIcon
+        stateKey={
+          isConnecting || isSendBusy
+            ? "busy"
+            : showResume
+              ? "resume"
+              : isEditingQueuedMessage
+                ? "edit"
+                : isRunning
+                  ? "running"
+                  : "send"
+        }
+      >
+        {isConnecting || isSendBusy ? (
+          <Spinner size="sm" aria-hidden="true" />
+        ) : showResume ? (
+          <PlayIcon className="size-4 fill-current" aria-hidden="true" />
+        ) : isEditingQueuedMessage ? (
+          <CheckIcon className="size-4" aria-hidden="true" />
+        ) : isRunning ? (
+          <MorphIcon className="size-4" icon={isQueuing ? ListPlus : CornerUpRight} />
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path
+              d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        )}
+      </AnimatedIcon>
     </button>
   );
 

@@ -67,14 +67,6 @@
   }
 }
 
-@keyframes changing-text-enter {
-  from {
-    opacity: 0;
-    filter: blur(3px);
-    transform: translateY(0.22em);
-  }
-}
-
 @keyframes changing-text-exit {
   to {
     opacity: 0;
@@ -90,6 +82,14 @@
 
 .changing-text {
   position: relative;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: bottom;
+}
+
+.changing-text-letter {
+  display: inline-block;
+  white-space: pre;
 }
 
 .changing-text-content {
@@ -97,11 +97,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.changing-text-enter {
-  animation: changing-text-enter var(--changing-state-duration, 150ms)
-    cubic-bezier(0.23, 1, 0.32, 1) both;
 }
 
 .changing-text-exit {
@@ -114,7 +109,8 @@
 @keyframes changing-icon-enter {
   from {
     opacity: 0;
-    transform: scale(0.82) rotate(-8deg);
+    filter: blur(2px);
+    transform: translateY(2px) scale(0.92);
   }
 }
 
@@ -130,7 +126,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .changing-text-enter,
   .changing-text-exit,
   .changing-icon-content {
     animation: none;

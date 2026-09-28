@@ -1,3 +1,4 @@
+import { AnimatedText, AnimatedIcon } from "../ui/changing-state";
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
   type ProviderInstanceId,
@@ -197,6 +198,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const allModelNames = selectedEntries
     ? selectedEntries.map((selection) => selection.label).join(", ") || "Choose models"
     : undefined;
+  const visibleLabel = props.triggerLabel ?? multipleLabel ?? triggerTitle;
   const triggerTooltipContent = shortcutLabel
     ? `${props.triggerLabel ?? allModelNames ?? triggerLabel} · ${shortcutLabel}`
     : (props.triggerLabel ?? allModelNames ?? triggerLabel);
@@ -263,21 +265,23 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               ) : null}
             </span>
           ) : activeEntry && props.triggerLabel === undefined ? (
-            <ProviderInstanceIcon
-              driverKind={activeEntry.driverKind}
-              displayName={activeEntry.displayName}
-              accentColor={activeEntry.accentColor}
-              acpRegistryAgentId={activeEntry.acpRegistryAgentId}
-              acpRegistryIconUrl={activeEntry.acpRegistryIconUrl}
-              showBadge={showInstanceBadge}
-              className="size-4"
-              iconClassName={cn("size-4", props.activeProviderIconClassName)}
-              indicatorBackground={props.instanceIndicatorBackground ?? "var(--contrast-input)"}
-              badgeClassName={cn(
-                "right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs",
-                size === "xs" && "shadow-none",
-              )}
-            />
+            <AnimatedIcon stateKey={activeEntry.instanceId}>
+              <ProviderInstanceIcon
+                driverKind={activeEntry.driverKind}
+                displayName={activeEntry.displayName}
+                accentColor={activeEntry.accentColor}
+                acpRegistryAgentId={activeEntry.acpRegistryAgentId}
+                acpRegistryIconUrl={activeEntry.acpRegistryIconUrl}
+                showBadge={showInstanceBadge}
+                className="size-4"
+                iconClassName={cn("size-4", props.activeProviderIconClassName)}
+                indicatorBackground={props.instanceIndicatorBackground ?? "var(--contrast-input)"}
+                badgeClassName={cn(
+                  "right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs",
+                  size === "xs" && "shadow-none",
+                )}
+              />
+            </AnimatedIcon>
           ) : null}
           <Tooltip>
             <TooltipTrigger
@@ -291,7 +295,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 />
               }
             >
-              {props.triggerLabel ?? multipleLabel ?? triggerTitle}
+              {typeof visibleLabel === "string" ? (
+                <AnimatedText value={visibleLabel} />
+              ) : (
+                visibleLabel
+              )}
             </TooltipTrigger>
             <TooltipPopup side="top">{triggerTooltipContent}</TooltipPopup>
           </Tooltip>

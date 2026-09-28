@@ -1,3 +1,4 @@
+import { AnimatedText } from "../ui/changing-state";
 import { Spinner } from "~/components/ui/spinner";
 
 import { threadSyncLabel, type ThreadSyncPhase } from "../../threadSync";
@@ -15,7 +16,7 @@ export function ComposerActivityRow({ phase }: { readonly phase: ThreadSyncPhase
           data-composer-sync-status={phase}
           role="status"
         >
-          {threadSyncLabel(phase)}
+          <AnimatedText value={threadSyncLabel(phase)} />
         </span>
       </ComposerBanner.Content>
     </ComposerBanner.Row>
