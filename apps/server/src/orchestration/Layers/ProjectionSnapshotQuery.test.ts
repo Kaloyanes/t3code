@@ -395,6 +395,13 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           '[{"path":"README.md","kind":"modified","additions":2,"deletions":1}]'
         )
       `;
+      yield* sql`
+        INSERT INTO projection_turns (
+          thread_id, turn_id, pending_message_id, state, requested_at, checkpoint_files_json
+        ) VALUES
+          ('thread-1', NULL, 'queued-first', 'pending', '2026-02-24T00:00:06.000Z', '[]'),
+          ('thread-1', NULL, 'queued-second', 'pending', '2026-02-24T00:00:07.000Z', '[]')
+      `;
 
       let sequence = 5;
       for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
@@ -520,6 +527,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               planId: "plan-1",
             },
           },
+          queuedMessageIds: [asMessageId("queued-first"), asMessageId("queued-second")],
           createdAt: "2026-02-24T00:00:02.000Z",
           updatedAt: "2026-02-24T00:00:03.000Z",
           archivedAt: null,

@@ -7553,6 +7553,10 @@ export default function ChatView(props: ChatViewProps) {
   });
   // Puts queued messages back into the composer after Stop or Cancel. Prompts
   // join with blank lines; attachments and contexts are added.
+  const queuedServerMessageIds = useMemo(
+    () => new Set(activeThread?.queuedMessageIds ?? []),
+    [activeThread?.queuedMessageIds],
+  );
   const restoreQueuedMessagesToComposer = (messages: ReadonlyArray<QueuedComposerMessage>) => {
     const [firstMessage] = messages;
     if (!firstMessage) return;
@@ -10360,6 +10364,9 @@ export default function ChatView(props: ChatViewProps) {
                 topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={paintOnlyDisplayedTimeline ? null : loadEarlierTurns}
                 queuedMessages={paintOnlyDisplayedTimeline ? EMPTY_QUEUED_MESSAGES : queuedMessages}
+                {...(paintOnlyDisplayedTimeline
+                  ? {}
+                  : { queuedMessageIds: queuedServerMessageIds })}
                 onSteerQueuedMessage={onSteerQueuedMessage}
                 steerQueuedMessageShortcutLabel={shortcutLabelForCommand(
                   keybindings,

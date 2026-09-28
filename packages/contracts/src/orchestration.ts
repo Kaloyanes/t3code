@@ -842,6 +842,7 @@ export const OrchestrationThread = Schema.Struct({
   ),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  queuedMessageIds: Schema.optionalKey(Schema.Array(MessageId)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),

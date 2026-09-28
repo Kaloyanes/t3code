@@ -214,7 +214,7 @@ export function ThreadPullRequestBadgeControl({
   url?: string | undefined;
   status: PrStatusIndicator | null;
   onOpenStack: () => void;
-  onOpenPullRequest: (event: MouseEvent<HTMLElement>) => void;
+  onOpenPullRequest: (event: MouseEvent<HTMLAnchorElement>) => void;
   openAggregate?: boolean;
 }) {
   const presentation = resolveThreadPullRequestBadgePresentation({ badge, number, url, status });

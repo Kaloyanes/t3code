@@ -124,6 +124,7 @@ export function applyThreadDetailEvent(
           worktreePath: event.payload.worktreePath,
           branchPullRequest: null,
           latestTurn: null,
+          queuedMessageIds: [],
           createdAt: event.payload.createdAt,
           updatedAt: event.payload.updatedAt,
           archivedAt: null,
@@ -358,6 +359,13 @@ export function applyThreadDetailEvent(
             : {}),
           runtimeMode: event.payload.runtimeMode,
           interactionMode: event.payload.interactionMode,
+          ...(event.payload.dispatchMode === "queue"
+            ? {
+                queuedMessageIds: (thread.queuedMessageIds ?? []).includes(event.payload.messageId)
+                  ? thread.queuedMessageIds
+                  : [...(thread.queuedMessageIds ?? []), event.payload.messageId],
+              }
+            : {}),
           updatedAt: event.occurredAt,
         },
       };
@@ -524,6 +532,15 @@ export function applyThreadDetailEvent(
               }
             : thread.latestTurn,
       );
+      const queuedMessageIds = thread.queuedMessageIds ?? [];
+      const nextQueuedMessageIds =
+        event.payload.session.status === "running" && thread.session?.status !== "running"
+          ? queuedMessageIds.slice(1)
+          : event.payload.session.status === "error" ||
+              event.payload.session.status === "stopped" ||
+              event.payload.session.status === "interrupted"
+            ? []
+            : queuedMessageIds;
 
       return {
         kind: "updated",
@@ -531,6 +548,7 @@ export function applyThreadDetailEvent(
           ...thread,
           session: event.payload.session,
           latestTurn,
+          queuedMessageIds: nextQueuedMessageIds,
           updatedAt: event.occurredAt,
         },
       };
@@ -549,6 +567,7 @@ export function applyThreadDetailEvent(
                 activeTurnId: null,
                 updatedAt: event.payload.createdAt,
               },
+              queuedMessageIds: [],
               updatedAt: event.occurredAt,
             },
           };

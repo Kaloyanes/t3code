@@ -422,6 +422,7 @@ export type MessagesTimelineRow =
       assistantCopyStreaming: boolean;
       assistantTurnDiffSummary?: TurnDiffSummary | undefined;
       revertTurnCount?: number | undefined;
+      queued?: boolean | undefined;
     }
   | {
       kind: "assistant-meta";
@@ -589,9 +590,15 @@ export function deriveUnsettledTurnId(
   return isSettled ? null : latestTurn.turnId;
 }
 
-function lastUserMessageIndex(timelineEntries: ReadonlyArray<TimelineEntry>): number {
+function lastUserMessageIndex(
+  timelineEntries: ReadonlyArray<TimelineEntry>,
+  queuedMessageIds?: ReadonlySet<MessageId>,
+): number {
   return timelineEntries.findLastIndex(
-    (entry) => entry.kind === "message" && entry.message.role === "user",
+    (entry) =>
+      entry.kind === "message" &&
+      entry.message.role === "user" &&
+      !queuedMessageIds?.has(entry.message.id),
   );
 }
 
@@ -617,6 +624,7 @@ function deriveActiveVisualResponseTurnIds(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   unsettledTurnId: TurnId | null;
   isWorking: boolean;
+  queuedMessageIds?: ReadonlySet<MessageId> | undefined;
 }): ReadonlySet<TurnId> {
   const turnIds = new Set<TurnId>();
   if (input.unsettledTurnId === null) {
@@ -628,7 +636,10 @@ function deriveActiveVisualResponseTurnIds(input: {
     return turnIds;
   }
 
-  const latestUserMessageIndex = lastUserMessageIndex(input.timelineEntries);
+  const latestUserMessageIndex = lastUserMessageIndex(
+    input.timelineEntries,
+    input.queuedMessageIds,
+  );
   for (let index = latestUserMessageIndex + 1; index < input.timelineEntries.length; index += 1) {
     const turnId = timelineEntryTurnId(input.timelineEntries[index]!);
     if (turnId !== null) {
@@ -981,6 +992,8 @@ export function deriveMessagesTimelineRows(input: {
   worktreeSetup?: WorktreeSetupSnapshot | null;
   /** Messages sent during the running turn, rendered after the live rows. */
   queuedMessages?: ReadonlyArray<QueuedComposerMessage>;
+  /** Server-accepted follow-ups waiting for the active turn to settle. */
+  queuedMessageIds?: ReadonlySet<MessageId> | undefined;
 }): MessagesTimelineRow[] {
   const bashCommands = indexComposerBashCommands(
     input.timelineEntries.flatMap((entry) => (entry.kind === "work" ? [entry.entry] : [])),
@@ -1020,6 +1033,7 @@ export function deriveMessagesTimelineRows(input: {
     timelineEntries: input.timelineEntries,
     unsettledTurnId,
     isWorking: input.isWorking,
+    queuedMessageIds: input.queuedMessageIds,
   });
   const foldsByAnchorEntryId = deriveTurnFolds({
     timelineEntries: input.timelineEntries,
@@ -1038,7 +1052,10 @@ export function deriveMessagesTimelineRows(input: {
 
   let activeTurnHeaderIndex = input.timelineEntries.length;
   if (input.isWorking) {
-    const latestUserMessageIndex = lastUserMessageIndex(input.timelineEntries);
+    const latestUserMessageIndex = lastUserMessageIndex(
+      input.timelineEntries,
+      input.queuedMessageIds,
+    );
     activeTurnHeaderIndex = latestUserMessageIndex + 1;
   }
   const entryBelongsToActiveTurn = (entry: TimelineEntry, index: number) =>
@@ -1053,6 +1070,7 @@ export function deriveMessagesTimelineRows(input: {
   const activeToolEntries: Array<Extract<TimelineEntry, { kind: "work" }>> = [];
   for (let index = input.timelineEntries.length - 1; index >= activeTurnHeaderIndex; index -= 1) {
     const entry = input.timelineEntries[index]!;
+    if (entry.kind === "message" && input.queuedMessageIds?.has(entry.message.id)) continue;
     if (
       !entryBelongsToActiveTurn(entry, index) ||
       entry.kind !== "work" ||
@@ -1114,7 +1132,8 @@ export function deriveMessagesTimelineRows(input: {
     activeWorkRow !== null || latestToolFailed ? activeToolEntries.map((entry) => entry.id) : [],
   );
   const appendWorkingRow = () => {
-    const latestUserMessage = input.timelineEntries[lastUserMessageIndex(input.timelineEntries)];
+    const latestUserMessage =
+      input.timelineEntries[lastUserMessageIndex(input.timelineEntries, input.queuedMessageIds)];
     const visualResponseStartedAt =
       activeVisualResponseTurnIds.size > 1 &&
       latestUserMessage?.kind === "message" &&
@@ -1143,6 +1162,7 @@ export function deriveMessagesTimelineRows(input: {
   };
 
   let scannedActivityThrough = -1;
+  const serverQueuedRows: MessagesTimelineRow[] = [];
   for (let index = 0; index < input.timelineEntries.length; index += 1) {
     const timelineEntry = input.timelineEntries[index];
     if (!timelineEntry) {
@@ -1400,6 +1420,24 @@ export function deriveMessagesTimelineRows(input: {
     const durationStart =
       durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt;
 
+    if (
+      timelineEntry.message.role === "user" &&
+      input.queuedMessageIds?.has(timelineEntry.message.id)
+    ) {
+      serverQueuedRows.push({
+        kind: "message",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        message: timelineEntry.message,
+        durationStart,
+        showAssistantMeta: false,
+        showAssistantCopyButton: false,
+        assistantCopyStreaming: false,
+        queued: true,
+      });
+      continue;
+    }
+
     // While the turn is still running, the latest assistant message is only
     // provisionally terminal — withhold the metadata row until the turn
     // settles so commentary doesn't flash timestamps mid-work.
@@ -1495,6 +1533,7 @@ export function deriveMessagesTimelineRows(input: {
     });
   }
   const rows = attachTrailingToolGroupsToAssistant(nextRows);
+  rows.push(...serverQueuedRows);
   input.queuedMessages?.forEach((queuedMessage, index) => {
     rows.push({
       kind: "queued-message",
@@ -1712,7 +1751,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
         a.assistantCopyStreaming === bm.assistantCopyStreaming &&
         a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
-        a.revertTurnCount === bm.revertTurnCount
+        a.revertTurnCount === bm.revertTurnCount &&
+        a.queued === bm.queued
       );
     }
   }

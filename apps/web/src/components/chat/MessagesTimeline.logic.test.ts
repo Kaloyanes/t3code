@@ -1131,6 +1131,76 @@ describe("deriveMessagesTimelineRows", () => {
     ]);
   });
 
+  it("keeps server-queued follow-ups after the active turn", () => {
+    const activeUser = {
+      id: "active-user",
+      kind: "message",
+      createdAt: "2026-01-01T00:00:00Z",
+      message: {
+        id: MessageId.make("active-user"),
+        role: "user",
+        text: "Start",
+        turnId: null,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+        streaming: false,
+      },
+    } as const;
+    const activeAssistant = {
+      id: "active-assistant",
+      kind: "message",
+      createdAt: "2026-01-01T00:00:01Z",
+      message: {
+        id: MessageId.make("active-assistant"),
+        role: "assistant",
+        text: "Working",
+        turnId: TurnId.make("turn-1"),
+        createdAt: "2026-01-01T00:00:01Z",
+        updatedAt: "2026-01-01T00:00:01Z",
+        streaming: true,
+      },
+    } as const;
+    const queuedUser = {
+      id: "queued-user",
+      kind: "message",
+      createdAt: "2026-01-01T00:00:02Z",
+      message: {
+        id: MessageId.make("queued-user"),
+        role: "user",
+        text: "Do this next",
+        turnId: null,
+        createdAt: "2026-01-01T00:00:02Z",
+        updatedAt: "2026-01-01T00:00:02Z",
+        streaming: false,
+      },
+    } as const;
+
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [activeUser, activeAssistant, queuedUser],
+      latestTurn: {
+        turnId: TurnId.make("turn-1"),
+        state: "running",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: null,
+      },
+      runningTurnId: TurnId.make("turn-1"),
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:00:00Z",
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+      queuedMessageIds: new Set([MessageId.make("queued-user")]),
+    });
+
+    expect(rows.map((row) => [row.kind, row.id])).toEqual([
+      ["message", "active-user"],
+      ["working", "working-indicator-row"],
+      ["message", "active-assistant"],
+      ["thinking", "live-activity-row"],
+      ["message", "queued-user"],
+    ]);
+    expect(rows.at(-1)).toMatchObject({ kind: "message", queued: true });
+  });
+
   it("leads the worktree setup card with the working header", () => {
     const snapshot: WorktreeSetupSnapshot = {
       threadId: ThreadId.make("thread-setup"),

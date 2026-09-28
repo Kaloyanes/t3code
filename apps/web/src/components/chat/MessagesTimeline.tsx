@@ -50,6 +50,7 @@ import {
 const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
 const NOOP_OPEN_AGENTS = () => {};
 const EMPTY_QUEUED_MESSAGES: ReadonlyArray<QueuedComposerMessage> = [];
+const EMPTY_QUEUED_MESSAGE_IDS: ReadonlySet<MessageId> = new Set();
 const NOOP_QUEUED_MESSAGE_ACTION = (_id: string) => {};
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
@@ -465,6 +466,7 @@ interface MessagesTimelineProps {
   loadEarlier?: CitationHistoryPage | null;
   /** Messages sent during the running turn. They render as ghost bubbles after the live rows. */
   queuedMessages?: ReadonlyArray<QueuedComposerMessage>;
+  queuedMessageIds?: ReadonlySet<MessageId>;
   onSteerQueuedMessage?: (id: string) => void;
   steerQueuedMessageShortcutLabel?: string | null;
   onRemoveQueuedMessage?: (id: string) => void;
@@ -523,6 +525,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   topFadeEnabled = false,
   loadEarlier = null,
   queuedMessages = EMPTY_QUEUED_MESSAGES,
+  queuedMessageIds = EMPTY_QUEUED_MESSAGE_IDS,
   onSteerQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
   steerQueuedMessageShortcutLabel = null,
   onRemoveQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
@@ -786,6 +789,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         liveAgentTaskIds,
         worktreeSetup,
         queuedMessages,
+        queuedMessageIds,
       },
       previous?.threadKey === listIdentityKey && previous.workspaceRoot === workspaceRoot
         ? previous.projection
@@ -809,6 +813,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     liveAgentTaskIds,
     worktreeSetup,
     queuedMessages,
+    queuedMessageIds,
   ]);
   const rows = useStableRows(rawRows, listIdentityKey);
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
@@ -2110,7 +2115,12 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div className="relative min-w-0 max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+      <div
+        className={cn(
+          "relative min-w-0 max-w-[80%] rounded-2xl p-3 text-message-foreground",
+          row.queued ? "border border-dashed border-border" : "bg-message",
+        )}
+      >
         <MessageAuthorHeading>You</MessageAuthorHeading>
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[210px] grid-cols-2 gap-2">
@@ -2224,6 +2234,12 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             />
           </div>
         </BashMessageDisclosure>
+        {row.queued ? (
+          <div className="mt-2 flex items-center gap-1 text-secondary-label text-xs">
+            <ClockIcon className="size-3.5" aria-hidden />
+            Queued
+          </div>
+        ) : null}
       </div>
       <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover:opacity-100">
         <div className="flex shrink-0 items-center gap-2">
