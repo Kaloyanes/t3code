@@ -1396,7 +1396,7 @@ function WorkspaceServersPopover(props: {
         side="right"
         align="start"
         className="w-64"
-
+        padding="none"
         onMouseEnter={cancelClose}
         onMouseLeave={scheduleClose}
       >

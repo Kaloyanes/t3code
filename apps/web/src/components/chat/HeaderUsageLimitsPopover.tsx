@@ -341,7 +341,7 @@ export function HeaderUsageLimitsPopover({
           side="bottom"
           align="end"
           className="w-[min(30rem,calc(100vw-2rem))]"
-
+          padding="none"
           aria-label="Usage limits"
         >
           <div className="flex flex-col">
