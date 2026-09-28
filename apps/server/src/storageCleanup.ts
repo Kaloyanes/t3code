@@ -25,6 +25,7 @@ import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "./config.ts";
 import * as GitManager from "./git/GitManager.ts";
+import * as IssueCompletionReactor from "./issue/IssueCompletionReactor.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ThreadDeletionReactor from "./orchestration/Services/ThreadDeletionReactor.ts";
@@ -115,6 +116,7 @@ export const make = Effect.gen(function* () {
   const threadDeletion = yield* ThreadDeletionReactor.ThreadDeletionReactor;
   const providers = yield* ProviderService.ProviderService;
   const pullRequests = yield* PullRequestService.PullRequestService;
+  const issueCompletion = yield* IssueCompletionReactor.IssueCompletionReactor;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const gitManager = yield* GitManager.GitManager;
   const terminals = yield* TerminalManager.TerminalManager;
@@ -290,6 +292,12 @@ export const make = Effect.gen(function* () {
           }
         }
         if (!eligible) return;
+        if (
+          !deleted &&
+          settings.worktreeOnMerge &&
+          !(yield* issueCompletion.completeWorktree(thread.projectId, thread.worktreePath))
+        )
+          return;
         // Re-read after Git/host calls so a queued turn, resumed session or new
         // thread sharing this path cancels the removal.
         const latestSnapshot = yield* readThreads();
@@ -487,8 +495,11 @@ export const make = Effect.gen(function* () {
     );
     yield* forkParked(
       Stream.runForEach(events, (event) =>
-        event.type === "thread.deleted" &&
-        anyWorktreePolicy(lastSettings, (rules) => rules.worktreeOnDelete)
+        (event.type === "thread.deleted" &&
+          anyWorktreePolicy(lastSettings, (rules) => rules.worktreeOnDelete)) ||
+        (event.type === "project.meta-updated" &&
+          event.payload.worktreePullRequests?.some((link) => link.snapshot?.state === "merged") &&
+          anyWorktreePolicy(lastSettings, (rules) => rules.worktreeOnMerge))
           ? worker.enqueue(undefined)
           : Effect.void,
       ),

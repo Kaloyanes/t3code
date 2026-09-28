@@ -476,8 +476,8 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
               {...searchableSetting("complete-linked-issue-on-merge")}
               description={
                 isProjectScope
-                  ? "Mark this project's linked issue completed once every pull request for its worktree has merged."
-                  : "Mark linked issues completed once every pull request for their worktree has merged. Projects can override it."
+                  ? "Mark this project's linked issue completed and comment with the merged pull request links before automatic worktree cleanup."
+                  : "Mark linked issues completed and comment with the merged pull request links before automatic worktree cleanup. Projects can override it."
               }
               resetAction={
                 settings.completeLinkedIssueOnMerge ? (

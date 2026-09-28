@@ -60,6 +60,7 @@ import * as Path from "effect/Path";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { ServerConfig } from "../config.ts";
 import * as StorageCleanup from "../storageCleanup.ts";
+import { IssueCompletionReactor } from "../issue/IssueCompletionReactor.ts";
 import * as WorktreeRunManager from "../worktreeRun/Manager.ts";
 import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import { TerminalManager } from "../terminal/Manager.ts";
@@ -1595,7 +1596,9 @@ describe("storage cleanup", () => {
     "terminal-worktree",
     "recent",
     "merged",
+    "merged-issue-failed",
     "merged-event",
+    "merged-event-snapshot",
     "merged-event-dirty",
     "merged-event-diverged",
     "merged-event-open",
@@ -1689,13 +1692,15 @@ describe("storage cleanup", () => {
           const domainEvents = yield* PubSub.unbounded<OrchestrationEvent>();
           const mergeEvent = yield* Deferred.make<PullRequestMergeEvent>();
           const mergeConsumed = yield* Deferred.make<void>();
+          const mergeSnapshotRead = yield* Deferred.make<void>();
           let mergeSubscribed = false;
           let mergeConfirmed = false;
           const mergeEventCase = protection.startsWith("merged-event");
           const deleteRule = protection.startsWith("deleted");
           let tombstoned = deleteRule && protection !== "deleted-event";
           const removals: string[] = [];
-          const mergeRule = protection === "merged" || protection === "unmerged" || mergeEventCase;
+          const mergeRule = protection.startsWith("merged") || protection === "unmerged";
+          let issueCompleted = false;
           const unchangedRule =
             protection === "unchanged" ||
             protection === "unchanged-two-worktrees" ||
@@ -1746,6 +1751,15 @@ describe("storage cleanup", () => {
             Effect.provide(
               Layer.mergeAll(
                 Layer.succeed(ServerSettingsService, settingsService),
+                Layer.mock(IssueCompletionReactor)({
+                  completeWorktree: (projectId, target) =>
+                    Effect.sync(() => {
+                      assert.strictEqual(projectId, PROJECT_ID);
+                      assert.ok(target === worktreePath || target === secondWorktreePath);
+                      issueCompleted = protection !== "merged-issue-failed";
+                      return issueCompleted;
+                    }),
+                }),
                 Layer.succeed(FileSystem.FileSystem, {
                   ...fs,
                   stat: (target) =>
@@ -1793,6 +1807,11 @@ describe("storage cleanup", () => {
                   getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 2 }),
                   getShellSnapshot: () =>
                     Deferred.succeed(snapshotRead, undefined).pipe(
+                      Effect.tap(() =>
+                        mergeConfirmed
+                          ? Deferred.succeed(mergeSnapshotRead, undefined)
+                          : Effect.void,
+                      ),
                       Effect.andThen(
                         Effect.sync(() => {
                           snapshotReads++;
@@ -1995,6 +2014,7 @@ describe("storage cleanup", () => {
                     ),
                   removeWorktree: (input) => {
                     assert.strictEqual(input.force, false);
+                    if (mergeRule) assert.strictEqual(issueCompleted, true);
                     removals.push(input.path);
                     return fs.remove(input.path, { recursive: true }).pipe(Effect.orDie);
                   },
@@ -2042,13 +2062,56 @@ describe("storage cleanup", () => {
             assert.strictEqual(yield* fs.exists(worktreePath), true);
             assert.strictEqual(mergeSubscribed, true, "cleanup must observe confirmed merges");
             mergeConfirmed = true;
-            yield* Deferred.succeed(mergeEvent, {
-              projectId: PROJECT_ID,
-              repository: "acme/web",
-              number: 1,
-              mergedAt: NOW,
-            });
-            yield* Deferred.await(mergeConsumed);
+            if (protection === "merged-event-snapshot") {
+              yield* PubSub.publish(domainEvents, {
+                type: "project.meta-updated",
+                sequence: 2,
+                eventId: EventId.make("storage-pr-merged"),
+                aggregateKind: "project",
+                aggregateId: PROJECT_ID,
+                occurredAt: NOW,
+                commandId: null,
+                causationEventId: null,
+                correlationId: null,
+                metadata: {},
+                payload: {
+                  projectId: PROJECT_ID,
+                  updatedAt: NOW,
+                  worktreePullRequests: [
+                    {
+                      projectId: PROJECT_ID,
+                      worktreePath,
+                      host: "github.com",
+                      repository: "acme/web",
+                      number: 1,
+                      url: "https://github.com/acme/web/pull/1",
+                      source: "created",
+                      linkedAt: NOW,
+                      stack: null,
+                      snapshot: {
+                        ...makePullRequestSummary({
+                          projectId: PROJECT_ID,
+                          repository: "acme/web",
+                          number: 1,
+                          state: "merged",
+                        }),
+                        isDraft: false,
+                        syncedAt: NOW,
+                      },
+                    },
+                  ],
+                },
+              });
+              yield* Deferred.await(mergeSnapshotRead);
+            } else {
+              yield* Deferred.succeed(mergeEvent, {
+                projectId: PROJECT_ID,
+                repository: "acme/web",
+                number: 1,
+                mergedAt: NOW,
+              });
+              yield* Deferred.await(mergeConsumed);
+            }
             yield* cleanup.drain;
           }
           if (protection === "deleted-event") {
@@ -2083,6 +2146,7 @@ describe("storage cleanup", () => {
             protection === "files-extended" ||
             protection === "merged" ||
             protection === "merged-event" ||
+            protection === "merged-event-snapshot" ||
             protection === "unchanged" ||
             protection === "unchanged-two-worktrees";
           assert.strictEqual(yield* fs.exists(worktreePath), !removed);

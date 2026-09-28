@@ -405,7 +405,7 @@ const IssueCompletionLive = Layer.effectDiscard(
     const reactor = yield* IssueCompletionReactor.IssueCompletionReactor;
     yield* reactor.start();
   }),
-).pipe(Layer.provide(IssueCompletionReactor.layer), Layer.provide(IssueServiceLive));
+).pipe(Layer.provideMerge(IssueCompletionReactor.layer), Layer.provide(IssueServiceLive));
 
 const SourceControlRepositoryServiceLayerLive = SourceControlRepositoryService.layer.pipe(
   Layer.provideMerge(GitVcsDriver.layer),
