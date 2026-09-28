@@ -1528,7 +1528,7 @@ export function AppearanceSettingsPanel() {
       <SettingsSection id="motion" title="Motion">
         <SettingsRow
           {...searchableSetting("ui-animations")}
-          description="Set how fast interface changes animate. Menus use their own timing. Set to 0 to reduce motion."
+          description="Set how fast interface changes, menus, and dialogs animate. Set to 0 to reduce motion."
           control={
             <div className="flex w-full items-center gap-3 sm:w-52">
               <output

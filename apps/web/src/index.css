@@ -1,5 +1,72 @@
 @import "tailwindcss";
 
+/* Body-portaled overlays inherit the user's timing from the document root. */
+@utility ui-overlay-transition {
+  --tw-duration: var(--ui-animation-duration, 150ms);
+  --tw-ease: cubic-bezier(0.23, 1, 0.32, 1);
+  transition-duration: var(--tw-duration);
+  transition-timing-function: var(--tw-ease);
+
+  &[data-ending-style] {
+    --tw-duration: calc(var(--ui-animation-duration, 150ms) * 0.8);
+    --tw-ease: ease-in;
+  }
+
+  &[data-instant],
+  [data-ui-animations="off"] & {
+    --tw-duration: 0s;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    && {
+      --tw-duration: 0s;
+    }
+  }
+}
+
+@utility ui-popup-motion {
+  --ui-popup-x: 0px;
+  --ui-popup-y: 4px;
+  transition-property: opacity, filter, transform, translate, scale;
+
+  &[data-side="bottom"] {
+    --ui-popup-y: -4px;
+  }
+  &[data-side="left"] {
+    --ui-popup-x: 4px;
+    --ui-popup-y: 0px;
+  }
+  &[data-side="right"] {
+    --ui-popup-x: -4px;
+    --ui-popup-y: 0px;
+  }
+  &[data-side="none"] {
+    --ui-popup-y: 0px;
+  }
+
+  &:is([data-starting-style], [data-ending-style]) {
+    opacity: 0;
+    filter: blur(2px);
+    transform: translate(var(--ui-popup-x), var(--ui-popup-y));
+  }
+
+  &[data-slot="sheet-popup"]:is([data-starting-style], [data-ending-style]) {
+    transform: translate(calc(var(--ui-popup-x) * -1), calc(var(--ui-popup-y) * -1));
+  }
+
+  [data-ui-animations="off"] &:is([data-starting-style], [data-ending-style]) {
+    filter: none;
+    transform: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    &&:is([data-starting-style], [data-ending-style]) {
+      filter: none;
+      transform: none;
+    }
+  }
+}
+
 @keyframes changing-text-enter {
   from {
     opacity: 0;
