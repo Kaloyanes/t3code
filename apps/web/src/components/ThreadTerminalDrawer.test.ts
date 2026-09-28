@@ -11,9 +11,9 @@ import {
 } from "./ThreadTerminalDrawer";
 
 describe("terminal group labels", () => {
-  it("distinguishes the shared Run terminal from isolated terminals", () => {
-    expect(terminalGroupLabel(["term-1"])).toBe("Shared");
-    expect(terminalGroupLabel(["term-2"])).toBe("Isolated");
+  it("does not infer ownership from a shell ID", () => {
+    expect(terminalGroupLabel(["term-1"])).toBe("Terminals");
+    expect(terminalGroupLabel(["term-2"])).toBe("Terminals");
   });
 
   it("describes split terminal layouts", () => {

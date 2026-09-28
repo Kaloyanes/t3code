@@ -186,6 +186,7 @@ const make = Effect.gen(function* () {
             ]).pipe(Effect.ignore),
           );
         });
+        yield* publishAttach(target, { type: "snapshot", snapshot: snapshot(session) });
         yield* publishMetadata(session);
         return snapshot(session);
       }),

@@ -15,6 +15,18 @@ import {
   createEnvironmentRpcCommand,
   createEnvironmentSubscriptionAtomFamily,
 } from "./runtime.ts";
+import { nextTerminalAttachSeedState } from "./terminalSession.ts";
+import {
+  appendOutput,
+  DEFAULT_MAX_TERMINAL_BUFFER_BYTES,
+  resetOutput,
+  type TerminalOutputState,
+} from "./terminalOutput.ts";
+
+export interface WorktreeRunState extends Omit<WorktreeRunSnapshot, "history"> {
+  readonly output: TerminalOutputState;
+  readonly version: number;
+}
 
 const key = (target: { projectId: string; workspacePath: string; scriptId: string }) =>
   JSON.stringify([target.projectId, target.workspacePath, target.scriptId]);
@@ -30,23 +42,43 @@ export function applyWorktreeRunMetadataEvent(
 }
 
 export function applyWorktreeRunAttachEvent(
-  current: WorktreeRunSnapshot | null,
+  current: WorktreeRunState | null,
   event: WorktreeRunAttachEvent,
-): WorktreeRunSnapshot | null {
-  if (event.type === "snapshot") return event.snapshot;
+): WorktreeRunState | null {
+  if (event.type === "snapshot") {
+    const { history, ...snapshot } = event.snapshot;
+    return {
+      ...snapshot,
+      output: resetOutput(
+        current?.output ?? nextTerminalAttachSeedState().output,
+        history,
+        DEFAULT_MAX_TERMINAL_BUFFER_BYTES,
+      ),
+      version: (current?.version ?? 0) + 1,
+    };
+  }
   if (!current) return null;
-  if (event.type === "output") return { ...current, history: current.history + event.data };
-  if (event.type === "cleared") return { ...current, history: "" };
+  const next = { ...current, version: current.version + 1 };
+  if (event.type === "output")
+    return {
+      ...next,
+      output: appendOutput(current.output, event.data, DEFAULT_MAX_TERMINAL_BUFFER_BYTES),
+    };
+  if (event.type === "cleared")
+    return {
+      ...next,
+      output: resetOutput(current.output, "", DEFAULT_MAX_TERMINAL_BUFFER_BYTES),
+    };
   if (event.type === "exited") {
     return {
-      ...current,
+      ...next,
       status: "exited",
       pid: null,
       exitCode: event.exitCode,
       exitSignal: event.exitSignal,
     };
   }
-  return { ...current, status: "stopped", pid: null };
+  return { ...next, status: "stopped", pid: null };
 }
 
 export function createWorktreeRunEnvironmentAtoms<R, E>(
@@ -72,7 +104,7 @@ export function createWorktreeRunEnvironmentAtoms<R, E>(
       label: "environment-data:worktree-runs:attach",
       subscribe: (input: EnvironmentRpcInput<typeof WS_METHODS.worktreeRunAttach>) =>
         subscribe(WS_METHODS.worktreeRunAttach, input).pipe(
-          Stream.scan(null as WorktreeRunSnapshot | null, applyWorktreeRunAttachEvent),
+          Stream.scan(null as WorktreeRunState | null, applyWorktreeRunAttachEvent),
         ),
     }),
     start: createEnvironmentRpcCommand(runtime, {

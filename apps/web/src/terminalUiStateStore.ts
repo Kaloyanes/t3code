@@ -347,9 +347,13 @@ function upsertTerminalIntoGroups(
   });
 }
 
-function setThreadTerminalOpen(state: ThreadTerminalUiState, open: boolean): ThreadTerminalUiState {
+function setThreadTerminalOpen(
+  state: ThreadTerminalUiState,
+  open: boolean,
+  createTerminal = true,
+): ThreadTerminalUiState {
   const normalized = normalizeThreadTerminalUiState(state);
-  if (open && normalized.terminalIds.length === 0) {
+  if (open && createTerminal && normalized.terminalIds.length === 0) {
     return upsertTerminalIntoGroups(normalized, DEFAULT_THREAD_TERMINAL_ID, "new");
   }
   if (normalized.terminalOpen === open) return normalized;
@@ -569,7 +573,11 @@ interface TerminalUiStateStoreState {
   terminalUiStateByThreadKey: Record<string, ThreadTerminalUiState>;
   /** Closed ids hidden from stale server metadata until that id is explicitly opened again. */
   suppressedTerminalIdsByThreadKey: Record<string, string[]>;
-  setTerminalOpen: (threadRef: ScopedThreadRef, open: boolean) => void;
+  setTerminalOpen: (
+    threadRef: ScopedThreadRef,
+    open: boolean,
+    options?: { createTerminal?: boolean },
+  ) => void;
   setTerminalHeight: (threadRef: ScopedThreadRef, height: number) => void;
   splitTerminal: (threadRef: ScopedThreadRef, terminalId: string) => void;
   splitTerminalVertical: (threadRef: ScopedThreadRef, terminalId: string) => void;
@@ -630,15 +638,15 @@ export const useTerminalUiStateStore = create<TerminalUiStateStoreState>()(
       return {
         terminalUiStateByThreadKey: {},
         suppressedTerminalIdsByThreadKey: {},
-        setTerminalOpen: (threadRef, open) => {
+        setTerminalOpen: (threadRef, open, options) => {
           const terminalState = selectThreadTerminalUiState(
             get().terminalUiStateByThreadKey,
             threadRef,
           );
           updateTerminal(
             threadRef,
-            (state) => setThreadTerminalOpen(state, open),
-            open && terminalState.terminalIds.length === 0
+            (state) => setThreadTerminalOpen(state, open, options?.createTerminal),
+            open && options?.createTerminal !== false && terminalState.terminalIds.length === 0
               ? { terminalId: DEFAULT_THREAD_TERMINAL_ID, suppressed: false }
               : undefined,
           );

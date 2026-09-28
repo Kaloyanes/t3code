@@ -75,6 +75,17 @@ describe("terminalUiStateStore actions", () => {
     ]);
   });
 
+  it("opens a workspace run view without materializing a thread shell", () => {
+    useTerminalUiStateStore.getState().setTerminalOpen(THREAD_REF, true, { createTerminal: false });
+    const state = selectThreadTerminalUiState(
+      useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
+      THREAD_REF,
+    );
+    expect(state.terminalOpen).toBe(true);
+    expect(state.terminalIds).toEqual([]);
+    expect(state.terminalGroups).toEqual([]);
+  });
+
   it("materializes the default terminal when opening an empty drawer", () => {
     useTerminalUiStateStore.getState().setTerminalOpen(THREAD_REF, true);
 

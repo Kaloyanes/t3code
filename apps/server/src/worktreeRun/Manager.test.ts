@@ -94,6 +94,29 @@ describe("WorktreeRunManager", () => {
     }).pipe(Effect.provide(makeLayer(processes)));
   });
 
+  it.effect("sends a fresh snapshot to attached clients when a stopped run restarts", () => {
+    const processes: FakeProcess[] = [];
+    return Effect.gen(function* () {
+      const manager = yield* WorktreeRunManager.WorktreeRunManager;
+      const first = yield* manager.start(startSpec);
+      const events = yield* Ref.make<ReadonlyArray<WorktreeRunAttachEvent>>([]);
+      const detach = yield* manager.attach(target, (event) =>
+        Ref.update(events, (current) => [...current, event]),
+      );
+      yield* manager.stop(target);
+      const restarted = yield* manager.start(startSpec);
+      detach();
+      const snapshots = (yield* Ref.get(events)).filter((event) => event.type === "snapshot");
+      expect(snapshots).toHaveLength(2);
+      expect(snapshots[1]?.snapshot).toMatchObject({
+        status: "running",
+        pid: restarted.pid,
+        history: "",
+      });
+      expect(restarted.pid).not.toBe(first.pid);
+    }).pipe(Effect.provide(makeLayer(processes)));
+  });
+
   it.effect("attaches interactively and clears retained output", () => {
     const processes: FakeProcess[] = [];
     return Effect.gen(function* () {

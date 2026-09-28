@@ -6,8 +6,8 @@ import { DEFAULT_TERMINAL_ID } from "@t3tools/contracts";
 import { getTerminalLabel, nextTerminalId, resolveTerminalSessionLabel } from "./terminalLabels.ts";
 
 describe("getTerminalLabel", () => {
-  it("distinguishes the shared Run terminal from isolated terminals", () => {
-    expect(getTerminalLabel(DEFAULT_TERMINAL_ID)).toBe("Run");
+  it("labels every allocated shell consistently", () => {
+    expect(getTerminalLabel(DEFAULT_TERMINAL_ID)).toBe("Terminal 1");
     expect(getTerminalLabel("term-2")).toBe("Terminal 2");
     expect(getTerminalLabel("term-12")).toBe("Terminal 12");
     expect(getTerminalLabel("terminal-3")).toBe("Terminal 3");
@@ -24,10 +24,10 @@ describe("resolveTerminalSessionLabel", () => {
     expect(resolveTerminalSessionLabel("term-2", summary)).toBe("bun");
   });
 
-  it("keeps the Run label stable while allowing isolated terminal process labels", () => {
-    expect(resolveTerminalSessionLabel(DEFAULT_TERMINAL_ID, { label: "pnpm" })).toBe("Run");
-    expect(resolveTerminalSessionLabel(DEFAULT_TERMINAL_ID, { label: "   " })).toBe("Run");
-    expect(resolveTerminalSessionLabel(DEFAULT_TERMINAL_ID, null)).toBe("Run");
+  it("uses process labels for the first shell too", () => {
+    expect(resolveTerminalSessionLabel(DEFAULT_TERMINAL_ID, { label: "pnpm" })).toBe("pnpm");
+    expect(resolveTerminalSessionLabel(DEFAULT_TERMINAL_ID, { label: "   " })).toBe("Terminal 1");
+    expect(resolveTerminalSessionLabel(DEFAULT_TERMINAL_ID, null)).toBe("Terminal 1");
     expect(resolveTerminalSessionLabel("term-2", undefined)).toBe("Terminal 2");
     expect(resolveTerminalSessionLabel("term-2", { label: "vite" })).toBe("vite");
   });

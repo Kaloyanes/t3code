@@ -1179,6 +1179,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
       return;
     }
     const terminalId = nextTerminalId(allocatableTerminalIds);
+    closeWorktreeRunTerminal();
     storeNewTerminal(threadRef, terminalId);
     bumpFocusRequestId();
     void openTerminal({
@@ -1197,6 +1198,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
     effectiveWorktreePath,
     allocatableTerminalIds,
     runtimeEnv,
+    closeWorktreeRunTerminal,
     storeNewTerminal,
     threadId,
     threadRef,
@@ -1562,6 +1564,7 @@ export default function ChatView(props: ChatViewProps) {
   });
   const openWorktreeRunTerminal = useWorktreeRunTerminalStore((state) => state.open);
   const activeWorktreeRunTerminal = useWorktreeRunTerminalStore((state) => state.active);
+  const closeWorktreeRunTerminal = useWorktreeRunTerminalStore((state) => state.close);
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
@@ -2060,6 +2063,12 @@ export default function ChatView(props: ChatViewProps) {
     [activeThreadDiscoveredPorts, activeThreadId, projectScriptTerminalRuns],
   );
   const activeWorkspacePath = activeThread?.worktreePath ?? activeProject?.workspaceRoot ?? null;
+  const activeWorkspaceRun =
+    activeWorktreeRunTerminal?.environmentId === environmentId &&
+    activeWorktreeRunTerminal.target.projectId === activeProject?.id &&
+    activeWorktreeRunTerminal.target.workspacePath === activeWorkspacePath
+      ? activeWorktreeRunTerminal
+      : null;
   const workspaceRuns = useMemo(
     () =>
       (worktreeRunMetadata.data ?? []).filter(
@@ -4217,16 +4226,16 @@ export default function ChatView(props: ChatViewProps) {
     [composerRef],
   );
   const setTerminalOpen = useCallback(
-    (open: boolean) => {
+    (open: boolean, createTerminal = activeWorkspaceRun === null) => {
       if (!activeThreadRef) return;
-      storeSetTerminalOpen(activeThreadRef, open);
+      storeSetTerminalOpen(activeThreadRef, open, { createTerminal });
     },
-    [activeThreadRef, storeSetTerminalOpen],
+    [activeThreadRef, activeWorkspaceRun, storeSetTerminalOpen],
   );
   const toggleTerminalVisibility = useCallback(() => {
     if (!activeThreadRef) return;
     const nextOpen = !terminalUiState.terminalOpen;
-    if (nextOpen && terminalUiState.terminalIds.length === 0) {
+    if (nextOpen && terminalUiState.terminalIds.length === 0 && !activeWorkspaceRun) {
       if (!activeThreadId || !activeProject) {
         return;
       }
@@ -4253,6 +4262,7 @@ export default function ChatView(props: ChatViewProps) {
     }
     setTerminalOpen(nextOpen);
   }, [
+    activeWorkspaceRun,
     activeProject,
     activeThreadId,
     activeThreadRef,
@@ -4268,7 +4278,13 @@ export default function ChatView(props: ChatViewProps) {
   ]);
   const splitTerminal = useCallback(
     (direction: "horizontal" | "vertical" = "horizontal") => {
-      if (!activeThreadRef || hasReachedSplitLimit || !activeThreadId || !activeProject) {
+      if (
+        activeWorkspaceRun ||
+        !activeThreadRef ||
+        hasReachedSplitLimit ||
+        !activeThreadId ||
+        !activeProject
+      ) {
         return;
       }
       const cwdForOpen = gitCwd ?? activeProject.workspaceRoot;
@@ -4297,6 +4313,7 @@ export default function ChatView(props: ChatViewProps) {
       });
     },
     [
+      activeWorkspaceRun,
       activeProject,
       activeThreadId,
       allocatableActiveTerminalIds,
@@ -4319,6 +4336,7 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     const terminalId = nextTerminalId(allocatableActiveTerminalIds);
+    closeWorktreeRunTerminal();
     storeNewTerminal(activeThreadRef, terminalId);
     setTerminalFocusRequestId((value) => value + 1);
     void openTerminal({
@@ -4343,6 +4361,7 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadWorktreePath,
     environmentId,
     gitCwd,
+    closeWorktreeRunTerminal,
     storeNewTerminal,
   ]);
   const closeTerminal = useCallback(
@@ -4404,7 +4423,7 @@ export default function ChatView(props: ChatViewProps) {
           true
       ) {
         const workspacePath = targetWorktreePath ?? activeProject.workspaceRoot;
-        setTerminalOpen(true);
+        setTerminalOpen(true, false);
         const result = await startWorktreeRun({
           environmentId,
           input: { projectId: activeProject.id, workspacePath, scriptId: script.id },
@@ -4425,6 +4444,7 @@ export default function ChatView(props: ChatViewProps) {
         });
         return;
       }
+      closeWorktreeRunTerminal();
       const runTerminal = resolveRunActionTerminal({
         allocatableTerminalIds: allocatableActiveTerminalIds,
         runningTerminalIds,
@@ -4531,6 +4551,7 @@ export default function ChatView(props: ChatViewProps) {
       writeTerminal,
       environmentById,
       openWorktreeRunTerminal,
+      closeWorktreeRunTerminal,
       startWorktreeRun,
     ],
   );
@@ -7131,7 +7152,8 @@ export default function ChatView(props: ChatViewProps) {
           return;
         }
         if (!terminalUiState.terminalOpen) return;
-        requestCloseTerminal(terminalUiState.activeTerminalId);
+        if (activeWorkspaceRun) closeWorktreeRunTerminal();
+        else requestCloseTerminal(terminalUiState.activeTerminalId);
         return;
       }
 
@@ -7235,6 +7257,8 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadId,
     closeRightPanelSurface,
     requestCloseTerminal,
+    activeWorkspaceRun,
+    closeWorktreeRunTerminal,
     requestClosePanelTerminal,
     createNewTerminal,
     setTerminalOpen,
@@ -10698,14 +10722,7 @@ export default function ChatView(props: ChatViewProps) {
             keybindings={keybindings}
             onAddTerminalContext={addTerminalContextToDraft}
             worktreeRuns={mountedThreadKey === activeThreadKey ? workspaceRuns : []}
-            activeWorktreeRun={
-              mountedThreadKey === activeThreadKey &&
-              activeWorktreeRunTerminal?.environmentId === environmentId &&
-              activeWorktreeRunTerminal.target.projectId === activeProject?.id &&
-              activeWorktreeRunTerminal.target.workspacePath === activeWorkspacePath
-                ? activeWorktreeRunTerminal
-                : null
-            }
+            activeWorktreeRun={mountedThreadKey === activeThreadKey ? activeWorkspaceRun : null}
           />
         ))}
       </div>
