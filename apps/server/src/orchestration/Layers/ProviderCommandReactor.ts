@@ -31,6 +31,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
 import * as FileSystem from "effect/FileSystem";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -73,6 +74,8 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
+import * as ProcessRunner from "../../processRunner.ts";
+import { runComposerBashCommand, sanitizeComposerBashText } from "../composerBash.ts";
 const isProviderAdapterProcessError = Schema.is(ProviderAdapterProcessError);
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderAdapterValidationError = Schema.is(ProviderAdapterValidationError);
@@ -269,6 +272,15 @@ const make = Effect.gen(function* () {
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
   const terminalManager = yield* TerminalManager.TerminalManager;
+  const processRunner = yield* ProcessRunner.ProcessRunner;
+  const composerCommands = new Map<string, { threadId: ThreadId; fiber: Fiber.Fiber<void> }>();
+  const interruptComposerCommands = Effect.fnUntraced(function* (threadId: ThreadId) {
+    const commands = [...composerCommands.values()].filter(
+      (command) => command.threadId === threadId,
+    );
+    yield* Effect.forEach(commands, ({ fiber }) => Fiber.interrupt(fiber), { discard: true });
+    return commands.length > 0;
+  });
   /** Environment settings with the thread's project overrides applied. */
   const projectSettingsForThread = Effect.fnUntraced(function* (threadId: ThreadId) {
     const settings = yield* serverSettingsService.getSettings;
@@ -1610,15 +1622,75 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const send = providerService
-      .sendTurn(sendTurnRequest.value)
-      .pipe(Effect.asVoid, Effect.catchCause(recoverTurnStartFailure));
+    const isBashCommand = message.text.startsWith("!");
+    const appendBashActivity = Effect.fnUntraced(function* (detail?: string, failed = false) {
+      const createdAt = DateTime.formatIso(yield* DateTime.now);
+      yield* orchestrationEngine.dispatch({
+        type: "thread.activity.append",
+        commandId: yield* serverCommandId("composer-bash"),
+        threadId: thread.id,
+        activity: {
+          id: yield* serverEventId(),
+          tone: failed ? "error" : "tool",
+          kind: detail === undefined ? "tool.updated" : "tool.completed",
+          summary:
+            detail === undefined
+              ? "Running Bash command"
+              : failed
+                ? "Bash command failed"
+                : "Bash command completed",
+          payload: {
+            itemType: "command_execution",
+            toolCallId: `composer-bash:${message.id}`,
+            status: detail === undefined ? "inProgress" : failed ? "failed" : "completed",
+            ...(detail !== undefined ? { detail } : {}),
+            data: {
+              command: sanitizeComposerBashText(message.text.slice(1)),
+              ...(detail !== undefined ? { rawOutput: detail } : {}),
+            },
+          },
+          turnId: null,
+          createdAt,
+        },
+        createdAt,
+      });
+    });
+    const send = Effect.gen(function* () {
+      if (!isBashCommand) return yield* providerService.sendTurn(sendTurnRequest.value);
+      const result = yield* Effect.gen(function* () {
+        const project = yield* resolveProject(thread.projectId);
+        yield* appendBashActivity();
+        return yield* runComposerBashCommand({
+          text: message.text,
+          cwd:
+            resolveThreadWorkspaceCwd({ thread, projects: project ? [project] : [] }) ?? undefined,
+        });
+      }).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
+        Effect.onInterrupt(() =>
+          appendBashActivity("Bash command canceled.", true).pipe(
+            Effect.andThen(
+              appendTurnStartFailure(
+                "Bash command canceled",
+                "The command was canceled before its result could be sent.",
+              ),
+            ),
+          ),
+        ),
+      );
+      composerCommands.delete(message.id);
+      if (result === null) return;
+      yield* appendBashActivity(result.detail, result.failed);
+      return yield* providerService.sendTurn({ ...sendTurnRequest.value, input: result.input });
+    }).pipe(Effect.asVoid, Effect.catchCause(recoverTurnStartFailure));
     // The forked send settles `sent` from here on, so drop the entry the post-processing hook uses.
     if (resumed && event.commandId !== null) resumedTurnStarts.delete(event.commandId);
-    yield* send.pipe(
+    const fiber = yield* send.pipe(
       Effect.ensuring(resumed ? Deferred.succeed(resumed.sent, undefined) : Effect.void),
+      Effect.ensuring(Effect.sync(() => composerCommands.delete(message.id))),
       Effect.forkScoped,
     );
+    if (isBashCommand) composerCommands.set(message.id, { threadId: thread.id, fiber });
   });
 
   const resumeNextQueuedTurn = Effect.fn("resumeNextQueuedTurn")(function* (threadId: ThreadId) {
@@ -1639,6 +1711,7 @@ const make = Effect.gen(function* () {
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-interrupt-requested" }>,
   ) {
+    const canceledBash = yield* interruptComposerCommands(event.payload.threadId);
     yield* cancelTurnsAfterCompaction(
       event.payload.threadId,
       "Context compaction was interrupted. Send this message again to continue.",
@@ -1648,6 +1721,13 @@ const make = Effect.gen(function* () {
       return;
     }
     const session = thread.session;
+    if (canceledBash && session && session.status !== "stopped" && session.activeTurnId === null) {
+      return yield* setThreadSession({
+        threadId: thread.id,
+        session: { ...session, status: "ready", updatedAt: event.payload.createdAt },
+        createdAt: event.payload.createdAt,
+      });
+    }
     if (!session || session.status === "stopped") {
       return yield* appendProviderFailureActivity({
         threadId: event.payload.threadId,
@@ -1829,6 +1909,7 @@ const make = Effect.gen(function* () {
   const processSessionStopRequested = Effect.fn("processSessionStopRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.session-stop-requested" }>,
   ) {
+    yield* interruptComposerCommands(event.payload.threadId);
     const thread = yield* resolveThreadShell(event.payload.threadId);
     if (!thread) {
       return;
@@ -2079,4 +2160,6 @@ const make = Effect.gen(function* () {
   } satisfies ProviderCommandReactorShape;
 });
 
-export const ProviderCommandReactorLive = Layer.effect(ProviderCommandReactor, make);
+export const ProviderCommandReactorLive = Layer.effect(ProviderCommandReactor, make).pipe(
+  Layer.provide(ProcessRunner.layer),
+);

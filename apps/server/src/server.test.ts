@@ -4559,6 +4559,58 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("requires terminal permission for Bash composer submissions", () =>
+    Effect.gen(function* () {
+      const dispatched: string[] = [];
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatched.push(command.commandId);
+                return { sequence: 1 };
+              }),
+          },
+        },
+      });
+      const { body: token } = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: "orchestration:operate",
+      });
+      const ticketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
+        headers: { authorization: `Bearer ${token.access_token ?? ""}` },
+      });
+      const ticket = (yield* ticketResponse.json) as { readonly ticket: string };
+      const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(ticket.ticket)}`;
+      yield* withWsRpcClient(wsUrl, (client) =>
+        Effect.gen(function* () {
+          const command = (text: string) => ({
+            type: "thread.turn.start" as const,
+            commandId: CommandId.make(text === "hello" ? "normal-message" : "bash-message"),
+            threadId: ThreadId.make("thread-bash-scope"),
+            message: {
+              messageId: MessageId.make("scope-message"),
+              role: "user" as const,
+              text,
+              attachments: [],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: "full-access" as const,
+            interactionMode: "default" as const,
+            createdAt: "2026-01-01T00:00:00.000Z",
+          });
+          yield* client[ORCHESTRATION_WS_METHODS.dispatchCommand](command("hello"));
+          const error = yield* client[ORCHESTRATION_WS_METHODS.dispatchCommand](
+            command("!printf hello"),
+          ).pipe(Effect.flip);
+          assert.equal(error._tag, "EnvironmentAuthorizationError");
+          if (error._tag === "EnvironmentAuthorizationError")
+            assert.equal(error.requiredScope, "terminal:operate");
+        }),
+      );
+      assert.deepEqual(dispatched, ["normal-message"]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("does not allow management-only access tokens to operate the environment", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();

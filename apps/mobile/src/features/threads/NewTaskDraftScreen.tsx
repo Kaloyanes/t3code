@@ -1758,6 +1758,7 @@ export function NewTaskDraftScreen(props: {
           style={promptEnhancementHaloStyle}
         />
         <ComposerSurface
+          bashMode={flow.prompt.startsWith("!")}
           style={{
             borderRadius: 26,
             minHeight: 140,

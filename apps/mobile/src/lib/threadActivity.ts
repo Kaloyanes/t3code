@@ -1,3 +1,8 @@
+import {
+  indexComposerBashCommands,
+  isComposerBashEntry,
+  type ComposerBashCommand,
+} from "@t3tools/client-runtime/composer-bash";
 import * as Option from "effect/Option";
 import { foldUserInputActivities } from "@t3tools/client-runtime/work-log/user-input";
 import * as Schema from "effect/Schema";
@@ -139,6 +144,7 @@ type RawThreadFeedEntry =
       readonly id: string;
       readonly createdAt: string;
       readonly message: OrchestrationThread["messages"][number];
+      readonly bashCommand?: ComposerBashCommand | undefined;
     }
   | {
       readonly type: "activity";
@@ -573,6 +579,12 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (!entry.detail && (activity.kind === "runtime.error" || activity.kind === "runtime.warning")) {
     const message = asTrimmedString(payload?.message);
     if (message) entry.detail = message;
+  }
+  // Composer Bash output is shown whole on its message. The client projection
+  // trims `data.rawOutput` to one line, so read the untrimmed `detail`.
+  const composerBashOutput = payload?.detail;
+  if (toolCallId?.startsWith("composer-bash:") && typeof composerBashOutput === "string") {
+    entry.detail = composerBashOutput;
   }
   if (viewedImagePath) {
     entry.viewedImagePath = viewedImagePath;
@@ -2420,6 +2432,9 @@ export function buildThreadFeed(
     (entry) =>
       oldestLoadedMessageCreatedAt === null || entry.createdAt >= oldestLoadedMessageCreatedAt,
   );
+  const bashCommands = indexComposerBashCommands(
+    activityEntries.map((entry) => entry.activity.workEntry),
+  );
   const foldedAnswerMessageIds = new Set(
     activityEntries.flatMap((entry) =>
       entry.activity.workEntry.questionAnswer
@@ -2432,14 +2447,28 @@ export function buildThreadFeed(
       ...messages
         .filter((message) => message.role !== "user" || !foldedAnswerMessageIds.has(message.id))
         .map((message) => {
+          const bashCommand =
+            message.role === "user" && message.text.startsWith("!")
+              ? bashCommands.get(message.id)
+              : undefined;
           let entry = messageEntriesCache.get(message);
-          if (!entry) {
-            entry = { type: "message", id: message.id, createdAt: message.createdAt, message };
+          if (
+            !entry ||
+            entry.bashCommand?.status !== bashCommand?.status ||
+            entry.bashCommand?.output !== bashCommand?.output
+          ) {
+            entry = {
+              type: "message",
+              id: message.id,
+              createdAt: message.createdAt,
+              message,
+              bashCommand,
+            };
             messageEntriesCache.set(message, entry);
           }
           return entry;
         }),
-      ...activityEntries,
+      ...activityEntries.filter((entry) => !isComposerBashEntry(entry.activity.workEntry)),
     ],
     (s) => new Date(s.createdAt),
     Order.Date,
