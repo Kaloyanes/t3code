@@ -242,45 +242,56 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               {props.triggerIcon}
             </span>
           ) : null}
-          {selectedEntries && props.triggerLabel === undefined ? (
-            <span className="flex shrink-0 items-center -space-x-1" aria-hidden="true">
-              {selectedEntries
-                .slice(0, 3)
-                .map((selection) =>
-                  selection.entry ? (
-                    <ProviderInstanceIcon
-                      key={`${selection.instanceId}:${selection.model}`}
-                      driverKind={selection.entry.driverKind}
-                      displayName={selection.entry.displayName}
-                      accentColor={selection.entry.accentColor}
-                      className="size-4 rounded-full bg-(--chat-composer-glass-surface,var(--background)) ring-2 ring-(--chat-composer-glass-surface,var(--background))"
-                      iconClassName="size-4"
-                    />
-                  ) : null,
-                )}
-              {selectedEntries.length > 3 ? (
-                <span className="relative z-30 flex size-4 items-center justify-center rounded-full bg-(--chat-composer-glass-surface,var(--background)) text-3xs ring-2 ring-(--chat-composer-glass-surface,var(--background))">
-                  +{selectedEntries.length - 3}
+          {props.triggerLabel === undefined && (selectedEntries || activeEntry) ? (
+            <AnimatedIcon
+              className="shrink-0"
+              stateKey={
+                selectedEntries
+                  ? JSON.stringify(
+                      selectedEntries.map(({ instanceId, model }) => [instanceId, model]),
+                    )
+                  : activeInstanceId
+              }
+            >
+              {selectedEntries ? (
+                <span className="flex shrink-0 items-center -space-x-1" aria-hidden="true">
+                  {selectedEntries
+                    .slice(0, 3)
+                    .map((selection) =>
+                      selection.entry ? (
+                        <ProviderInstanceIcon
+                          key={`${selection.instanceId}:${selection.model}`}
+                          driverKind={selection.entry.driverKind}
+                          displayName={selection.entry.displayName}
+                          accentColor={selection.entry.accentColor}
+                          className="size-4 rounded-full bg-(--chat-composer-glass-surface,var(--background)) ring-2 ring-(--chat-composer-glass-surface,var(--background))"
+                          iconClassName="size-4"
+                        />
+                      ) : null,
+                    )}
+                  {selectedEntries.length > 3 ? (
+                    <span className="relative z-30 flex size-4 items-center justify-center rounded-full bg-(--chat-composer-glass-surface,var(--background)) text-3xs ring-2 ring-(--chat-composer-glass-surface,var(--background))">
+                      +{selectedEntries.length - 3}
+                    </span>
+                  ) : null}
                 </span>
+              ) : activeEntry ? (
+                <ProviderInstanceIcon
+                  driverKind={activeEntry.driverKind}
+                  displayName={activeEntry.displayName}
+                  accentColor={activeEntry.accentColor}
+                  acpRegistryAgentId={activeEntry.acpRegistryAgentId}
+                  acpRegistryIconUrl={activeEntry.acpRegistryIconUrl}
+                  showBadge={showInstanceBadge}
+                  className="size-4"
+                  iconClassName={cn("size-4", props.activeProviderIconClassName)}
+                  indicatorBackground={props.instanceIndicatorBackground ?? "var(--contrast-input)"}
+                  badgeClassName={cn(
+                    "right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs",
+                    size === "xs" && "shadow-none",
+                  )}
+                />
               ) : null}
-            </span>
-          ) : activeEntry && props.triggerLabel === undefined ? (
-            <AnimatedIcon stateKey={activeEntry.instanceId}>
-              <ProviderInstanceIcon
-                driverKind={activeEntry.driverKind}
-                displayName={activeEntry.displayName}
-                accentColor={activeEntry.accentColor}
-                acpRegistryAgentId={activeEntry.acpRegistryAgentId}
-                acpRegistryIconUrl={activeEntry.acpRegistryIconUrl}
-                showBadge={showInstanceBadge}
-                className="size-4"
-                iconClassName={cn("size-4", props.activeProviderIconClassName)}
-                indicatorBackground={props.instanceIndicatorBackground ?? "var(--contrast-input)"}
-                badgeClassName={cn(
-                  "right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs",
-                  size === "xs" && "shadow-none",
-                )}
-              />
             </AnimatedIcon>
           ) : null}
           <Tooltip>
