@@ -2,7 +2,11 @@ import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools
 import { describe, expect, it } from "vite-plus/test";
 
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
-import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "./worktreeCleanup";
+import {
+  hasLinkedWorktreeIssue,
+  formatWorktreePathForDisplay,
+  getOrphanedWorktreePathForThread,
+} from "./worktreeCleanup";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
 
@@ -109,5 +113,17 @@ describe("formatWorktreePathForDisplay", () => {
   it("ignores trailing slashes", () => {
     const result = formatWorktreePathForDisplay("/tmp/custom-worktrees/my-worktree/");
     expect(result).toBe("my-worktree");
+  });
+});
+
+describe("hasLinkedWorktreeIssue", () => {
+  it("finds a linked issue on a shared worktree regardless of its thread", () => {
+    expect(
+      hasLinkedWorktreeIssue([{ worktreePath: "/worktrees/feature/" }], "/worktrees/feature"),
+    ).toBe(true);
+    expect(
+      hasLinkedWorktreeIssue([{ worktreePath: "/worktrees/other" }], "/worktrees/feature"),
+    ).toBe(false);
+    expect(hasLinkedWorktreeIssue([{ worktreePath: null }], "/worktrees/feature")).toBe(false);
   });
 });

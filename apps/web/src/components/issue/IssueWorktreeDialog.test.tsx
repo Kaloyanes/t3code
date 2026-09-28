@@ -10,6 +10,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const state = vi.hoisted(() => ({
+  preflight: vi.fn(),
+  remove: vi.fn(),
   prepare: vi.fn(),
   create: vi.fn(),
   link: vi.fn(),
@@ -43,7 +45,12 @@ vi.mock("~/state/server", () => ({
 }));
 
 vi.mock("~/state/issues", () => ({
-  issueEnvironment: { worktreePrepare: state.prepare, link: state.link },
+  issueEnvironment: {
+    worktreePrepare: state.prepare,
+    link: state.link,
+    worktreeDeletePreflight: state.preflight,
+    worktreeDelete: state.remove,
+  },
   useIssueCandidates: vi.fn(),
   useIssueComments: vi.fn(),
   useIssueDetail: vi.fn(),
@@ -81,6 +88,13 @@ vi.mock("../ui/dialog", () => ({
 vi.mock("../ui/button", () => ({ Button: "button" }));
 vi.mock("../ui/checkbox", () => ({ Checkbox: "input" }));
 vi.mock("../ui/input", () => ({ Input: "input" }));
+vi.mock("../ui/select", () => ({
+  Select: "select",
+  SelectTrigger: "label",
+  SelectValue: "span",
+  SelectPopup: "div",
+  SelectItem: "option",
+}));
 
 import { IssueWorktreeDialog } from "./IssueDetailPanel";
 
@@ -211,5 +225,113 @@ describe("IssueWorktreeDialog", () => {
     expect(state.link).toHaveBeenCalled();
     expect(state.newThread).not.toHaveBeenCalled();
     expect(JSON.stringify(view.toJSON())).toContain("Issue linked to this worktree.");
+  });
+});
+
+describe("issue worktree deletion choices", () => {
+  async function checkWorktree(issueState: "open" | "closed" | null = "open") {
+    state.refs = [{ name: worktree.branch, worktreePath: worktree.worktreePath }];
+    state.threads = [
+      {
+        id: "thread",
+        environmentId: "remote",
+        projectId: "project",
+        worktreePath: worktree.worktreePath,
+      },
+    ];
+    state.preflight.mockResolvedValue({
+      _tag: "Success",
+      value: {
+        items: [
+          {
+            threadId: "thread",
+            projectId: "project",
+            path: worktree.worktreePath,
+            branch: worktree.branch,
+            blocked: false,
+            changedFiles: [],
+            unpushedCommitCount: 0,
+            requiresForce: false,
+            issues: [{ ...reference, state: issueState }],
+          },
+        ],
+      },
+    });
+    state.remove.mockResolvedValue({
+      _tag: "Success",
+      value: {
+        results: [
+          {
+            threadId: "thread",
+            path: worktree.worktreePath,
+            deleted: true,
+            warnings: ["acme/repo#142 remains open. Closing failed."],
+          },
+        ],
+      },
+    });
+    await renderDialog();
+    await act(async () =>
+      renderer!.root
+        .findAllByType("input")
+        .find((item) => item.props.onCheckedChange)!
+        .props.onCheckedChange(true),
+    );
+    await act(async () =>
+      renderer!.root
+        .findAllByType("button")
+        .find((item) => item.props.children?.props?.children?.includes("Check 1 before deleting"))!
+        .props.onClick(),
+    );
+  }
+  async function confirmDelete() {
+    await act(async () =>
+      renderer!.root
+        .findAllByType("button")
+        .find((item) => item.props.children === "Delete selected worktrees")!
+        .props.onClick(),
+    );
+  }
+  it.each(["completed", "not-planned"])(
+    "submits %s only when selected and shows the failed-close warning after deletion",
+    async (action) => {
+      await checkWorktree();
+      await act(async () => renderer!.root.findByType("select").props.onValueChange(action));
+      await confirmDelete();
+      expect(state.remove.mock.calls[0]?.[0]).toMatchObject({
+        environmentId: "remote",
+        input: { issueDecisions: [{ ...reference, action }] },
+      });
+      expect(JSON.stringify(renderer!.toJSON())).toContain("remains open. Closing failed.");
+      expect(JSON.stringify(renderer!.toJSON())).toContain("Deleted");
+    },
+  );
+  it("keeps open issues unchanged by default", async () => {
+    await checkWorktree();
+    await confirmDelete();
+    expect(state.remove.mock.calls[0]?.[0].input.issueDecisions).toEqual([]);
+  });
+  it("allows a closed issue without a close decision", async () => {
+    await checkWorktree("closed");
+    expect(renderer!.root.findAllByType("select")).toHaveLength(0);
+    await confirmDelete();
+    expect(state.remove).toHaveBeenCalledOnce();
+  });
+  it("shows an explicit unchanged path for unknown issue state", async () => {
+    await checkWorktree(null);
+    expect(JSON.stringify(renderer!.toJSON())).toContain("Leave unchanged");
+    await confirmDelete();
+    expect(state.remove.mock.calls[0]?.[0].input.issueDecisions).toEqual([]);
+  });
+  it("requires a new preflight after the selected worktrees change", async () => {
+    await checkWorktree();
+    await act(async () =>
+      renderer!.root
+        .findAllByType("input")
+        .find((item) => item.props.onCheckedChange)!
+        .props.onCheckedChange(false),
+    );
+    expect(JSON.stringify(renderer!.toJSON())).not.toContain("Delete selected worktrees");
+    expect(state.remove).not.toHaveBeenCalled();
   });
 });

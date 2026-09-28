@@ -95,6 +95,10 @@ prevent removal. Branches and thread history stay; starting another turn recreat
 Merge cleanup requires the commits to be included in the remote default branch, so squash merges
 may need the inactivity rule instead.
 
+When deleting a worktree manually, choose whether each open linked issue stays open, closes as
+completed, or closes as not planned. Issue links and conversation history remain. If an issue
+cannot be closed, deletion still proceeds and reports the failed issue update.
+
 To finish linked issues before removing merged worktrees, enable **Complete linked issue on merge**
 in **Settings → Source control** and **Delete merged worktrees** in **Settings → Storage**.
 Once every linked pull request has merged, T3 Code marks the linked issue completed and posts a

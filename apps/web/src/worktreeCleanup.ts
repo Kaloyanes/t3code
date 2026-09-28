@@ -1,3 +1,5 @@
+import type { IssueLinkedWork } from "@t3tools/contracts";
+import { normalizeProjectPathForComparison } from "./lib/projectPaths";
 import type { ThreadShell } from "./types";
 
 function normalizeWorktreePath(path: string | null): string | null {
@@ -42,4 +44,16 @@ export function formatWorktreePathForDisplay(worktreePath: string): string {
   const parts = normalized.split("/");
   const lastPart = parts[parts.length - 1]?.trim() ?? "";
   return lastPart.length > 0 ? lastPart : trimmed;
+}
+
+export function hasLinkedWorktreeIssue(
+  issues: ReadonlyArray<Pick<IssueLinkedWork, "worktreePath">>,
+  worktreePath: string,
+) {
+  return issues.some(
+    (issue) =>
+      issue.worktreePath !== null &&
+      normalizeProjectPathForComparison(issue.worktreePath) ===
+        normalizeProjectPathForComparison(worktreePath),
+  );
 }

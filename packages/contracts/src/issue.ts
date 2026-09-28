@@ -489,11 +489,24 @@ export const IssueWorktreeDeletePreflightInput = Schema.Struct({
 });
 export type IssueWorktreeDeletePreflightInput = typeof IssueWorktreeDeletePreflightInput.Type;
 
+export const IssueWorktreeDeleteIssue = Schema.Struct({
+  ...IssueRef.fields,
+  state: Schema.NullOr(IssueState),
+});
+export type IssueWorktreeDeleteIssue = typeof IssueWorktreeDeleteIssue.Type;
+
+export const IssueWorktreeDeleteDecision = Schema.Struct({
+  ...IssueRef.fields,
+  action: Schema.Literals(["keep-open", "completed", "not-planned"]),
+});
+export type IssueWorktreeDeleteDecision = typeof IssueWorktreeDeleteDecision.Type;
+
 export const IssueWorktreeDeletePreflightItem = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
   path: TrimmedNonEmptyString,
   branch: TrimmedNonEmptyString,
+  issues: Schema.optional(Schema.Array(IssueWorktreeDeleteIssue)),
   activeAgent: Schema.NullOr(TrimmedNonEmptyString),
   blocked: Schema.Boolean,
   changedFiles: Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(1_000)),
@@ -512,6 +525,8 @@ export type IssueWorktreeDeletePreflightResult = typeof IssueWorktreeDeletePrefl
 export const IssueWorktreeDeleteInput = Schema.Struct({
   selections: IssueWorktreeDeleteSelections,
   forceAcknowledged: Schema.Boolean,
+  preserveUnpushedCommits: Schema.optional(Schema.Boolean),
+  issueDecisions: Schema.optional(Schema.Array(IssueWorktreeDeleteDecision)),
 });
 export type IssueWorktreeDeleteInput = typeof IssueWorktreeDeleteInput.Type;
 
@@ -522,6 +537,7 @@ export const IssueWorktreeDeleteItemResult = Schema.Struct({
   deleted: Schema.Boolean,
   error: Schema.NullOr(TrimmedNonEmptyString),
   detachedWorkspace: Schema.NullOr(IssueDetachedWorkspace),
+  warnings: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 export type IssueWorktreeDeleteItemResult = typeof IssueWorktreeDeleteItemResult.Type;
 

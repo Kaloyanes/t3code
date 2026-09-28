@@ -1,3 +1,5 @@
+import { WorktreeIssueDecisions } from "./WorktreeIssueDecisions";
+import type { IssueWorktreeDeleteDecision } from "@t3tools/contracts";
 import type {
   EnvironmentId,
   IssueComment,
@@ -1072,6 +1074,7 @@ export function IssueWorktreeDialog({
   const [preflightResult, setPreflightResult] = useState<IssueWorktreeDeletePreflightResult | null>(
     null,
   );
+  const [issueDecisions, setIssueDecisions] = useState<IssueWorktreeDeleteDecision[]>([]);
   const [deleteResult, setDeleteResult] = useState<IssueWorktreeDeleteResult | null>(null);
   const [forceAcknowledged, setForceAcknowledged] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -1098,7 +1101,15 @@ export function IssueWorktreeDialog({
               id: option.worktreePath,
               projectId: reference.projectId,
               title: option.label,
-              threadId: thread?.id ?? null,
+              threadId:
+                thread?.id ??
+                project.worktreeIssues?.find(
+                  (issue) =>
+                    issue.worktreePath !== null &&
+                    normalizeProjectPathForComparison(issue.worktreePath) ===
+                      normalizeProjectPathForComparison(option.worktreePath),
+                )?.threadId ??
+                null,
             };
           })
         : [],
@@ -1201,6 +1212,7 @@ export function IssueWorktreeDialog({
       (value) => {
         setPreflightResult(value as IssueWorktreeDeletePreflightResult);
         setDeleteResult(null);
+        setIssueDecisions([]);
         setForceAcknowledged(false);
         setNotice("Worktree check complete.");
       },
@@ -1218,8 +1230,13 @@ export function IssueWorktreeDialog({
         remove({
           environmentId,
           input: {
-            selections: selectedInputs,
+            selections: preflightResult.items.map(({ threadId, projectId, path }) => ({
+              threadId,
+              projectId,
+              path,
+            })),
             forceAcknowledged,
+            issueDecisions,
           },
         }),
       (value) => {
@@ -1425,14 +1442,16 @@ export function IssueWorktreeDialog({
                       <Checkbox
                         id={checkboxId}
                         checked={selected.has(thread.id)}
-                        onCheckedChange={(checked) =>
+                        onCheckedChange={(checked) => {
+                          setPreflightResult(null);
+                          setIssueDecisions([]);
                           setSelected((current) => {
                             const next = new Set(current);
                             if (checked === true) next.add(thread.id);
                             else next.delete(thread.id);
                             return next;
-                          })
-                        }
+                          });
+                        }}
                         aria-label={`Select ${thread.title}`}
                         disabled={deletePending || preflightPending || thread.threadId === null}
                       />
@@ -1543,6 +1562,12 @@ export function IssueWorktreeDialog({
                   {item.reason ? ` · ${item.reason}` : ""}
                 </div>
               ))}
+              <WorktreeIssueDecisions
+                issues={preflightResult.items.flatMap((item) => item.issues ?? [])}
+                decisions={issueDecisions}
+                onChange={setIssueDecisions}
+                disabled={deletePending}
+              />
               {preflightResult.items.some((item) => item.requiresForce) ? (
                 <label className="flex items-center gap-2">
                   <Checkbox
@@ -1559,6 +1584,7 @@ export function IssueWorktreeDialog({
                 disabled={
                   deletePending ||
                   preflightPending ||
+                  preflightResult.items.some((item) => item.blocked) ||
                   (!forceAcknowledged && preflightResult.items.some((item) => item.requiresForce))
                 }
                 onClick={deleteWorktrees}
@@ -1591,6 +1617,11 @@ export function IssueWorktreeDialog({
                 >
                   {item.deleted ? "Deleted" : "Not deleted"} {item.path}
                   {item.error ? ` · ${item.error}` : ""}
+                  {item.warnings?.map((warning) => (
+                    <span key={warning} className="block">
+                      {warning}
+                    </span>
+                  ))}
                   {item.detachedWorkspace ? " · thread is now read-only" : ""}
                 </p>
               ))}

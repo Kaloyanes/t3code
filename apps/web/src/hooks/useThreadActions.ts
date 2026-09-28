@@ -40,7 +40,11 @@ import {
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useUiStateStore } from "../uiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
-import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
+import {
+  hasLinkedWorktreeIssue,
+  formatWorktreePathForDisplay,
+  getOrphanedWorktreePathForThread,
+} from "../worktreeCleanup";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
 import * as ThreadUndo from "./threadUndo";
@@ -408,7 +412,17 @@ export function useThreadActions() {
       const automaticWorktreeCleanup = environmentSettings
         ? resolveWorktreeCleanup(environmentSettings, thread.projectId).worktreeOnDelete
         : false;
-      if (canDeleteWorktree && localApi && !automaticWorktreeCleanup) {
+      const linkedWorktreeIssue =
+        orphanedWorktreePath !== null &&
+        hasLinkedWorktreeIssue(threadProject?.worktreeIssues ?? [], orphanedWorktreePath);
+      if (canDeleteWorktree && linkedWorktreeIssue && !automaticWorktreeCleanup) {
+        toastManager.add({
+          type: "info",
+          title: "Linked worktree will be kept",
+          description: "Delete the worktree from the sidebar to review linked issues.",
+        });
+      }
+      if (canDeleteWorktree && localApi && !automaticWorktreeCleanup && !linkedWorktreeIssue) {
         const confirmationResult = await settlePromise(() =>
           localApi.dialogs.confirm(
             [

@@ -84,6 +84,12 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { VcsListRefsResult } from "@t3tools/contracts";
 import { parse as parseYaml } from "yaml";
 
+import {
+  deleteIssueWorktree,
+  resolveIssueWorktreeAttachment,
+  readIssueWorktreeThreads,
+} from "./IssueWorktreeDeletion.ts";
+
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -1430,6 +1436,21 @@ export const make = Effect.gen(function* () {
           Effect.asVoid,
         );
     });
+  const publishWorktreeIssues = (projectId: ProjectIdType) =>
+    Effect.gen(function* () {
+      const currentTime = yield* Clock.currentTimeMillis;
+      yield* engine
+        .dispatch({
+          type: "project.meta.update",
+          commandId: CommandId.make(`issue-worktree-refresh-${++commandSequence}-${currentTime}`),
+          projectId,
+        })
+        .pipe(
+          Effect.mapError((cause) =>
+            operationError("worktree.delete", "Unable to refresh project issues.", cause),
+          ),
+        );
+    });
   const persistLink = (
     input: IssueLinkInput,
     repo: Repo,
@@ -1683,16 +1704,81 @@ export const make = Effect.gen(function* () {
       return { worktree, linkedWork };
     });
 
+  const projectWorktreeThreads = (projectId: ProjectIdType) =>
+    readIssueWorktreeThreads(projectId).pipe(
+      Effect.provideService(SqlClient.SqlClient, sql),
+      Effect.mapError((cause) =>
+        operationError("worktree.delete", "Unable to resolve worktree threads.", cause),
+      ),
+    );
+  const worktreeThreads = (projectId: ProjectIdType, worktreePath: string) =>
+    projectWorktreeThreads(projectId).pipe(
+      Effect.map((threads) =>
+        threads.filter(
+          (thread) =>
+            thread.worktreePath !== null &&
+            path.resolve(thread.worktreePath) === path.resolve(worktreePath),
+        ),
+      ),
+    );
+
+  const freshIssueState = (input: IssueRef) =>
+    Effect.gen(function* () {
+      detailCache.clear();
+      return (yield* detail(input)).state;
+    });
+
+  const worktreeIssues = (projectId: ProjectIdType, worktreePath: string) =>
+    Effect.gen(function* () {
+      const rows = yield* sql<{
+        host: string;
+        repository: string;
+        number: number;
+        worktreePath: string | null;
+        attachedPath: string | null;
+      }>`
+        SELECT links.host, links.repository, links.number,
+          links.worktree_path AS "worktreePath", threads.worktree_path AS "attachedPath"
+        FROM projection_issue_links links
+        LEFT JOIN projection_threads threads ON threads.thread_id = links.thread_id
+        WHERE links.project_id = ${projectId}
+      `.pipe(
+        Effect.mapError((cause) =>
+          operationError("worktree.delete", "Unable to resolve linked issues.", cause),
+        ),
+      );
+      const unique = new Map<string, IssueRef>();
+      for (const row of rows) {
+        if (
+          ![row.worktreePath, row.attachedPath].some(
+            (value) => value !== null && path.resolve(value) === path.resolve(worktreePath),
+          )
+        )
+          continue;
+        unique.set(`${row.host}\0${row.repository}\0${row.number}`, {
+          projectId,
+          host: row.host,
+          repository: row.repository,
+          number: row.number,
+        });
+      }
+      return yield* Effect.forEach([...unique.values()], (reference) =>
+        freshIssueState(reference).pipe(
+          Effect.match({
+            onFailure: () => ({ ...reference, state: null }),
+            onSuccess: (state) => ({ ...reference, state }),
+          }),
+        ),
+      );
+    });
+
   const preflightItem = (
     selection: IssueWorktreeDeletePreflightInput["selections"][number],
   ): Effect.Effect<IssueWorktreeDeletePreflightItem, IssueError> =>
     Effect.gen(function* () {
-      const [thread, project] = yield* Effect.all([
-        projections.getThreadShellById(selection.threadId).pipe(
-          Effect.mapError((cause) =>
-            operationError("worktree.deletePreflight", "Unable to resolve thread.", cause),
-          ),
-          Effect.map(Option.getOrUndefined),
+      const [liveThread, project] = yield* Effect.all([
+        projectWorktreeThreads(selection.projectId).pipe(
+          Effect.map((threads) => threads.find((thread) => thread.id === selection.threadId)),
         ),
         projections.getProjectShellById(selection.projectId).pipe(
           Effect.mapError((cause) =>
@@ -1701,6 +1787,33 @@ export const make = Effect.gen(function* () {
           Effect.map(Option.getOrUndefined),
         ),
       ]);
+      const link =
+        liveThread === undefined
+          ? yield* sql<{
+              projectId: ProjectIdType;
+              branch: string | null;
+              worktreePath: string | null;
+            }>`
+        SELECT project_id AS "projectId", branch, worktree_path AS "worktreePath"
+        FROM projection_issue_links WHERE thread_id = ${selection.threadId} AND project_id = ${selection.projectId}
+      `.pipe(
+              Effect.map((rows) =>
+                rows.find(
+                  (row) =>
+                    row.worktreePath !== null &&
+                    path.resolve(row.worktreePath) === path.resolve(selection.path),
+                ),
+              ),
+              Effect.mapError((cause) =>
+                operationError(
+                  "worktree.deletePreflight",
+                  "Unable to resolve issue workspace.",
+                  cause,
+                ),
+              ),
+            )
+          : undefined;
+      const thread = resolveIssueWorktreeAttachment(selection.projectId, liveThread, link);
       const branch = thread?.branch ?? "unknown";
       const base = {
         threadId: selection.threadId,
@@ -1721,7 +1834,7 @@ export const make = Effect.gen(function* () {
         requiresForce: false,
         reason,
       });
-      if (thread === undefined || project === undefined)
+      if (thread === null || project === undefined)
         return blocked("Thread or project was not found.");
       if (thread.projectId !== selection.projectId)
         return blocked("Thread does not belong to this project.");
@@ -1754,11 +1867,13 @@ export const make = Effect.gen(function* () {
       ) {
         return blocked("The requested path resolves to the project checkout.");
       }
-      const activeAgent =
-        thread.session !== null &&
-        (thread.session.status === "starting" || thread.session.status === "running")
-          ? (thread.session.providerName ?? "provider")
-          : null;
+      const issues = yield* worktreeIssues(selection.projectId, attachedPath);
+      const siblings = yield* worktreeThreads(selection.projectId, attachedPath);
+      const activeThread = siblings.find(
+        (sibling) =>
+          sibling.session?.status === "starting" || sibling.session?.status === "running",
+      );
+      const activeAgent = activeThread?.session?.providerName ?? (activeThread ? "provider" : null);
       const local = yield* git.localStatus({ cwd: attachedPath }).pipe(
         Effect.matchEffect({
           onFailure: () => Effect.succeed(null),
@@ -1797,6 +1912,7 @@ export const make = Effect.gen(function* () {
         changedFiles,
         unpushedCommitCount,
         canDelete: activeAgent === null && !requiresForce,
+        issues,
         requiresForce,
         reason,
       };
@@ -1812,163 +1928,142 @@ export const make = Effect.gen(function* () {
   ): Effect.Effect<IssueWorktreeDeleteResult, IssueError> =>
     Effect.gen(function* () {
       const results: Array<IssueWorktreeDeleteResult["results"][number]> = [];
+      const selectedPaths = new Set<string>();
       for (const selection of input.selections) {
-        const preflight = yield* preflightItem(selection);
-        if (preflight.blocked) {
-          results.push({
-            threadId: selection.threadId,
-            projectId: selection.projectId,
-            path: selection.path,
-            deleted: false,
-            error: preflight.reason ?? "Worktree deletion is blocked.",
-            detachedWorkspace: null,
-          });
-          continue;
-        }
-        if (preflight.requiresForce && !input.forceAcknowledged) {
-          results.push({
-            threadId: selection.threadId,
-            projectId: selection.projectId,
-            path: selection.path,
-            deleted: false,
-            error: "Force acknowledgement is required.",
-            detachedWorkspace: null,
-          });
-          continue;
-        }
-        const project = yield* projections.getProjectShellById(selection.projectId).pipe(
-          Effect.mapError((cause) =>
-            operationError("worktree.delete", "Unable to resolve project.", cause),
-          ),
-          Effect.map(Option.getOrUndefined),
-        );
-        const thread = yield* projections.getThreadShellById(selection.threadId).pipe(
-          Effect.mapError((cause) =>
-            operationError("worktree.delete", "Unable to resolve thread.", cause),
-          ),
-          Effect.map(Option.getOrUndefined),
-        );
-        if (project === undefined || thread === undefined || thread.worktreePath === null) {
-          results.push({
-            threadId: selection.threadId,
-            projectId: selection.projectId,
-            path: selection.path,
-            deleted: false,
-            error: "Thread or worktree was not found.",
-            detachedWorkspace: null,
-          });
-          continue;
-        }
-        const projectRoot = path.resolve(project.workspaceRoot);
-        const attachedPath = path.resolve(thread.worktreePath);
-        const requestedPath = path.resolve(selection.path);
-        if (!isSafeIssueWorktreePath({ projectRoot, attachedPath, requestedPath })) {
-          results.push({
-            threadId: selection.threadId,
-            projectId: selection.projectId,
-            path: selection.path,
-            deleted: false,
-            error: "The requested path is not the thread's attached worktree.",
-            detachedWorkspace: null,
-          });
-          continue;
-        }
-        const detachedAt = now();
-        const detachedWorkspace = {
-          threadId: selection.threadId,
-          projectId: selection.projectId,
-          branch: thread.branch,
-          worktreePath: thread.worktreePath,
-          detachedAt,
-        };
-        yield* sql
-          .withTransaction(
+        const key = `${selection.projectId}\0${path.resolve(selection.path)}`;
+        if (selectedPaths.has(key)) continue;
+        selectedPaths.add(key);
+        const result = yield* deleteIssueWorktree(input, selection, {
+          preflight: () => preflightItem(selection),
+          close,
+          state: freshIssueState,
+          detach: () =>
             Effect.gen(function* () {
-              yield* sql`
-              INSERT INTO projection_issue_detached_workspaces (
-                thread_id, project_id, branch, worktree_path, detached_at
-              ) VALUES (
-                ${selection.threadId}, ${selection.projectId}, ${thread.branch}, ${thread.worktreePath}, ${detachedAt}
-              )
-              ON CONFLICT(thread_id) DO UPDATE SET
-                project_id = excluded.project_id,
-                branch = excluded.branch,
-                worktree_path = excluded.worktree_path,
-                detached_at = excluded.detached_at
-            `;
-              yield* sql`
-              UPDATE projection_issue_links
-              SET branch = NULL, worktree_path = NULL, detached_at = ${detachedAt}
-              WHERE thread_id = ${selection.threadId}
-            `;
-            }),
-          )
-          .pipe(
-            Effect.mapError((cause) =>
-              operationError("worktree.delete", "Unable to save detached workspace state.", cause),
-            ),
-          );
-        yield* dispatchWorkspace(selection.threadId, null, null, "delete");
-        yield* worktreeRuns.stopWorkspace(attachedPath);
-        const removed = yield* Effect.option(
-          git.removeWorktree({
-            cwd: projectRoot,
-            path: attachedPath,
-            force: input.forceAcknowledged,
-          }),
-        );
-        if (Option.isNone(removed)) {
-          yield* sql
-            .withTransaction(
-              Effect.gen(function* () {
-                yield* sql`
-                  UPDATE projection_issue_links
-                  SET branch = ${thread.branch}, worktree_path = ${thread.worktreePath}, detached_at = NULL
-                  WHERE thread_id = ${selection.threadId}
-                `;
-                yield* sql`
-                  DELETE FROM projection_issue_detached_workspaces
-                  WHERE thread_id = ${selection.threadId}
-                `;
-              }),
-            )
-            .pipe(
-              Effect.mapError((cause) =>
-                operationError(
-                  "worktree.delete",
-                  "Unable to restore issue worktree state after deletion failed.",
-                  cause,
+              const siblings = yield* worktreeThreads(selection.projectId, selection.path);
+              const thread = siblings.find((item) => item.id === selection.threadId);
+              if (
+                siblings.some(
+                  (item) =>
+                    item.session?.status === "starting" || item.session?.status === "running",
+                )
+              ) {
+                return yield* operationError("worktree.delete", "A worktree agent is running.");
+              }
+              const detachedAt = now();
+              const previousLinks = yield* sql<{
+                threadId: string;
+                host: string;
+                repository: string;
+                number: number;
+                branch: string | null;
+                worktreePath: string | null;
+                detachedAt: string | null;
+              }>`
+              SELECT thread_id AS "threadId", host, repository, number, branch,
+                worktree_path AS "worktreePath", detached_at AS "detachedAt"
+              FROM projection_issue_links WHERE project_id = ${selection.projectId}
+            `.pipe(
+                Effect.map((links) =>
+                  links.filter(
+                    (link) =>
+                      siblings.some((sibling) => sibling.id === link.threadId) ||
+                      (link.worktreePath !== null &&
+                        path.resolve(link.worktreePath) === path.resolve(selection.path)),
+                  ),
                 ),
-              ),
-            );
-          yield* dispatchWorkspace(
-            selection.threadId,
-            thread.branch,
-            thread.worktreePath,
-            "delete-restore",
-          );
-          results.push({
-            threadId: selection.threadId,
-            projectId: selection.projectId,
-            path: selection.path,
-            deleted: false,
-            error: "Unable to delete worktree.",
-            detachedWorkspace: null,
-          });
-          continue;
-        }
+              );
+              if (!thread && !previousLinks.some((link) => link.threadId === selection.threadId)) {
+                return yield* operationError(
+                  "worktree.delete",
+                  "The issue workspace changed. Check it again before deleting.",
+                );
+              }
+              const detachedWorkspace =
+                thread && previousLinks.some((link) => link.threadId === thread.id)
+                  ? {
+                      threadId: thread.id,
+                      projectId: thread.projectId,
+                      branch: thread.branch,
+                      worktreePath: thread.worktreePath,
+                      detachedAt,
+                    }
+                  : null;
+              const previousDetached = yield* Effect.forEach(siblings, (sibling) =>
+                findDetached(sibling.id),
+              );
+              const restore = Effect.gen(function* () {
+                yield* sql.withTransaction(
+                  Effect.gen(function* () {
+                    for (const link of previousLinks) {
+                      yield* sql`UPDATE projection_issue_links SET branch = ${link.branch}, worktree_path = ${link.worktreePath}, detached_at = ${link.detachedAt}
+                    WHERE thread_id = ${link.threadId} AND host = ${link.host} AND repository = ${link.repository} AND number = ${link.number}`;
+                    }
+                    for (const sibling of siblings) {
+                      const previous = previousDetached.find(
+                        (item) => item?.threadId === sibling.id,
+                      );
+                      if (previous) {
+                        yield* sql`INSERT INTO projection_issue_detached_workspaces (thread_id, project_id, branch, worktree_path, detached_at)
+                      VALUES (${previous.threadId}, ${previous.projectId}, ${previous.branch}, ${previous.worktreePath}, ${previous.detachedAt})
+                      ON CONFLICT(thread_id) DO UPDATE SET branch = excluded.branch, worktree_path = excluded.worktree_path, detached_at = excluded.detached_at`;
+                      } else {
+                        yield* sql`DELETE FROM projection_issue_detached_workspaces WHERE thread_id = ${sibling.id}`;
+                      }
+                    }
+                  }),
+                );
+                const restored = yield* Effect.forEach(siblings, (sibling) =>
+                  dispatchWorkspace(
+                    sibling.id,
+                    sibling.branch,
+                    sibling.worktreePath,
+                    "delete-restore",
+                  ).pipe(Effect.exit),
+                );
+                yield* publishWorktreeIssues(selection.projectId);
+                for (const result of restored)
+                  if (Exit.isFailure(result)) return yield* Effect.failCause(result.cause);
+              });
+              yield* Effect.gen(function* () {
+                yield* sql.withTransaction(
+                  Effect.gen(function* () {
+                    for (const sibling of siblings) {
+                      if (!previousLinks.some((link) => link.threadId === sibling.id)) continue;
+                      yield* sql`INSERT INTO projection_issue_detached_workspaces (thread_id, project_id, branch, worktree_path, detached_at)
+                    VALUES (${sibling.id}, ${sibling.projectId}, ${sibling.branch}, ${sibling.worktreePath}, ${detachedAt})
+                    ON CONFLICT(thread_id) DO UPDATE SET project_id = excluded.project_id, branch = excluded.branch, worktree_path = excluded.worktree_path, detached_at = excluded.detached_at`;
+                    }
+                    for (const link of previousLinks) {
+                      yield* sql`UPDATE projection_issue_links SET branch = NULL, worktree_path = NULL, detached_at = ${detachedAt}
+                        WHERE thread_id = ${link.threadId} AND host = ${link.host} AND repository = ${link.repository} AND number = ${link.number}`;
+                    }
+                  }),
+                );
+                yield* Effect.forEach(
+                  siblings,
+                  (sibling) => dispatchWorkspace(sibling.id, null, null, "delete"),
+                  { discard: true },
+                );
+                yield* publishWorktreeIssues(selection.projectId);
+              }).pipe(Effect.catch((cause) => restore.pipe(Effect.andThen(Effect.fail(cause)))));
+              return { detachedWorkspace, restore };
+            }),
+          remove: () =>
+            Effect.gen(function* () {
+              const project = yield* projections.getProjectShellById(selection.projectId);
+              if (Option.isNone(project))
+                return yield* operationError("worktree.delete", "Project was not found.");
+              yield* worktreeRuns.stopWorkspace(path.resolve(selection.path));
+              yield* git.removeWorktree({
+                cwd: project.value.workspaceRoot,
+                path: path.resolve(selection.path),
+                force: input.forceAcknowledged,
+              });
+            }),
+        });
+        results.push(result);
         listCache.clear();
         detailCache.clear();
-        commentsCache.clear();
-        templatesCache.clear();
-        results.push({
-          threadId: selection.threadId,
-          projectId: selection.projectId,
-          path: selection.path,
-          deleted: true,
-          error: null,
-          detachedWorkspace,
-        });
       }
       return { results };
     });

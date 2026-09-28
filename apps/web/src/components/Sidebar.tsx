@@ -1,3 +1,5 @@
+import type { IssueWorktreeDeleteDecision } from "@t3tools/contracts";
+import { issueEnvironment } from "../state/issues";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import {
@@ -400,7 +402,7 @@ function worktreeDeletionBlockReason(worktree: SidebarWorktreeGroup): string | n
   ) {
     return "agent running";
   }
-  return worktree.issues.length > 0 ? "linked issue" : null;
+  return null;
 }
 
 export function findWorktreeThreads<
@@ -1535,7 +1537,9 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
         target: server.worktreeRun,
       });
       if (props.threadRef !== null) {
-        useTerminalUiStateStore.getState().setTerminalOpen(props.threadRef, true);
+        useTerminalUiStateStore
+          .getState()
+          .setTerminalOpen(props.threadRef, true, { createTerminal: false });
         props.onThreadActivate(props.threadRef);
       }
       return;
@@ -3027,6 +3031,9 @@ export default function Sidebar() {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
+  const deleteIssueWorktree = useAtomCommand(issueEnvironment.worktreeDelete, {
+    reportFailure: false,
+  });
   const removeWorktree = useAtomCommand(vcsEnvironment.removeWorktree, {
     reportFailure: false,
   });
@@ -3856,7 +3863,11 @@ export default function Sidebar() {
     ],
   );
   const handleConfirmedWorktreeDelete = useCallback(
-    (repository: SidebarRepositoryGroup, worktree: SidebarWorktreeGroup) => {
+    (
+      repository: SidebarRepositoryGroup,
+      worktree: SidebarWorktreeGroup,
+      issueDecisions: IssueWorktreeDeleteDecision[],
+    ) => {
       void (async () => {
         const project = repository.project.memberProjects.find(
           (member) =>
@@ -3864,6 +3875,43 @@ export default function Sidebar() {
         );
         if (!project || worktreeDeletionBlockReason(worktree) !== null) return;
         const linkedThreads = findWorktreeThreads(threads, repository.environmentId, worktree.path);
+        if (worktree.issues.length > 0) {
+          const thread = linkedThreads.find((item) => item.projectId === worktree.projectId);
+
+          const result = await deleteIssueWorktree({
+            environmentId: repository.environmentId,
+            input: {
+              selections: [
+                {
+                  threadId: thread?.id ?? worktree.issues[0]!.threadId,
+                  projectId: worktree.projectId,
+                  path: worktree.path,
+                },
+              ],
+              forceAcknowledged: false,
+              preserveUnpushedCommits: true,
+              issueDecisions,
+            },
+          });
+          if (result._tag === "Failure") {
+            toastManager.add({
+              type: "error",
+              title: "Worktree removal could not be confirmed",
+              description: "Check the worktree and linked issue status before retrying.",
+            });
+            return;
+          }
+          for (const item of result.value.results) {
+            toastManager.add({
+              type: item.deleted ? (item.warnings?.length ? "warning" : "success") : "error",
+              title: item.deleted ? "Worktree deleted" : "Unable to delete worktree",
+              description: [item.error, ...(item.warnings ?? []), item.path]
+                .filter(Boolean)
+                .join(" "),
+            });
+          }
+          return;
+        }
         const detachResults = await Promise.all(
           linkedThreads.map((thread) =>
             updateThreadMetadata({
@@ -3930,7 +3978,7 @@ export default function Sidebar() {
         });
       })();
     },
-    [removeWorktree, threads, updateThreadMetadata],
+    [deleteIssueWorktree, removeWorktree, threads, updateThreadMetadata],
   );
   const settledThreadKeys = useMemo(
     () =>
@@ -6308,6 +6356,22 @@ export default function Sidebar() {
           environmentId={pendingWorktreeDelete.repository.environmentId}
           path={pendingWorktreeDelete.worktree.path}
           label={pendingWorktreeDelete.worktree.label}
+          {...(pendingWorktreeDelete.worktree.issues.length > 0
+            ? {
+                issueSelection: {
+                  threadId:
+                    findWorktreeThreads(
+                      threads,
+                      pendingWorktreeDelete.repository.environmentId,
+                      pendingWorktreeDelete.worktree.path,
+                    ).find(
+                      (thread) => thread.projectId === pendingWorktreeDelete.worktree.projectId,
+                    )?.id ?? pendingWorktreeDelete.worktree.issues[0]!.threadId,
+                  projectId: pendingWorktreeDelete.worktree.projectId,
+                  path: pendingWorktreeDelete.worktree.path,
+                },
+              }
+            : {})}
           threadCount={
             findWorktreeThreads(
               threads,
@@ -6316,7 +6380,7 @@ export default function Sidebar() {
             ).length
           }
           onClose={() => setPendingWorktreeDelete(null)}
-          onConfirm={() => {
+          onConfirm={(issueDecisions) => {
             const target = pendingWorktreeDelete;
             setPendingWorktreeDelete(null);
             const repository = repositoryGroupsRef.current.find(
@@ -6333,7 +6397,7 @@ export default function Sidebar() {
               });
               return;
             }
-            handleConfirmedWorktreeDelete(repository, worktree);
+            handleConfirmedWorktreeDelete(repository, worktree, issueDecisions);
           }}
         />
       ) : null}
