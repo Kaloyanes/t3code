@@ -125,6 +125,7 @@ import { useDiffPanelStore } from "../diffPanelStore";
 import {
   collapseExpandedComposerCursor,
   type ComposerSubmissionIntent,
+  resolveComposerDispatchMode,
   parseStandaloneComposerSlashCommand,
 } from "../composer-logic";
 import {
@@ -339,7 +340,6 @@ import {
   terminalContextReference,
 } from "../lib/composerContextRecords";
 import {
-  latestCompletedToolActivityId,
   type QueuedComposerMessage,
   type QueuedMessageSendSettings,
   useQueuedMessages,
@@ -5508,6 +5508,7 @@ export default function ChatView(props: ChatViewProps) {
       branch?: string;
       runtimeMode: RuntimeMode;
       interactionMode: ProviderInteractionMode;
+      deferProviderSettings?: boolean;
     }): Promise<AtomCommandResult<void, unknown>> => {
       if (!serverThread) {
         return AsyncResult.success(undefined);
@@ -5516,7 +5517,9 @@ export default function ChatView(props: ChatViewProps) {
       let result: AtomCommandResult<void, unknown> = AsyncResult.success(undefined);
       const metadataUpdate = resolveThreadMetadataUpdateForNextTurn({
         currentModelSelection: serverThread.modelSelection,
-        ...(input.modelSelection ? { nextModelSelection: input.modelSelection } : {}),
+        ...(input.modelSelection && !input.deferProviderSettings
+          ? { nextModelSelection: input.modelSelection }
+          : {}),
         currentBranch: serverThread.branch,
         ...(input.branch ? { nextBranch: input.branch } : {}),
       });
@@ -5536,7 +5539,7 @@ export default function ChatView(props: ChatViewProps) {
         }
       }
 
-      if (input.runtimeMode !== serverThread.runtimeMode) {
+      if (!input.deferProviderSettings && input.runtimeMode !== serverThread.runtimeMode) {
         result = mapAtomCommandResult(
           await setThreadRuntimeMode({
             environmentId,
@@ -5553,7 +5556,7 @@ export default function ChatView(props: ChatViewProps) {
         }
       }
 
-      if (input.interactionMode !== serverThread.interactionMode) {
+      if (!input.deferProviderSettings && input.interactionMode !== serverThread.interactionMode) {
         result = mapAtomCommandResult(
           await setThreadInteractionMode({
             environmentId,
@@ -7566,7 +7569,6 @@ export default function ChatView(props: ChatViewProps) {
         previewAnnotations: [],
         reviewComments: [],
         sendSettings: sendCtx ? readComposerSendSettings(sendCtx) : firstMessage.sendSettings,
-        queuedAfterToolActivityId: latestCompletedToolActivityId(threadActivities),
         // Restoration is not a send. The user decides when the overflow goes.
         holdUntilUserAction: true,
         createdAt: new Date().toISOString(),
@@ -7610,12 +7612,7 @@ export default function ChatView(props: ChatViewProps) {
     },
   ) => {
     e?.preventDefault();
-    const dispatchMode =
-      phase !== "running"
-        ? "start"
-        : (settings.followUpBehavior === "queue") !== (submissionIntent === "alternate")
-          ? "queue"
-          : "steer";
+    const dispatchMode = resolveComposerDispatchMode(settings.followUpBehavior, submissionIntent);
     // Typed out in full rather than picked from the menu. Attachments or contexts
     // mean the user is sending a prompt, so those go through as usual.
     if (
@@ -8562,6 +8559,7 @@ export default function ChatView(props: ChatViewProps) {
           : {}),
         runtimeMode,
         interactionMode: sendInteractionMode,
+        deferProviderSettings: dispatchMode === "queue",
       });
       if (settingsResult._tag === "Failure") {
         failure = settingsResult;
@@ -8850,7 +8848,7 @@ export default function ChatView(props: ChatViewProps) {
   queuedMessageActionsRef.current = {
     steer: (id) => {
       if (!activeThreadRef || queueBlockedByPendingRequest) return;
-      void sendQueuedMessage(activeThreadRef, id);
+      void sendQueuedMessage(activeThreadRef, id, "steer");
     },
     remove: (id) => {
       if (!activeThreadKey) return;

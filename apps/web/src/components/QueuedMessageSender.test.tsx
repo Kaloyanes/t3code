@@ -73,7 +73,6 @@ function enqueue(overrides: Partial<QueuedComposerMessage> = {}) {
       interactionMode: "default",
       promptEffort: null,
     },
-    queuedAfterToolActivityId: null,
     createdAt: "2026-09-25T00:00:00Z",
     ...overrides,
   });
@@ -114,7 +113,16 @@ describe("QueuedMessageSender", () => {
       createdAt: "2026-09-25T00:00:01Z",
     })),
     messages: userMessageIds.map((id) => ({ id, role: "user" })),
-    latestTurn: null,
+    latestTurn:
+      userMessageIds.length > 0
+        ? {
+            turnId: "turn-first",
+            state: status === "ready" ? "completed" : "running",
+            requestedAt: "2026-09-25T00:00:01Z",
+            startedAt: "2026-09-25T00:00:01Z",
+            completedAt: status === "ready" ? "2026-09-25T00:00:02Z" : null,
+          }
+        : null,
   });
   let root: ReactTestRenderer | null = null;
   const render = () =>
@@ -139,7 +147,12 @@ describe("QueuedMessageSender", () => {
     expect(commandsRun()).toEqual(["start"]);
     expect(io.run.mock.calls[0]?.[2]).toMatchObject({
       environmentId: "env-a",
-      input: { threadId: "thread-a", message: { text: "follow up" }, modelSelection },
+      input: {
+        threadId: "thread-a",
+        message: { text: "follow up" },
+        modelSelection,
+        dispatchMode: "queue",
+      },
     });
     expect(queue()).toBeUndefined();
   });
@@ -152,11 +165,14 @@ describe("QueuedMessageSender", () => {
     await render();
     expect(commandsRun()).toEqual(["start"]);
 
-    // The first message started a turn; the second waits for its next tool call.
+    // The second message waits for the entire first turn, including its tools.
     io.thread = thread("running", { userMessageIds: ["first"] });
     await render();
     expect(commandsRun()).toEqual(["start"]);
     io.thread = thread("running", { userMessageIds: ["first"], toolActivityIds: ["tool-1"] });
+    await render();
+    expect(commandsRun()).toEqual(["start"]);
+    io.thread = thread("ready", { userMessageIds: ["first"], toolActivityIds: ["tool-1"] });
     await render();
     expect(commandsRun()).toEqual(["start", "start"]);
   });
@@ -180,14 +196,26 @@ describe("QueuedMessageSender", () => {
 });
 
 describe("sendQueuedMessage", () => {
-  it("saves a mode changed before queueing, then starts the turn", async () => {
+  it("keeps Send now as an explicit steer", async () => {
+    io.shell = { ...io.shell, runtimeMode: "approval-required" };
+    const message = enqueue();
+
+    await sendQueuedMessage(threadRef, message.id, "steer");
+
+    expect(commandsRun()).toEqual(["runtime", "start"]);
+    expect(io.run.mock.calls[1]?.[2]).toMatchObject({ input: { dispatchMode: "steer" } });
+  });
+
+  it("leaves queued settings for the server to apply when the turn can start", async () => {
     io.shell = { ...io.shell, runtimeMode: "approval-required" };
     const message = enqueue();
 
     await sendQueuedMessage(threadRef, message.id);
 
-    expect(commandsRun()).toEqual(["runtime", "start"]);
-    expect(io.run.mock.calls[1]?.[2]).toMatchObject({ input: { runtimeMode: "full-access" } });
+    expect(commandsRun()).toEqual(["start"]);
+    expect(io.run.mock.calls[0]?.[2]).toMatchObject({
+      input: { runtimeMode: "full-access", dispatchMode: "queue" },
+    });
     expect(queue()).toBeUndefined();
   });
 
@@ -213,6 +241,39 @@ describe("sendQueuedMessage", () => {
     expect(commandsRun()).toEqual([]);
     expect(io.toast).not.toHaveBeenCalled();
     expect(queue()).toBeUndefined();
+  });
+
+  it("keeps queue intent when another client starts a turn during attachment upload", async () => {
+    let finishUpload!: () => void;
+    io.upload.mockReturnValue(new Promise<void>((resolve) => (finishUpload = resolve)));
+    io.shell = { ...io.shell, runtimeMode: "approval-required" };
+    const message = enqueue({
+      images: [
+        {
+          type: "image",
+          id: "image-1",
+          name: "a.png",
+          mimeType: "image/png",
+          sizeBytes: 4,
+          previewUrl: "data:image/png;base64,AAAA",
+          file: new File(["AAAA"], "a.png", { type: "image/png" }),
+        },
+      ],
+    });
+    const sending = sendQueuedMessage(threadRef, message.id);
+    io.thread = {
+      session: { status: "running", activeTurnId: "another-client-turn" },
+      messages: [],
+      activities: [],
+      latestTurn: null,
+    };
+    finishUpload();
+    await sending;
+
+    expect(commandsRun()).toEqual(["start"]);
+    expect(io.run.mock.calls[0]?.[2]).toMatchObject({
+      input: { dispatchMode: "queue", runtimeMode: "full-access" },
+    });
   });
 
   it("holds a message at the head when the turn start fails", async () => {

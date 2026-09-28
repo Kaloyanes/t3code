@@ -12,6 +12,7 @@ import {
   collapseExpandedComposerCursor,
   composerStateAtPromptEnd,
   composerSubmissionIntentForEnter,
+  resolveComposerDispatchMode,
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   formatAssistantCitationForComposer,
@@ -59,6 +60,33 @@ describe("formatAssistantCitationForComposer", () => {
     expect(text).toBe(`${serializeAssistantCitation(boundCitation)} `);
     expect(collectAssistantCitations(text).map((entry) => entry.citation)).toEqual([boundCitation]);
     expect(expandAssistantCitationsForProvider(text)).toMatch(/^\[assistant-quote-1\] \n\n/);
+  });
+});
+
+describe("composer dispatch intent", () => {
+  it.each([false, true])("keeps Queue intent with a running snapshot of %s", (isRunning) => {
+    const intent = composerSubmissionIntentForEnter({
+      isMobileViewport: false,
+      shiftKey: false,
+      modifierKey: false,
+      isDraftThread: false,
+      isRunning,
+    });
+    expect(resolveComposerDispatchMode("queue", intent!)).toBe("queue");
+  });
+
+  it.each([
+    ["queue", "steer"],
+    ["steer", "queue"],
+  ] as const)("the alternate shortcut overrides %s with %s", (preference, expected) => {
+    const intent = composerSubmissionIntentForEnter({
+      isMobileViewport: false,
+      shiftKey: false,
+      modifierKey: true,
+      isDraftThread: false,
+      isRunning: true,
+    });
+    expect(resolveComposerDispatchMode(preference, intent!)).toBe(expected);
   });
 });
 

@@ -17,7 +17,7 @@ import {
   startAttachmentUpload,
 } from "../../lib/attachmentUploadQueue";
 import { newMessageId } from "../../lib/utils";
-import { latestCompletedToolActivityId, useQueuedMessageStore } from "../../queuedMessageStore";
+import { useQueuedMessageStore } from "../../queuedMessageStore";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { readThread, readThreadShell } from "../../state/entities";
 import { environmentServerConfigsAtom } from "../../state/server";
@@ -48,15 +48,12 @@ async function run<W, A, E>(command: AtomCommand<W, A, E>, input: W): Promise<A>
 export async function sendQueuedMessage(
   threadRef: ScopedThreadRef,
   messageId: string,
+  dispatchMode: "queue" | "steer" = "queue",
 ): Promise<void> {
   const { environmentId, threadId } = threadRef;
   const threadKey = scopedThreadKey(threadRef);
   const queue = useQueuedMessageStore.getState();
-  const message = queue.beginSend(
-    threadKey,
-    messageId,
-    latestCompletedToolActivityId(readThread(threadRef)?.activities ?? []),
-  );
+  const message = queue.beginSend(threadKey, messageId);
   if (!message) return;
   const { sendSettings } = message;
   const attachments = [...message.images, ...message.files];
@@ -130,10 +127,9 @@ export async function sendQueuedMessage(
     );
     assertFilesAllowed();
 
-    // The server starts the turn with the thread's stored modes, so a change
-    // made in the composer before queueing is saved first.
+    // Queued settings travel with the message; only an explicit steer applies them now.
     const createdAt = new Date().toISOString();
-    const shell = readThreadShell(threadRef);
+    const shell = dispatchMode === "steer" ? readThreadShell(threadRef) : null;
     const metadataUpdate = shell
       ? resolveThreadMetadataUpdateForNextTurn({
           currentModelSelection: shell.modelSelection,
@@ -193,6 +189,7 @@ export async function sendQueuedMessage(
         modelSelection: sendSettings.modelSelection,
         runtimeMode: sendSettings.runtimeMode,
         interactionMode: sendSettings.interactionMode,
+        dispatchMode,
         createdAt,
       },
     });

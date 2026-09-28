@@ -667,19 +667,29 @@ describe("ProviderCommandReactor", () => {
     };
   }
 
-  it("delivers a queued message only after the active turn settles", async () => {
-    const harness = await createHarness();
-    const threadId = ThreadId.make("thread-1");
+  effectIt.effect.each([
+    "codex",
+    "claudeAgent",
+    "cursor",
+    "grok",
+    "opencode",
+    "antigravity",
+  ] as const)("delivers a queued message only after the active %s turn settles", (provider) =>
+    Effect.gen(function* () {
+      const selection = { instanceId: ProviderInstanceId.make(provider), model: "test-model" };
+      const harness = yield* Effect.promise(() =>
+        createHarness({ threadModelSelection: selection }),
+      );
+      const threadId = ThreadId.make("thread-1");
 
-    await Effect.runPromise(
-      harness.engine.dispatch({
+      yield* harness.engine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.make("cmd-active-turn"),
         threadId,
         session: {
           threadId,
-          providerInstanceId: ProviderInstanceId.make("codex"),
-          providerName: "codex",
+          providerInstanceId: selection.instanceId,
+          providerName: provider,
           status: "running",
           runtimeMode: "approval-required",
           activeTurnId: TurnId.make("active-turn"),
@@ -687,10 +697,8 @@ describe("ProviderCommandReactor", () => {
           updatedAt: "2026-01-01T00:00:01.000Z",
         },
         createdAt: "2026-01-01T00:00:01.000Z",
-      }),
-    );
-    await Effect.runPromise(
-      harness.engine.dispatch({
+      });
+      yield* harness.engine.dispatch({
         type: "thread.turn.start",
         commandId: CommandId.make("cmd-queued-follow-up"),
         threadId,
@@ -701,17 +709,15 @@ describe("ProviderCommandReactor", () => {
           attachments: [],
         },
         modelSelection: {
-          instanceId: ProviderInstanceId.make("codex"),
-          model: "gpt-5-codex",
+          instanceId: selection.instanceId,
+          model: selection.model,
         },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
+        interactionMode: "plan",
+        runtimeMode: "full-access",
         dispatchMode: "queue",
         createdAt: "2026-01-01T00:00:02.000Z",
-      }),
-    );
-    await Effect.runPromise(
-      harness.engine.dispatch({
+      });
+      yield* harness.engine.dispatch({
         type: "thread.turn.start",
         commandId: CommandId.make("cmd-queued-follow-up-2"),
         threadId,
@@ -722,34 +728,37 @@ describe("ProviderCommandReactor", () => {
           attachments: [],
         },
         modelSelection: {
-          instanceId: ProviderInstanceId.make("codex"),
-          model: "gpt-5-codex",
+          instanceId: selection.instanceId,
+          model: selection.model,
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
         dispatchMode: "queue",
         createdAt: "2026-01-01T00:00:02.500Z",
-      }),
-    );
-    await harness.drain();
+      });
+      yield* Effect.promise(harness.drain);
 
-    expect(harness.sendTurn).not.toHaveBeenCalled();
-    expect(await harness.readPendingTurnStartMessages()).toEqual([
-      { messageId: "queued-follow-up" },
-      { messageId: "queued-follow-up-2" },
-    ]);
+      expect(harness.sendTurn).not.toHaveBeenCalled();
+      expect(harness.startSession).not.toHaveBeenCalled();
+      expect((yield* Effect.promise(harness.readModel)).threads[0]).toMatchObject({
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+      });
+      expect(yield* Effect.promise(harness.readPendingTurnStartMessages)).toEqual([
+        { messageId: "queued-follow-up" },
+        { messageId: "queued-follow-up-2" },
+      ]);
 
-    // Providers can report readiness more than once before the reactor drains.
-    for (const commandId of ["cmd-active-turn-settled", "cmd-active-turn-ready-again"]) {
-      await Effect.runPromise(
-        harness.engine.dispatch({
+      // Providers can report readiness more than once before the reactor drains.
+      for (const commandId of ["cmd-active-turn-settled", "cmd-active-turn-ready-again"]) {
+        yield* harness.engine.dispatch({
           type: "thread.session.set",
           commandId: CommandId.make(commandId),
           threadId,
           session: {
             threadId,
-            providerInstanceId: ProviderInstanceId.make("codex"),
-            providerName: "codex",
+            providerInstanceId: selection.instanceId,
+            providerName: provider,
             status: "ready",
             runtimeMode: "approval-required",
             activeTurnId: null,
@@ -757,25 +766,27 @@ describe("ProviderCommandReactor", () => {
             updatedAt: "2026-01-01T00:00:03.000Z",
           },
           createdAt: "2026-01-01T00:00:03.000Z",
-        }),
+        });
+      }
+      yield* Effect.promise(harness.drain);
+
+      expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+      expect(harness.sendTurn).toHaveBeenCalledWith(
+        expect.objectContaining({ input: "Run this next", interactionMode: "plan" }),
       );
-    }
-    await harness.drain();
+      expect(harness.startSession).toHaveBeenCalledWith(
+        threadId,
+        expect.objectContaining({ runtimeMode: "full-access" }),
+      );
 
-    expect(harness.sendTurn).toHaveBeenCalledTimes(1);
-    expect(harness.sendTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ input: "Run this next" }),
-    );
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
+      yield* harness.engine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.make("cmd-queued-turn-running"),
         threadId,
         session: {
           threadId,
-          providerInstanceId: ProviderInstanceId.make("codex"),
-          providerName: "codex",
+          providerInstanceId: selection.instanceId,
+          providerName: provider,
           status: "running",
           runtimeMode: "approval-required",
           activeTurnId: TurnId.make("queued-turn"),
@@ -783,17 +794,15 @@ describe("ProviderCommandReactor", () => {
           updatedAt: "2026-01-01T00:00:04.000Z",
         },
         createdAt: "2026-01-01T00:00:04.000Z",
-      }),
-    );
-    await Effect.runPromise(
-      harness.engine.dispatch({
+      });
+      yield* harness.engine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.make("cmd-queued-turn-settled"),
         threadId,
         session: {
           threadId,
-          providerInstanceId: ProviderInstanceId.make("codex"),
-          providerName: "codex",
+          providerInstanceId: selection.instanceId,
+          providerName: provider,
           status: "ready",
           runtimeMode: "approval-required",
           activeTurnId: null,
@@ -801,13 +810,154 @@ describe("ProviderCommandReactor", () => {
           updatedAt: "2026-01-01T00:00:05.000Z",
         },
         createdAt: "2026-01-01T00:00:05.000Z",
-      }),
-    );
-    await harness.drain();
+      });
+      yield* Effect.promise(harness.drain);
 
-    expect(harness.sendTurn).toHaveBeenCalledTimes(2);
-    expect(harness.sendTurn).toHaveBeenLastCalledWith(
-      expect.objectContaining({ input: "Run this after that" }),
+      expect(harness.sendTurn).toHaveBeenCalledTimes(2);
+      expect(harness.sendTurn).toHaveBeenLastCalledWith(
+        expect.objectContaining({ input: "Run this after that", interactionMode: "default" }),
+      );
+      expect((yield* Effect.promise(harness.readModel)).threads[0]?.runtimeMode).toBe(
+        "approval-required",
+      );
+    }),
+  );
+
+  describe("queued turn lifecycle", () => {
+    const queuedHarness = Effect.fnUntraced(function* () {
+      const harness = yield* Effect.promise(() => createHarness());
+      const threadId = ThreadId.make("thread-1");
+      const createdAt = "2026-01-01T00:00:01.000Z";
+      let sequence = 0;
+      const drain = Effect.promise(harness.drain);
+      const setSession = (
+        status: "starting" | "running" | "ready" | "error" | "stopped" | "interrupted",
+        activeTurnId: TurnId | null = status === "running" ? asTurnId("active-turn") : null,
+      ) =>
+        harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make(`queue-session-${sequence++}`),
+          threadId,
+          session: {
+            threadId,
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            providerName: "codex",
+            status,
+            activeTurnId,
+            runtimeMode: "approval-required",
+            lastError: null,
+            updatedAt: createdAt,
+          },
+          createdAt,
+        });
+      const activity = (kind: string) =>
+        harness.engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make(`queue-activity-${sequence++}`),
+          threadId,
+          activity: {
+            id: EventId.make(`queue-activity-${sequence}`),
+            tone: "info",
+            kind,
+            summary: kind,
+            payload: { requestId: "pending-request", requestKind: "command" },
+            turnId: asTurnId("active-turn"),
+            createdAt,
+          },
+          createdAt,
+        });
+      yield* setSession("running");
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("queue-follow-up"),
+        threadId,
+        message: {
+          messageId: MessageId.make("queue-follow-up"),
+          role: "user",
+          text: "Run after the current turn",
+          attachments: [],
+        },
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        dispatchMode: "queue",
+        createdAt,
+      });
+      yield* drain;
+      expect(harness.sendTurn).not.toHaveBeenCalled();
+      return { ...harness, drain, setSession, activity };
+    });
+
+    effectIt.effect.each(["error", "stopped", "interrupted"] as const)(
+      "does not release canceled messages after a %s session becomes ready again",
+      (status) =>
+        Effect.gen(function* () {
+          const harness = yield* queuedHarness();
+          yield* harness.setSession(status);
+          yield* harness.drain;
+          yield* harness.setSession("ready");
+          yield* harness.drain;
+          expect(harness.sendTurn).not.toHaveBeenCalled();
+          const thread = (yield* Effect.promise(harness.readModel)).threads[0];
+          expect(thread?.messages).toEqual([
+            expect.objectContaining({ id: "queue-follow-up", text: "Run after the current turn" }),
+          ]);
+          expect(thread?.activities).toContainEqual(
+            expect.objectContaining({
+              kind: "provider.turn.start.failed",
+              payload: expect.objectContaining({ requestId: "queue-follow-up" }),
+            }),
+          );
+        }),
+    );
+
+    effectIt.effect(
+      "holds messages through tool completion and readiness with an active turn",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* queuedHarness();
+          yield* harness.activity("tool.completed");
+          yield* harness.drain;
+          expect(harness.sendTurn).not.toHaveBeenCalled();
+          yield* harness.setSession("ready", asTurnId("active-turn"));
+          yield* harness.drain;
+          expect(harness.sendTurn).not.toHaveBeenCalled();
+          yield* harness.setSession("ready");
+          yield* harness.drain;
+          expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+        }),
+    );
+
+    effectIt.effect.each(["thread.turn.interrupt", "thread.session.stop"] as const)(
+      "cancels queued messages immediately on %s",
+      (type) =>
+        Effect.gen(function* () {
+          const harness = yield* queuedHarness();
+          yield* harness.engine.dispatch({
+            type,
+            commandId: CommandId.make("stop-queue"),
+            threadId: ThreadId.make("thread-1"),
+            createdAt: "2026-01-01T00:00:02.000Z",
+          });
+          yield* harness.drain;
+          yield* harness.setSession("ready");
+          yield* harness.drain;
+          expect(harness.sendTurn).not.toHaveBeenCalled();
+        }),
+    );
+
+    effectIt.effect.each(["approval", "user-input"] as const)(
+      "holds messages until a pending %s request is resolved",
+      (kind) =>
+        Effect.gen(function* () {
+          const harness = yield* queuedHarness();
+          yield* harness.activity(`${kind}.requested`);
+          yield* harness.setSession("ready");
+          yield* harness.drain;
+          expect(harness.sendTurn).not.toHaveBeenCalled();
+          yield* harness.activity(`${kind}.resolved`);
+          yield* harness.drain;
+          expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+        }),
     );
   });
 

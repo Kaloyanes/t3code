@@ -6,6 +6,7 @@ import {
   EventId,
   type ModelSelection,
   type OrchestrationEvent,
+  type OrchestrationThreadShell,
   ProviderDriverKind,
   type ProjectId,
   type OrchestrationSession,
@@ -94,9 +95,17 @@ type ProviderIntentEvent = Extract<
       | "thread.user-input-response-requested"
       | "thread.session-stop-requested"
       | "thread.settled"
+      | "thread.activity-appended"
       | "thread.session-set";
   }
 >;
+
+const threadBlocksQueuedTurn = (thread: OrchestrationThreadShell) =>
+  thread.session?.status === "starting" ||
+  thread.session?.status === "running" ||
+  thread.session?.activeTurnId != null ||
+  thread.hasPendingApprovals ||
+  thread.hasPendingUserInput;
 
 function toNonEmptyProviderInput(value: string | undefined): string | undefined {
   const normalized = value?.trim();
@@ -377,6 +386,22 @@ const make = Effect.gen(function* () {
         kind: "provider.turn.start.failed",
         summary: "Queued message was not sent",
         detail,
+        turnId: null,
+        createdAt: DateTime.formatIso(yield* DateTime.now),
+        requestId: event.payload.messageId,
+      }).pipe(Effect.ignore({ log: true, message: "failed to report canceled queued message" }));
+    }
+  });
+
+  const cancelQueuedTurns = Effect.fn("cancelQueuedTurns")(function* (threadId: ThreadId) {
+    const queued = queuedTurnStarts.get(threadId) ?? [];
+    queuedTurnStarts.delete(threadId);
+    for (const event of queued) {
+      yield* appendProviderFailureActivity({
+        threadId,
+        kind: "provider.turn.start.failed",
+        summary: "Queued message was not sent",
+        detail: "The previous turn stopped or failed. Send this message again to continue.",
         turnId: null,
         createdAt: DateTime.formatIso(yield* DateTime.now),
         requestId: event.payload.messageId,
@@ -1308,10 +1333,7 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return;
     }
-    if (
-      event.payload.dispatchMode === "queue" &&
-      (thread.session?.status === "starting" || thread.session?.status === "running")
-    ) {
+    if (event.payload.dispatchMode === "queue" && threadBlocksQueuedTurn(thread)) {
       const queued = queuedTurnStarts.get(thread.id) ?? [];
       if (!queued.some((candidate) => candidate.payload.messageId === event.payload.messageId)) {
         queued.push(event);
@@ -1396,6 +1418,44 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
+
+    // Queueing must not change the session that is still handling the previous turn.
+    const settingsApplied = yield* Effect.gen(function* () {
+      if (event.payload.dispatchMode !== "queue") return;
+      if (
+        event.payload.modelSelection !== undefined &&
+        !Equal.equals(thread.modelSelection, event.payload.modelSelection)
+      ) {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.meta.update",
+          commandId: yield* serverCommandId("queued-turn-model"),
+          threadId: thread.id,
+          modelSelection: event.payload.modelSelection,
+        });
+      }
+      if (thread.runtimeMode !== event.payload.runtimeMode) {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.runtime-mode.set",
+          commandId: yield* serverCommandId("queued-turn-runtime-mode"),
+          threadId: thread.id,
+          runtimeMode: event.payload.runtimeMode,
+          createdAt: event.payload.createdAt,
+        });
+      }
+      if (thread.interactionMode !== event.payload.interactionMode) {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.interaction-mode.set",
+          commandId: yield* serverCommandId("queued-turn-interaction-mode"),
+          threadId: thread.id,
+          interactionMode: event.payload.interactionMode,
+          createdAt: event.payload.createdAt,
+        });
+      }
+    }).pipe(
+      Effect.as(true),
+      Effect.catchCause((cause) => recoverTurnStartFailure(cause).pipe(Effect.as(false))),
+    );
+    if (!settingsApplied) return;
 
     const authCommandHandled = yield* Effect.gen(function* () {
       // Native account commands belong to the thread's existing provider session.
@@ -1698,14 +1758,11 @@ const make = Effect.gen(function* () {
     if (!queued?.length) return;
     // A ready event can outlive the idle session it describes in the worker queue.
     const thread = yield* resolveThreadShell(threadId);
-    if (thread?.session?.status !== "ready") return;
+    if (thread?.session?.status !== "ready" || threadBlocksQueuedTurn(thread)) return;
     const next = queued?.shift();
     if (!next) return;
     if (queued?.length === 0) queuedTurnStarts.delete(threadId);
-    yield* processTurnStartRequested({
-      ...next,
-      payload: { ...next.payload, dispatchMode: "start" },
-    });
+    yield* processTurnStartRequested(next);
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
@@ -2001,8 +2058,11 @@ const make = Effect.gen(function* () {
           event.payload.session.status === "stopped" ||
           event.payload.session.status === "interrupted"
         ) {
-          queuedTurnStarts.delete(event.payload.threadId);
+          yield* cancelQueuedTurns(event.payload.threadId);
         }
+        return;
+      case "thread.activity-appended":
+        yield* resumeNextQueuedTurn(event.payload.threadId);
         return;
       case "thread.runtime-mode-set": {
         const thread = yield* resolveThreadShell(event.payload.threadId);
@@ -2028,6 +2088,7 @@ const make = Effect.gen(function* () {
         return;
       }
       case "thread.turn-interrupt-requested":
+        yield* cancelQueuedTurns(event.payload.threadId);
         yield* processTurnInterruptRequested(event);
         return;
       case "thread.approval-response-requested":
@@ -2037,6 +2098,7 @@ const make = Effect.gen(function* () {
         yield* processUserInputResponseRequested(event);
         return;
       case "thread.session-stop-requested":
+        yield* cancelQueuedTurns(event.payload.threadId);
         yield* processSessionStopRequested(event);
         return;
       case "thread.settled": {
@@ -2103,7 +2165,10 @@ const make = Effect.gen(function* () {
         (event.type === "thread.meta-updated" &&
           (event.payload.regenerateTitle === true ||
             event.payload.titleState?.needsRefinement === true)) ||
-        (event.type === "thread.session-set" && event.payload.session.status === "ready") ||
+        event.type === "thread.session-set" ||
+        (event.type === "thread.activity-appended" &&
+          (event.payload.activity.kind === "approval.resolved" ||
+            event.payload.activity.kind === "user-input.resolved")) ||
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-interrupt-requested" ||

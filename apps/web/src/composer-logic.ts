@@ -13,6 +13,13 @@ export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "s
 export type ComposerSlashCommand = "model" | "plan" | "default";
 export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
 
+export function resolveComposerDispatchMode(
+  preference: ClientSettings["followUpBehavior"],
+  intent: ComposerSubmissionIntent,
+) {
+  return (preference === "queue") !== (intent === "alternate") ? "queue" : "steer";
+}
+
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
   query: string;

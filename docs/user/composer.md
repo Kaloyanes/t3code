@@ -34,11 +34,14 @@ See [images and videos](#images-and-videos-in-messages) for previewing and savin
 
 ## Send while the agent is working
 
-On web and desktop, a message sent during a running turn waits at the end of the conversation as a
-dashed bubble. It goes out on its own when the agent finishes its next tool
-call, or when the turn ends, even while you have another thread open. Use the arrow under the bubble to send it right
-away, or the X to move it back into the composer. Stop returns every queued
-message to the composer.
+On web and desktop, queued messages wait for the agent to finish its current turn,
+then run one at a time in the order you sent them. Finishing a tool call does not
+release the next message. The queue continues while you have another thread open.
+Each message keeps the model and modes you selected for it until its turn starts.
+
+Stopping a turn or encountering a turn failure cancels pending delivery. Messages
+already submitted to the server remain in the conversation so you can send them
+again; messages still held by the client return to the composer when you press Stop.
 
 In **Settings → General → Follow-up behavior**, choose **Queue** to keep this
 behavior or **Steer** to send new messages immediately. This setting applies to

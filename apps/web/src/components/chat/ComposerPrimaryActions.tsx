@@ -1,6 +1,6 @@
 import { memo, type PointerEventHandler } from "react";
 import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
-import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
+import { useClientSettings, useEnvironmentIdentificationMode } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";
 import { Button } from "../ui/button";
@@ -82,6 +82,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     ? { onPointerDown: preventPointerFocus }
     : undefined;
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
+  const followUpBehavior = useClientSettings((settings) => settings.followUpBehavior);
   const isSendDisabled = sendDisabledReason !== null;
   const stageBackdropVariant = useSidebarStageBackdropVariant(
     environmentIdentificationMode === "artwork",
@@ -240,7 +241,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                 : isSendBusy
                   ? "Sending"
                   : isRunning
-                    ? "Queue message"
+                    ? followUpBehavior === "queue"
+                      ? "Queue message"
+                      : "Steer agent"
                     : "Send message"
       }
     >
@@ -269,8 +272,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     return sendButton;
   }
 
-  // While a turn runs, a sendable draft queues for the next tool boundary, so
-  // the send button stays next to Stop on every viewport.
+  // Keep the follow-up action beside Stop while a turn runs.
   return (
     <>
       {renderStopGenerationButton(false)}
