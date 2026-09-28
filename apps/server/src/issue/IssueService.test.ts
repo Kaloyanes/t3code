@@ -52,6 +52,18 @@ describe("IssueService pure issue helpers", () => {
     );
   });
 
+  it.each([
+    ["Fix checkout redirect", "142-fix-checkout-redirect"],
+    ["Fix: checkout / login's redirect!", "142-fix-checkout-logins-redirect"],
+    ["x".repeat(200), `142-${"x".repeat(60)}`],
+    ["修复登录", "142"],
+  ])("builds an issue branch from the title %s", (title, fragment) => {
+    expect(issueWorktreeFragment(142, title)).toBe(fragment);
+    expect(issueWorktreeBranch(142, title, undefined, "Kaloyanes")).toBe(`Kaloyanes/${fragment}`);
+    expect(issueWorktreeBranch(142, title, 2, "Kaloyanes")).toBe(`Kaloyanes/${fragment}-2`);
+    expect(issueWorktreeBranch(142, title, undefined, "Kaloyanes", "bug")).toBe(`bug/${fragment}`);
+  });
+
   it("only permits deleting the attached worktree, never the project root", () => {
     expect(
       isSafeIssueWorktreePath({

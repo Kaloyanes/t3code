@@ -6,6 +6,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  ThreadId,
 } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -13,6 +14,7 @@ const state = vi.hoisted(() => ({
   preflight: vi.fn(),
   remove: vi.fn(),
   prepare: vi.fn(),
+  replace: vi.fn(),
   create: vi.fn(),
   link: vi.fn(),
   newThread: vi.fn(),
@@ -47,6 +49,7 @@ vi.mock("~/state/server", () => ({
 vi.mock("~/state/issues", () => ({
   issueEnvironment: {
     worktreePrepare: state.prepare,
+    worktreeReplace: state.replace,
     link: state.link,
     worktreeDeletePreflight: state.preflight,
     worktreeDelete: state.remove,
@@ -96,24 +99,29 @@ vi.mock("../ui/select", () => ({
   SelectItem: "option",
 }));
 
-import { IssueWorktreeDialog } from "./IssueDetailPanel";
+import { IssueWorktreeDialog, type IssueWorktreeDialogProps } from "./IssueDetailPanel";
 
 const reference = { projectId: ProjectId.make("project"), repository: "acme/repo", number: 142 };
 const worktree = { branch: "issue-142", worktreePath: "/worktrees/issue-142" };
 let renderer: ReactTestRenderer | undefined;
 
-async function renderDialog(canLink = true) {
+function dialog(props: Partial<IssueWorktreeDialogProps> = {}) {
+  return (
+    <IssueWorktreeDialog
+      open
+      onOpenChange={vi.fn()}
+      environmentId={EnvironmentId.make("remote")}
+      reference={reference}
+      issueTitle="Fix checkout redirect"
+      linkedWork={null}
+      {...props}
+    />
+  );
+}
+
+async function renderDialog(canLink = true, props: Partial<IssueWorktreeDialogProps> = {}) {
   await act(async () => {
-    renderer = create(
-      <IssueWorktreeDialog
-        open
-        onOpenChange={vi.fn()}
-        environmentId={EnvironmentId.make("remote")}
-        reference={reference}
-        linkedWork={null}
-        canLink={canLink}
-      />,
-    );
+    renderer = create(dialog({ canLink, ...props }));
   });
   return renderer!;
 }
@@ -152,6 +160,73 @@ afterEach(async () => {
 });
 
 describe("IssueWorktreeDialog", () => {
+  it("uses the issue title when creating a worktree", async () => {
+    await renderDialog(false);
+    await clickCreate();
+    expect(state.prepare.mock.calls[0]?.[0].input.name).toBe("Fix checkout redirect");
+  });
+
+  it("preserves a manual name across issue refreshes", async () => {
+    await renderDialog(false);
+    await act(async () => {
+      renderer!.root.findAllByType("input")[0]!.props.onChange({ target: { value: "custom-fix" } });
+    });
+    await act(async () => {
+      renderer!.update(dialog({ canLink: false, issueTitle: "Updated title" }));
+    });
+    await clickCreate();
+    expect(state.prepare.mock.calls[0]?.[0].input.name).toBe("custom-fix");
+  });
+
+  it.each([
+    { reference: { ...reference, number: 143 } },
+    { reference: { ...reference, repository: "acme/other" } },
+    { reference: { ...reference, host: "github.example.com" } },
+    { reference: { ...reference, projectId: ProjectId.make("other") } },
+    { environmentId: EnvironmentId.make("other") },
+  ])("resets the name when the issue identity changes: %j", async (props) => {
+    await renderDialog(false);
+    await act(async () => {
+      renderer!.update(dialog({ canLink: false, ...props, issueTitle: "Fix login" }));
+    });
+    await clickCreate();
+    expect(state.prepare.mock.calls[0]?.[0].input.name).toBe("Fix login");
+  });
+
+  it("caps long titles to the worktree name contract", async () => {
+    await renderDialog(false, { issueTitle: "x".repeat(200) });
+    await clickCreate();
+    expect(state.prepare.mock.calls[0]?.[0].input.name).toBe("x".repeat(128));
+  });
+
+  it("uses the title when replacing a linked worktree", async () => {
+    state.replace.mockResolvedValue({ _tag: "Success", value: {} });
+    await renderDialog(true, {
+      linkedWork: {
+        issue: {
+          provider: "github",
+          host: "github.com",
+          repository: reference.repository,
+          number: 142,
+        },
+        projectId: reference.projectId,
+        threadId: ThreadId.make("thread"),
+        linkedAt: "2026-09-26T00:00:00.000Z",
+        source: "created",
+        ...worktree,
+      },
+    });
+    await act(async () => {
+      renderer!.root
+        .findAllByType("button")
+        .find((button) =>
+          button.props.children?.props?.children?.includes(" Replace linked worktree"),
+        )!
+        .props.onClick();
+    });
+    expect(state.replace.mock.calls[0]?.[0].input.name).toBe("Fix checkout redirect");
+  });
+
   it("creates a worktree and links it through a saved thread without navigating to a draft", async () => {
     await renderDialog();
     await clickCreate();

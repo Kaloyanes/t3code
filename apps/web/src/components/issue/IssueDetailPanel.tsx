@@ -823,6 +823,7 @@ export function IssueDetailPanel({
         onOpenChange={setWorktreeOpen}
         environmentId={environmentId}
         reference={reference}
+        issueTitle={issue.title}
         linkedWork={issue.linkedWork ?? null}
         canLink={permissions?.link !== false}
         onActed={refreshIssue}
@@ -1028,16 +1029,34 @@ export interface IssueWorktreeDialogProps {
   readonly environmentId: EnvironmentId;
   readonly reference: IssueRef;
   readonly linkedWork: IssueLinkedWork | null;
+  readonly issueTitle: string;
   readonly canLink?: boolean;
   readonly onActed?: () => void;
 }
 
-export function IssueWorktreeDialog({
+export function IssueWorktreeDialog(props: IssueWorktreeDialogProps) {
+  const { environmentId, reference } = props;
+  return (
+    <IssueWorktreeDialogContent
+      key={JSON.stringify([
+        environmentId,
+        reference.projectId,
+        reference.host,
+        reference.repository,
+        reference.number,
+      ])}
+      {...props}
+    />
+  );
+}
+
+function IssueWorktreeDialogContent({
   open,
   onOpenChange,
   environmentId,
   reference,
   linkedWork,
+  issueTitle,
   canLink = true,
   onActed,
 }: IssueWorktreeDialogProps) {
@@ -1068,7 +1087,7 @@ export function IssueWorktreeDialog({
   const link = useAtomCommand(issueEnvironment.link, { reportFailure: false });
   const newThread = useNewThreadHandler();
   const actions = useScopedActions();
-  const [name, setName] = useState(`issue-${reference.number}`);
+  const [name, setName] = useState(issueTitle.trim().slice(0, 128) || "issue");
   const [baseBranch, setBaseBranch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [preflightResult, setPreflightResult] = useState<IssueWorktreeDeletePreflightResult | null>(
