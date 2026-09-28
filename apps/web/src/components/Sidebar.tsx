@@ -1569,7 +1569,7 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
       }}
     >
       <li
-        className="group flex h-8 list-none items-center gap-0.5 ps-3"
+        className="group flex h-8 list-none items-center gap-1 ps-3"
         onContextMenu={(event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -1620,7 +1620,7 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
             ) : null}
             <span
               className={cn(
-                "shrink-0 text-[11px] tabular-nums text-sidebar-muted-foreground/70",
+                "shrink-0 text-xs tabular-nums text-sidebar-muted-foreground/70",
                 !props.hasUnread && "ml-auto",
               )}
             >
@@ -1644,16 +1644,18 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
           />
         ) : null}
         {badge !== null && current !== null ? (
-          <ThreadPullRequestBadgeControl
-            render={<InlineButton />}
-            badge={badge}
-            number={current.number}
-            url={current.url}
-            status={null}
-            onOpenStack={handleAggregateOpen}
-            onOpenPullRequest={handleSingleOpen as (event: ReactMouseEvent<HTMLElement>) => void}
-            openAggregate={links.length > 1}
-          />
+          <span className="flex h-7 shrink-0 items-center text-xs">
+            <ThreadPullRequestBadgeControl
+              render={<InlineButton />}
+              badge={badge}
+              number={current.number}
+              url={current.url}
+              status={null}
+              onOpenStack={handleAggregateOpen}
+              onOpenPullRequest={handleSingleOpen as (event: ReactMouseEvent<HTMLElement>) => void}
+              openAggregate={links.length > 1}
+            />
+          </span>
         ) : null}
         {props.issues.map((issue) => {
           const url = issueLinkExternalUrl(issue.issue);
@@ -1669,7 +1671,7 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
                     aria-label={label}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => handleIssueOpen(event, issue)}
-                    className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 whitespace-nowrap border-b border-transparent text-xs tabular-nums text-emerald-600 hover:border-current hover:text-emerald-700 focus-visible:outline-2 focus-visible:outline-ring dark:text-emerald-400 dark:hover:text-emerald-300"
+                    className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-0.5 whitespace-nowrap text-xs tabular-nums text-emerald-600 underline-offset-2 hover:text-emerald-700 hover:underline focus-visible:outline-2 focus-visible:outline-ring dark:text-emerald-400 dark:hover:text-emerald-300"
                   />
                 }
               >
