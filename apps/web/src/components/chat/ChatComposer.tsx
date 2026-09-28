@@ -84,6 +84,14 @@ import {
 } from "react";
 import { createPortal, flushSync } from "react-dom";
 import {
+  animate,
+  AnimatePresence,
+  motion,
+  useIsPresent,
+  useMotionValue,
+  type AnimationPlaybackControls,
+} from "motion/react";
+import {
   clampCollapsedComposerCursor,
   type ComposerTrigger,
   type ComposerSubmissionIntent,
@@ -460,7 +468,8 @@ function useComposerRestingTransition(
     controlsFromLeft: null,
     surfaceBottomInset: null,
   });
-  const animationRef = useRef<Animation | null>(null);
+  const animationRef = useRef<AnimationPlaybackControls | null>(null);
+  const animatedHeight = useMotionValue(0);
   const animationTargetHeightRef = useRef<number | null>(null);
   const contentAnimationsRef = useRef<Animation[]>([]);
   const stateChangeAnimationsRef = useRef<Animation[]>([]);
@@ -487,6 +496,7 @@ function useComposerRestingTransition(
     element?.style.removeProperty("overflow");
     element?.style.removeProperty("clip-path");
     element?.style.removeProperty("overflow-clip-margin");
+    element?.style.removeProperty("height");
     element
       ?.querySelector<HTMLElement>('[data-chat-composer-surface="true"]')
       ?.style.removeProperty("height");
@@ -518,7 +528,7 @@ function useComposerRestingTransition(
   isCollapsedRef.current = isCollapsed;
 
   const transitionToCurrentGeometry = useCallback(
-    (stateChanged: boolean) => {
+    (stateChanged: boolean, contentChanged = false) => {
       const element = elementRef.current;
       const surface = element?.querySelector<HTMLElement>('[data-chat-composer-surface="true"]');
       if (!element || !surface) return;
@@ -562,16 +572,15 @@ function useComposerRestingTransition(
         ? element.getBoundingClientRect().height
         : null;
       const interruptedTargetHeight = animationTargetHeightRef.current;
-      const interruptedCurrentTime =
-        typeof interruptedAnimation?.currentTime === "number"
-          ? interruptedAnimation.currentTime
-          : null;
-      const interruptedDuration = interruptedAnimation?.effect?.getComputedTiming().duration;
+      const interruptedCurrentTime = interruptedAnimation ? interruptedAnimation.time * 1000 : null;
+      const interruptedDuration = interruptedAnimation
+        ? interruptedAnimation.duration * 1000
+        : null;
       if (transitionCleanupTimeoutRef.current !== null) {
         window.clearTimeout(transitionCleanupTimeoutRef.current);
         transitionCleanupTimeoutRef.current = null;
       }
-      interruptedAnimation?.cancel();
+      interruptedAnimation?.stop();
       animationRef.current = null;
       for (const animation of contentAnimationsRef.current) animation.cancel();
       contentAnimationsRef.current = [];
@@ -609,7 +618,7 @@ function useComposerRestingTransition(
         interruptedTargetHeight === null || Math.abs(interruptedTargetHeight - nextHeight) >= 0.5;
       const shouldAnimate = shouldAnimateComposerRestingTransition({
         hasCompletedInitialLayout: hasCompletedInitialLayoutRef.current,
-        stateChanged,
+        stateChanged: stateChanged || contentChanged,
         hasInterruptedAnimation: interruptedHeight !== null,
       });
 
@@ -695,14 +704,17 @@ function useComposerRestingTransition(
           );
         }
 
-        const animation = element.animate(
-          [{ height: `${previousHeight}px` }, { height: `${nextHeight}px` }],
-          {
-            duration,
-            easing: COMPOSER_RESTING_TRANSITION_EASING,
-            fill: "both",
+        if (!interruptedAnimation) animatedHeight.jump(previousHeight);
+        element.style.height = `${String(animatedHeight.get())}px`;
+        const speed = 300 / Math.max(1, animationDurationMs);
+        const animation = animate(animatedHeight, nextHeight, {
+          type: "spring",
+          stiffness: 400 * speed * speed,
+          damping: 40 * speed,
+          onUpdate: (height) => {
+            element.style.height = `${String(height)}px`;
           },
-        );
+        });
         animationRef.current = animation;
         animationTargetHeightRef.current = nextHeight;
 
@@ -848,7 +860,7 @@ function useComposerRestingTransition(
             transitionCleanupTimeoutRef.current = null;
           }
           if (cancelAnimations) {
-            animation.cancel();
+            animation.stop();
             for (const contentAnimation of contentAnimationsRef.current) {
               contentAnimation.cancel();
             }
@@ -860,7 +872,6 @@ function useComposerRestingTransition(
           animationTargetHeightRef.current = null;
           contentAnimationsRef.current = [];
           stateChangeAnimationsRef.current = [];
-          animation.cancel();
           stripAnimation?.cancel();
           clearTransitionStyles();
         };
@@ -870,7 +881,7 @@ function useComposerRestingTransition(
         // the natural layout the eventual source of truth in that case.
         transitionCleanupTimeoutRef.current = window.setTimeout(
           () => finishTransition(true),
-          duration + COMPOSER_RESTING_TRANSITION_CLEANUP_BUFFER_MS,
+          animation.duration * 1000 + COMPOSER_RESTING_TRANSITION_CLEANUP_BUFFER_MS,
         );
       } else {
         animationTargetHeightRef.current = null;
@@ -891,6 +902,7 @@ function useComposerRestingTransition(
     [
       animationDurationMs,
       animationsActive,
+      animatedHeight,
       clearTransitionStyles,
       onOverlayHeightChange,
       restingControlsRef,
@@ -933,10 +945,15 @@ function useComposerRestingTransition(
 
     const body = element.querySelector<HTMLElement>('[data-chat-composer-body="true"]');
     return observeResize(body ? [element, body] : element, (entries) => {
+      const bodyChanged = body && entries.some((entry) => entry.target === body);
       if (animationRef.current) {
-        if (body && entries.some((entry) => entry.target === body)) {
-          transitionToCurrentGeometry(false);
+        if (bodyChanged) {
+          transitionToCurrentGeometry(false, true);
         }
+        return;
+      }
+      if (bodyChanged && hasCompletedInitialLayoutRef.current) {
+        transitionToCurrentGeometry(false, true);
         return;
       }
       const elementRect = element.getBoundingClientRect();
@@ -981,7 +998,7 @@ function useComposerRestingTransition(
         window.clearTimeout(transitionCleanupTimeoutRef.current);
         transitionCleanupTimeoutRef.current = null;
       }
-      animationRef.current?.cancel();
+      animationRef.current?.stop();
       animationRef.current = null;
       animationTargetHeightRef.current = null;
       for (const animation of contentAnimationsRef.current) animation.cancel();
@@ -1006,6 +1023,8 @@ function composerCommandMenuPositionsEqual(
 
 function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children: ReactNode }) {
   const [position, setPosition] = useState<ComposerCommandMenuPosition | null>(null);
+  const { active, durationMs } = usePanelAnimationSettings();
+  const isPresent = useIsPresent();
 
   useLayoutEffect(() => {
     const anchor = props.anchor;
@@ -1065,9 +1084,14 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
   if (!position) return null;
 
   return createPortal(
-    <div
+    <motion.div
       className="pointer-events-auto fixed z-40 flex flex-col"
       data-composer-drawer-layer="true"
+      initial={active ? { opacity: 0, y: 4 } : false}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: active ? 4 : 0 }}
+      inert={!isPresent}
+      transition={{ duration: active ? durationMs / 1000 : 0, ease: [0.23, 1, 0.32, 1] }}
       style={{
         bottom: position.bottom,
         left: position.left,
@@ -1076,7 +1100,7 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
       }}
     >
       {props.children}
-    </div>,
+    </motion.div>,
     document.body,
   );
 }
@@ -6878,6 +6902,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
 
   const isBashMode = prompt.startsWith("!") && !activePendingUserInput && !isComposerApprovalState;
+  const composerTransition = !panelAnimationsActive
+    ? { duration: 0 }
+    : { type: "spring" as const, duration: panelAnimationDurationMs / 1000, bounce: 0 };
 
   // Render
   // ------------------------------------------------------------------
@@ -7157,20 +7184,25 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ) : null}
       </ComposerBanner.Dock>
       <div className="relative rounded-3xl">
-        {/* One-shot fade/scale on opacity+transform only, so the glow never repaints while idle. */}
-        <span
+        <motion.span
           aria-hidden="true"
-          className={cn(
-            "pointer-events-none absolute inset-0 rounded-3xl shadow-composer-bash shadow-destructive/35 ring-1 ring-destructive/30 opacity-0 scale-[0.98] transition-[opacity,transform] duration-300 ease-drawer motion-reduce:scale-100",
-            isBashMode && "opacity-100 scale-100",
-          )}
+          initial={false}
+          animate={{
+            opacity: isBashMode ? 1 : 0,
+            scale: isBashMode || !panelAnimationsActive ? 1 : 0.98,
+          }}
+          transition={composerTransition}
+          className="pointer-events-none absolute inset-0 rounded-3xl shadow-composer-bash shadow-destructive/35 ring-1 ring-destructive/30"
         />
-        <span
+        <motion.span
           aria-hidden="true"
-          className={cn(
-            "pointer-events-none absolute -inset-1 rounded-[24px] ring-2 ring-primary/35 opacity-0 scale-[0.985] transition-[opacity,transform] duration-[220ms] ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:scale-100",
-            showPromptEnhancementHalo && "opacity-100 scale-[1.01]",
-          )}
+          initial={false}
+          animate={{
+            opacity: showPromptEnhancementHalo ? 1 : 0,
+            scale: !panelAnimationsActive ? 1 : showPromptEnhancementHalo ? 1.01 : 0.985,
+          }}
+          transition={composerTransition}
+          className="pointer-events-none absolute -inset-1 rounded-3xl ring-2 ring-primary/35"
         />
         <ComposerSurface.Main
           ref={composerMainSurfaceRef}
@@ -7192,10 +7224,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               composerProviderState.composerSurfaceClassName,
             )}
           >
-            {isBashMode && (
+            <motion.div
+              initial={false}
+              animate={{ height: isBashMode ? "auto" : 0, opacity: isBashMode ? 1 : 0 }}
+              transition={composerTransition}
+              aria-hidden={!isBashMode}
+              className="overflow-hidden"
+            >
               <div
-                role="status"
-                className="flex items-center gap-2 px-4 pt-2.5 text-xs transition-[opacity,translate] duration-200 ease-drawer starting:-translate-y-1 starting:opacity-0 motion-reduce:starting:translate-y-0"
+                role={isBashMode ? "status" : undefined}
+                className="flex items-center gap-2 px-4 pt-2.5 text-xs"
               >
                 <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 font-medium text-destructive">
                   <TerminalIcon className="size-3" aria-hidden="true" />
@@ -7205,7 +7243,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   Runs in the workspace, output goes to the agent
                 </span>
               </div>
-            )}
+            </motion.div>
             {showCollapsedMobilePromptRow ? (
               <div className="flex items-center justify-between gap-2 px-3 py-2">
                 <button
@@ -7277,24 +7315,41 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 isComposerResting && "py-2 sm:py-2",
               )}
             >
-              {isStashMenuOpen && !composerMenuOpen && !isComposerApprovalState && (
-                <ComposerCommandMenuLayer anchor={composerMenuAnchor}>
-                  <ComposerStashMenu
-                    entries={stashQueue}
-                    stashShortcutLabel={shortcutLabelForCommand(keybindings, "composer.stash", {
-                      context: {
-                        terminalFocus: false,
-                        terminalOpen,
-                        modelPickerOpen: false,
-                      },
-                    })}
-                    onRestore={restoreStashEntry}
-                    onDelete={deleteStashEntry}
-                    onClose={() => setIsStashMenuOpen(false)}
-                  />
-                </ComposerCommandMenuLayer>
-              )}
+              <AnimatePresence initial={false}>
+                {isStashMenuOpen && !composerMenuOpen && !isComposerApprovalState && (
+                  <ComposerCommandMenuLayer key="stash" anchor={composerMenuAnchor}>
+                    <ComposerStashMenu
+                      entries={stashQueue}
+                      stashShortcutLabel={shortcutLabelForCommand(keybindings, "composer.stash", {
+                        context: {
+                          terminalFocus: false,
+                          terminalOpen,
+                          modelPickerOpen: false,
+                        },
+                      })}
+                      onRestore={restoreStashEntry}
+                      onDelete={deleteStashEntry}
+                      onClose={() => setIsStashMenuOpen(false)}
+                    />
+                  </ComposerCommandMenuLayer>
+                )}
 
+                {composerSuggestionsVisible && (
+                  <ComposerCommandMenuLayer key="commands" anchor={composerMenuAnchor}>
+                    <ComposerCommandMenu
+                      listId={composerSuggestionListId}
+                      items={composerMenuItems}
+                      resolvedTheme={resolvedTheme}
+                      isLoading={isComposerMenuLoading}
+                      triggerKind={composerTriggerKind}
+                      emptyStateText={composerMenuEmptyState}
+                      activeItemId={activeComposerMenuItem?.id ?? null}
+                      onHighlightedItemChange={onComposerMenuItemHighlighted}
+                      onSelect={onSelectComposerItem}
+                    />
+                  </ComposerCommandMenuLayer>
+                )}
+              </AnimatePresence>
               <div role="status" aria-atomic="true" className="sr-only">
                 {composerSuggestionsVisible && composerMenuItems.length === 0
                   ? isComposerMenuLoading
@@ -7304,21 +7359,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     : composerMenuEmptyState
                   : ""}
               </div>
-              {composerSuggestionsVisible && (
-                <ComposerCommandMenuLayer anchor={composerMenuAnchor}>
-                  <ComposerCommandMenu
-                    listId={composerSuggestionListId}
-                    items={composerMenuItems}
-                    resolvedTheme={resolvedTheme}
-                    isLoading={isComposerMenuLoading}
-                    triggerKind={composerTriggerKind}
-                    emptyStateText={composerMenuEmptyState}
-                    activeItemId={activeComposerMenuItem?.id ?? null}
-                    onHighlightedItemChange={onComposerMenuItemHighlighted}
-                    onSelect={onSelectComposerItem}
-                  />
-                </ComposerCommandMenuLayer>
-              )}
 
               {!isComposerCollapsedMobile &&
                 !isComposerApprovalState &&
