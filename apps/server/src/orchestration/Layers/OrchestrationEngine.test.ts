@@ -27,6 +27,7 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { PersistenceSqlError } from "../../persistence/Errors.ts";
@@ -89,7 +90,7 @@ function makeOrchestrationLayer(
           )
         : RepositoryIdentityResolver.layer,
     ),
-    Layer.provide(persistence),
+    Layer.provideMerge(persistence),
     Layer.provideMerge(ServerConfigLayer),
     Layer.provideMerge(NodeServices.layer),
   );
@@ -104,8 +105,10 @@ async function createOrchestrationSystem(
   );
   const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
   const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
+  const sql = await runtime.runPromise(Effect.service(SqlClient.SqlClient));
   return {
     engine,
+    sql,
     readModel: () => runtime.runPromise(snapshotQuery.getSnapshot()),
     readThread: (threadId: ThreadId) =>
       runtime.runPromise(snapshotQuery.getThreadDetailById(threadId)),
@@ -128,6 +131,208 @@ const hasMetricSnapshot = (
       snapshot.id === id &&
       Object.entries(attributes).every(([key, value]) => snapshot.attributes?.[key] === value),
   );
+
+describe("scheduled usage resume guards", () => {
+  const threadId = ThreadId.make("usage-resume-thread");
+  const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" };
+  const continuation = {
+    type: "thread.turn.start",
+    commandId: CommandId.make("server:usage-resume:resume-1"),
+    usageResumeId: "resume-1",
+    threadId,
+    message: {
+      messageId: MessageId.make("usage-resume:resume-1"),
+      role: "user",
+      text: "Continue.",
+      attachments: [],
+    },
+    runtimeMode: "approval-required",
+    interactionMode: "default",
+    modelSelection,
+    createdAt: now(),
+  } as const satisfies OrchestrationCommand;
+
+  async function setup(status: "pending" | "dispatching") {
+    const system = await createOrchestrationSystem();
+    const projectId = ProjectId.make("usage-project");
+    await system.run(
+      system.engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("usage-project"),
+        projectId,
+        title: "Usage resume",
+        workspaceRoot: "/tmp/usage-resume-test",
+        createdAt: now(),
+      }),
+    );
+    await system.run(
+      system.engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("usage-thread"),
+        threadId,
+        projectId,
+        title: "Usage resume",
+        modelSelection,
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdAt: now(),
+      }),
+    );
+    await system.run(system.sql`
+      INSERT INTO usage_resumes (thread_id, id, prompt, scheduled_at, status, created_at, updated_at, execution_json, auth_identity)
+      VALUES (${threadId}, 'resume-1', 'Continue.', ${now()}, ${status}, ${now()}, ${now()}, '{}', '{}')
+    `);
+    return system;
+  }
+
+  const mutations = [
+    {
+      type: "thread.turn.start",
+      commandId: CommandId.make("manual-send"),
+      threadId,
+      message: {
+        messageId: MessageId.make("manual"),
+        role: "user",
+        text: "Do this instead.",
+        attachments: [],
+      },
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      createdAt: now(),
+    },
+    {
+      type: "thread.turn.interrupt",
+      commandId: CommandId.make("manual-stop"),
+      threadId,
+      createdAt: now(),
+    },
+    { type: "thread.archive", commandId: CommandId.make("manual-archive"), threadId },
+    {
+      type: "thread.meta.update",
+      commandId: CommandId.make("manual-model"),
+      threadId,
+      modelSelection: { ...modelSelection, model: "other-model" },
+    },
+    {
+      type: "thread.meta.update",
+      commandId: CommandId.make("manual-worktree"),
+      threadId,
+      worktreePath: "/tmp/another-worktree",
+    },
+  ] as const satisfies ReadonlyArray<OrchestrationCommand>;
+
+  it.each(mutations)(
+    "cancels a claimed resume before $commandId can be followed by dispatch",
+    async (mutation) => {
+      const system = await setup("dispatching");
+      try {
+        await system.run(system.engine.dispatch(mutation));
+        await expect(system.run(system.engine.dispatch(continuation))).rejects.toThrow(
+          "scheduled resume",
+        );
+        const rows = await system.run(
+          system.sql<{ status: string }>`SELECT status FROM usage_resumes WHERE id='resume-1'`,
+        );
+        expect(rows[0]?.status).toBe("canceled");
+        const events = await system.run(Stream.runCollect(system.engine.readEvents(0)));
+        expect(
+          events.some(
+            (event) =>
+              event.type === "thread.message-sent" &&
+              event.payload.messageId === continuation.message.messageId,
+          ),
+        ).toBe(false);
+      } finally {
+        await system.dispose();
+      }
+    },
+  );
+
+  it("refuses an unclaimed resume without persisting its message", async () => {
+    const system = await setup("pending");
+    try {
+      await expect(system.run(system.engine.dispatch(continuation))).rejects.toThrow(
+        "scheduled resume",
+      );
+      const events = await system.run(Stream.runCollect(system.engine.readEvents(0)));
+      expect(events.some((event) => event.type === "thread.message-sent")).toBe(false);
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it("deduplicates an accepted scheduled resume by its durable command receipt", async () => {
+    const system = await setup("dispatching");
+    try {
+      const accepted = await system.run(system.engine.dispatch(continuation));
+      expect(await system.run(system.engine.dispatch(continuation))).toEqual(accepted);
+      const events = await system.run(Stream.runCollect(system.engine.readEvents(0)));
+      expect(events.filter((event) => event.type === "thread.turn-start-requested")).toHaveLength(
+        1,
+      );
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it("rechecks active work inside the engine transaction", async () => {
+    const system = await setup("dispatching");
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make("became-busy"),
+          threadId,
+          createdAt: now(),
+          session: {
+            threadId,
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: TurnId.make("other-turn"),
+            lastError: null,
+            updatedAt: now(),
+          },
+        }),
+      );
+      await expect(system.run(system.engine.dispatch(continuation))).rejects.toThrow(
+        "no longer idle",
+      );
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it("keeps a scheduled resume during automatic settled-session cleanup", async () => {
+    const system = await setup("pending");
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.settle",
+          commandId: CommandId.make("settle"),
+          threadId,
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.session.stop",
+          commandId: CommandId.make("settle-cleanup"),
+          threadId,
+          createdAt: now(),
+          onlyIfSettled: true,
+        }),
+      );
+      const rows = await system.run(
+        system.sql<{ status: string }>`SELECT status FROM usage_resumes WHERE id='resume-1'`,
+      );
+      expect(rows[0]?.status).toBe("pending");
+    } finally {
+      await system.dispose();
+    }
+  });
+});
 
 describe("OrchestrationEngine", () => {
   it.each(["running", "stopped"] as const)(

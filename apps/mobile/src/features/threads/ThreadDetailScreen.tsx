@@ -89,6 +89,7 @@ import type {
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { ComposerFeedback } from "./ComposerFeedback";
 import { ComposerUsageLimits } from "./ComposerUsageLimits";
+import { UsageResumeCard } from "./UsageResumeCard";
 import { PendingUserInputCard } from "./PendingUserInputCard";
 import { ThreadCreationFailedCard } from "./ThreadCreationFailedCard";
 import {
@@ -984,6 +985,15 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                 onScrollToEnd={handleScrollToEnd}
               />
               <View className="w-full self-center" style={{ maxWidth: contentMaxWidth }}>
+                {props.creationState === null ? (
+                  <UsageResumeCard
+                    key={selectedThreadKey}
+                    environmentId={props.environmentId}
+                    threadId={props.selectedThread.id}
+                    threadError={props.selectedThread.session?.lastError ?? null}
+                    connected={props.connectionStateLabel === "connected"}
+                  />
+                ) : null}
                 {props.feedbackSubmissions.map((submission) => (
                   <ComposerFeedback
                     key={submission.id}

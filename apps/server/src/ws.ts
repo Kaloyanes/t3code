@@ -98,6 +98,7 @@ import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as AutomationService from "./automation/AutomationService.ts";
+import { UsageResumeService } from "./automation/UsageResumeService.ts";
 import * as ServerConfig from "./config.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -536,6 +537,7 @@ const makeWsRpcLayer = (
             );
       const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
       const automationService = yield* AutomationService.AutomationService;
+      const usageResumes = yield* UsageResumeService;
       const threadDeletionReactor = yield* ThreadDeletionReactor;
       const analytics = yield* AnalyticsService.AnalyticsService;
       // Every command dispatched on this connection carries the connecting
@@ -2483,6 +2485,17 @@ const makeWsRpcLayer = (
               "rpc.aggregate": "server",
             },
           ),
+        [WS_METHODS.usageResumesGet]: (input) =>
+          observeRpcEffect(WS_METHODS.usageResumesGet, usageResumes.get(input.threadId)),
+        [WS_METHODS.usageResumesSchedule]: (input) =>
+          observeRpcEffect(WS_METHODS.usageResumesSchedule, usageResumes.schedule(input)),
+        [WS_METHODS.usageResumesCancel]: (input) =>
+          observeRpcEffect(WS_METHODS.usageResumesCancel, usageResumes.cancel(input)),
+        [WS_METHODS.usageResumesSubscribe]: (input) =>
+          observeRpcStream(
+            WS_METHODS.usageResumesSubscribe,
+            usageResumes.subscribe(input.threadId),
+          ),
         [WS_METHODS.automationsGetSnapshot]: (_input) =>
           observeRpcEffect(WS_METHODS.automationsGetSnapshot, automationService.getSnapshot(), {
             "rpc.aggregate": "automations",
@@ -4252,6 +4265,7 @@ const makeWsRpcLayer = (
 
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
+    const usageResumes = yield* UsageResumeService;
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const baseServerSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const config = yield* ServerConfig.ServerConfig;
@@ -4321,6 +4335,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               clientAnalyticsProps,
               previewAutomationBroker,
             ).pipe(
+              Layer.provide(Layer.succeed(UsageResumeService, usageResumes)),
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provideMerge(
                 AutomationService.layer.pipe(

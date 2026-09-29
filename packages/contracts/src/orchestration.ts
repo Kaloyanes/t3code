@@ -1387,6 +1387,7 @@ export const ThreadTurnDispatchMode = Schema.Literals(["start", "queue", "steer"
 export type ThreadTurnDispatchMode = typeof ThreadTurnDispatchMode.Type;
 
 export const ThreadTurnStartCommand = Schema.Struct({
+  usageResumeId: Schema.optional(TrimmedNonEmptyString),
   type: Schema.Literal("thread.turn.start"),
   commandId: CommandId,
   threadId: ThreadId,

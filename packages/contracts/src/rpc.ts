@@ -1,6 +1,13 @@
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
+import {
+  UsageResumeGetInput,
+  UsageResumeScheduleInput,
+  UsageResumeCancelInput,
+  UsageResumeSnapshot,
+  UsageResumeError,
+} from "./usageResume.ts";
 import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   ProviderAuthCancelInput,
@@ -356,6 +363,10 @@ export const WS_METHODS = {
   projectsWriteFile: "projects.writeFile",
 
   // Scheduled automation methods
+  usageResumesGet: "usageResumes.get",
+  usageResumesSchedule: "usageResumes.schedule",
+  usageResumesCancel: "usageResumes.cancel",
+  usageResumesSubscribe: "usageResumes.subscribe",
   automationsGetSnapshot: "automations.getSnapshot",
   automationsCreate: "automations.create",
   automationsUpdate: "automations.update",
@@ -581,6 +592,29 @@ const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   payload: Schema.Struct({}),
   success: ServerConfig,
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError, EnvironmentAuthorizationError]),
+});
+
+const UsageResumeRpcError = Schema.Union([UsageResumeError, EnvironmentAuthorizationError]);
+const WsUsageResumesGetRpc = Rpc.make(WS_METHODS.usageResumesGet, {
+  payload: UsageResumeGetInput,
+  success: UsageResumeSnapshot,
+  error: UsageResumeRpcError,
+});
+const WsUsageResumesScheduleRpc = Rpc.make(WS_METHODS.usageResumesSchedule, {
+  payload: UsageResumeScheduleInput,
+  success: UsageResumeSnapshot,
+  error: UsageResumeRpcError,
+});
+const WsUsageResumesCancelRpc = Rpc.make(WS_METHODS.usageResumesCancel, {
+  payload: UsageResumeCancelInput,
+  success: UsageResumeSnapshot,
+  error: UsageResumeRpcError,
+});
+const WsUsageResumesSubscribeRpc = Rpc.make(WS_METHODS.usageResumesSubscribe, {
+  payload: UsageResumeGetInput,
+  success: UsageResumeSnapshot,
+  error: UsageResumeRpcError,
+  stream: true,
 });
 
 const AutomationRpcError = Schema.Union([AutomationOperationError, EnvironmentAuthorizationError]);
@@ -1742,6 +1776,10 @@ const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeResourceTel
 export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
+  WsUsageResumesGetRpc,
+  WsUsageResumesScheduleRpc,
+  WsUsageResumesCancelRpc,
+  WsUsageResumesSubscribeRpc,
   WsAutomationsGetSnapshotRpc,
   WsAutomationsCreateRpc,
   WsAutomationsUpdateRpc,

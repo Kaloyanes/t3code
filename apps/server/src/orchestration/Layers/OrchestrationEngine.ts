@@ -295,6 +295,45 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         const committedCommand = yield* sql
           .withTransaction(
             Effect.gen(function* () {
+              const command = envelope.command;
+              if (command.type === "thread.turn.start" && command.usageResumeId) {
+                const scheduled = yield* sql<{
+                  readonly status: string;
+                }>`SELECT status FROM usage_resumes WHERE id=${command.usageResumeId} AND thread_id=${command.threadId}`;
+                const shell = yield* projectionSnapshotQuery.getThreadShellById(command.threadId);
+                if (
+                  scheduled[0]?.status !== "dispatching" ||
+                  Option.isNone(shell) ||
+                  shell.value.archivedAt ||
+                  shell.value.session?.activeTurnId ||
+                  shell.value.session?.status === "starting" ||
+                  shell.value.session?.status === "running" ||
+                  shell.value.latestTurn?.state === "running" ||
+                  shell.value.hasPendingApprovals ||
+                  shell.value.hasPendingUserInput
+                ) {
+                  return yield* new OrchestrationCommandInvariantError({
+                    commandType: command.type,
+                    detail: "The scheduled resume was canceled or the thread is no longer idle.",
+                  });
+                }
+              } else if (
+                command.type === "thread.turn.start" ||
+                command.type === "thread.turn.interrupt" ||
+                (command.type === "thread.session.stop" && !command.onlyIfSettled) ||
+                command.type === "thread.archive" ||
+                command.type === "thread.delete" ||
+                command.type === "thread.checkpoint.revert" ||
+                command.type === "thread.conversation.revert" ||
+                command.type === "thread.runtime-mode.set" ||
+                command.type === "thread.interaction-mode.set" ||
+                (command.type === "thread.meta.update" &&
+                  (command.modelSelection !== undefined ||
+                    command.branch !== undefined ||
+                    command.worktreePath !== undefined))
+              ) {
+                yield* sql`UPDATE usage_resumes SET status='canceled', reason='The thread changed after this resume was scheduled.' WHERE thread_id=${command.threadId} AND status IN ('pending', 'dispatching')`;
+              }
               const committedEvents: OrchestrationEvent[] = [];
               const attachmentCleanups: Effect.Effect<void>[] = [];
               let nextCommandReadModel = commandReadModel;

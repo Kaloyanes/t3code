@@ -49,6 +49,23 @@ reported accounts, refresh provider status, and confirm the second instance has
 its own shadow path and login. A shadow-home conflict usually means the directory
 contains a copied Codex setup. Use a fresh shadow directory and sign in again.
 
+## Resume after a usage limit
+
+When a Codex thread stops at a usage limit with a known reset time, choose
+**Resume when usage resets**. Review the continuation message and select
+**Schedule resume**. This schedules one message in the same thread; it does not
+enable ongoing automatic retries. Codex Spark is not supported.
+
+The schedule runs on the connected host. You can close the web, desktop client,
+or mobile app, provided the host's T3 server keeps running. If the desktop app
+is the host, keep it running. After sleep or a server restart, the host checks
+overdue schedules and usage before sending.
+
+You can cancel from any connected client. Sending a message manually, stopping
+the thread, or changing its model cancels the pending resume. If usage remains
+limited, the host waits for the next reported reset. Failed checks or an
+interrupted dispatch appear in the thread so you can review before retrying.
+
 ## Answer questions while Codex works
 
 Codex can ask a question and keep working. Answer it in the thread's question
@@ -68,7 +85,8 @@ for command and file approvals.
 ## Codex says I hit a usage limit
 
 When Codex stops on a usage limit, the thread names the window that ran out and
-when it resets, when Codex reports them. Send the message again after the reset. On a workspace plan the
+when it resets, when Codex reports them. You can [schedule a continuation](#resume-after-a-usage-limit)
+or send a message after the reset. On a workspace plan the
 message also says whether your workspace owner needs to add credits or raise the
 spend limit to continue sooner.
 

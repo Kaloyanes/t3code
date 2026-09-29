@@ -23,6 +23,7 @@ import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
+import * as UsageResumeService from "./automation/UsageResumeService.ts";
 import * as AutomationService from "./automation/AutomationService.ts";
 import * as AutomationScheduler from "./automation/AutomationScheduler.ts";
 import * as HostPowerMonitor from "./background/HostPowerMonitor.ts";
@@ -280,6 +281,12 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(RuntimeReceiptBusLive),
 );
+
+const UsageResumeSchedulerLive = Layer.effectDiscard(
+  Effect.gen(function* () {
+    yield* (yield* UsageResumeService.UsageResumeService).start();
+  }),
+).pipe(Layer.provideMerge(UsageResumeService.layer));
 
 const AutomationSchedulerLive = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -548,6 +555,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   ),
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(VcsLayerLive),
+  Layer.provideMerge(UsageResumeSchedulerLive),
   Layer.provideMerge(AutomationSchedulerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(

@@ -45,6 +45,7 @@ export * from "./previewAutomation.ts";
 export * from "./promptEnhancement.ts";
 export * from "./resourceTelemetry.ts";
 export * from "./usage.ts";
+export * from "./usageResume.ts";
 export * from "./rpc.ts";
 export * from "./worktreeSetup.ts";
 export * from "./worktreeRun.ts";
