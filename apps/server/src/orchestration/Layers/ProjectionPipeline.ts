@@ -1525,9 +1525,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             threadId: event.payload.threadId,
             turnId,
           });
-          const pendingTurnStart = yield* projectionTurnRepository.getPendingTurnStartByThreadId({
-            threadId: event.payload.threadId,
-          });
+          // Repeated running updates must not adopt a follow-up queued behind this turn.
+          const pendingTurnStart = Option.isSome(existingTurn)
+            ? Option.none()
+            : yield* projectionTurnRepository.getPendingTurnStartByThreadId({
+                threadId: event.payload.threadId,
+              });
           if (Option.isSome(existingTurn)) {
             const nextState =
               existingTurn.value.state === "completed" || existingTurn.value.state === "error"

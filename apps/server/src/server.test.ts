@@ -9459,7 +9459,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 
-  it.effect("buffers thread events published while the initial snapshot loads", () =>
+  it.effect("streams queued turn intent with its message during snapshot and replay", () =>
     Effect.gen(function* () {
       const thread = makeDefaultOrchestrationReadModel().threads[0]!;
       const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>();
@@ -9486,15 +9486,34 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         },
       } satisfies Extract<OrchestrationEvent, { type: "thread.message-sent" }>;
 
+      const queuedEvent = {
+        ...messageEvent,
+        sequence: 3,
+        eventId: EventId.make("event-queued-turn"),
+        type: "thread.turn-start-requested",
+        payload: {
+          threadId: defaultThreadId,
+          messageId: messageEvent.payload.messageId,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          dispatchMode: "queue",
+          createdAt: messageEvent.occurredAt,
+        },
+      } satisfies OrchestrationEvent;
+
       yield* buildAppUnderTest({
         layers: {
           orchestrationEngine: {
             streamDomainEvents: Stream.fromPubSub(liveEvents),
+            latestSequence: Effect.succeed(3),
+            getThreadReplayStats: () =>
+              Effect.succeed({ eventCount: 2, payloadBytes: 200, hasCreateEvent: false }),
+            readThreadEvents: () => Stream.make(messageEvent, queuedEvent),
           },
           projectionSnapshotQuery: {
             getThreadDetailSnapshot: () =>
               Effect.gen(function* () {
-                yield* PubSub.publish(liveEvents, messageEvent);
+                yield* PubSub.publishAll(liveEvents, [messageEvent, queuedEvent]);
                 return Option.some({ snapshotSequence: 1, thread });
               }),
           },
@@ -9502,22 +9521,27 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
 
       const wsUrl = yield* getWsServerUrl("/ws");
-      const items = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
-            threadId: defaultThreadId,
-            requestCompletionMarker: true,
-          }).pipe(
-            Stream.takeUntil((item) => item.kind === "synchronized"),
-            Stream.runCollect,
+      for (const afterSequence of [undefined, 1]) {
+        const items = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+              threadId: defaultThreadId,
+              requestCompletionMarker: true,
+              ...(afterSequence !== undefined ? { afterSequence } : {}),
+            }).pipe(
+              Stream.takeUntil((item) => item.kind === "synchronized"),
+              Stream.runCollect,
+            ),
           ),
-        ),
-      );
+        );
 
-      assert.equal(items[0]?.kind, "snapshot");
-      assert.equal(items[1]?.kind, "event");
-      assert.equal(items[1]?.kind === "event" ? items[1].event.sequence : null, 2);
-      assert.equal(items[2]?.kind, "synchronized");
+        if (afterSequence === undefined) assert.equal(items[0]?.kind, "snapshot");
+        assert.deepEqual(
+          items.filter((item) => item.kind === "event").map((item) => item.event),
+          [messageEvent, queuedEvent],
+        );
+        assert.equal(items.at(-1)?.kind, "synchronized");
+      }
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

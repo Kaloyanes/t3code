@@ -354,18 +354,19 @@ export function applyThreadDetailEvent(
         kind: "updated",
         thread: {
           ...thread,
-          ...(event.payload.modelSelection !== undefined
-            ? { modelSelection: event.payload.modelSelection }
-            : {}),
-          runtimeMode: event.payload.runtimeMode,
-          interactionMode: event.payload.interactionMode,
           ...(event.payload.dispatchMode === "queue"
             ? {
                 queuedMessageIds: (thread.queuedMessageIds ?? []).includes(event.payload.messageId)
-                  ? thread.queuedMessageIds
+                  ? (thread.queuedMessageIds ?? [])
                   : [...(thread.queuedMessageIds ?? []), event.payload.messageId],
               }
-            : {}),
+            : {
+                ...(event.payload.modelSelection !== undefined
+                  ? { modelSelection: event.payload.modelSelection }
+                  : {}),
+                runtimeMode: event.payload.runtimeMode,
+                interactionMode: event.payload.interactionMode,
+              }),
           updatedAt: event.occurredAt,
         },
       };

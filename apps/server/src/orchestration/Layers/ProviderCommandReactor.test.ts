@@ -749,6 +749,32 @@ describe("ProviderCommandReactor", () => {
         { messageId: "queued-follow-up-2" },
       ]);
 
+      // Session heartbeats belong to the active turn, not to its queued follow-ups.
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-active-turn-heartbeat"),
+        threadId,
+        session: {
+          threadId,
+          providerInstanceId: selection.instanceId,
+          providerName: provider,
+          status: "running",
+          runtimeMode: "approval-required",
+          activeTurnId: TurnId.make("active-turn"),
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:02.750Z",
+        },
+        createdAt: "2026-01-01T00:00:02.750Z",
+      });
+      yield* Effect.promise(harness.drain);
+      expect(harness.sendTurn).not.toHaveBeenCalled();
+      expect(harness.interruptTurn).not.toHaveBeenCalled();
+      expect(harness.startSession).not.toHaveBeenCalled();
+      expect((yield* Effect.promise(harness.readModel)).threads[0]?.queuedMessageIds).toEqual([
+        "queued-follow-up",
+        "queued-follow-up-2",
+      ]);
+
       // Providers can report readiness more than once before the reactor drains.
       for (const commandId of ["cmd-active-turn-settled", "cmd-active-turn-ready-again"]) {
         yield* harness.engine.dispatch({
@@ -795,6 +821,10 @@ describe("ProviderCommandReactor", () => {
         },
         createdAt: "2026-01-01T00:00:04.000Z",
       });
+      yield* Effect.promise(harness.drain);
+      expect((yield* Effect.promise(harness.readModel)).threads[0]?.queuedMessageIds).toEqual([
+        "queued-follow-up-2",
+      ]);
       yield* harness.engine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.make("cmd-queued-turn-settled"),

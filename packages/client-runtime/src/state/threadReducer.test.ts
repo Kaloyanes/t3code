@@ -982,8 +982,9 @@ describe("applyThreadDetailEvent", () => {
         payload: {
           threadId: ThreadId.make("thread-1"),
           messageId: MessageId.make("queued-message"),
-          runtimeMode: "full-access",
-          interactionMode: "default",
+          modelSelection: { ...baseThread.modelSelection, model: "next-model" },
+          runtimeMode: "approval-required",
+          interactionMode: "plan",
           dispatchMode: "queue",
           createdAt: "2026-04-01T08:00:00.000Z",
         },
@@ -992,6 +993,9 @@ describe("applyThreadDetailEvent", () => {
       expect(queued.kind).toBe("updated");
       if (queued.kind !== "updated") return;
       expect(queued.thread.queuedMessageIds).toEqual(["queued-message"]);
+      expect(queued.thread.modelSelection).toEqual(baseThread.modelSelection);
+      expect(queued.thread.runtimeMode).toBe(baseThread.runtimeMode);
+      expect(queued.thread.interactionMode).toBe(baseThread.interactionMode);
 
       const started = applyThreadDetailEvent(
         {
