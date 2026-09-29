@@ -25,6 +25,18 @@ const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeWorktreeBranchPrefix = Schema.decodeUnknownSync(WorktreeBranchPrefix);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
+describe("keep awake settings", () => {
+  it("defaults off and accepts explicit changes", () => {
+    expect(decodeServerSettings({}).keepAwakeWhileAgentsWork).toBe(false);
+    expect(decodeServerSettingsPatch({ keepAwakeWhileAgentsWork: true })).toEqual({
+      keepAwakeWhileAgentsWork: true,
+    });
+    expect(decodeServerSettings({ keepAwakeWhileAgentsWork: true }).keepAwakeWhileAgentsWork).toBe(
+      true,
+    );
+  });
+});
+
 describe("storage cleanup settings", () => {
   it("keeps cleanup disabled for existing installations", () => {
     expect(decodeServerSettings({}).worktreeCleanup).toBeNull();

@@ -102,6 +102,7 @@ describe("splitSharedServerPatch", () => {
       sidebarAutoSettleOnMerge: false,
       continueThreadsAfterServerUpdate: true,
       enableAgentBrowserAccess: false,
+      keepAwakeWhileAgentsWork: true,
       defaultThreadEnvMode: "worktree",
       newWorktreesStartFromOrigin: true,
     });
@@ -113,6 +114,7 @@ describe("splitSharedServerPatch", () => {
     });
     expect(localPatch).toEqual({
       enableAgentBrowserAccess: false,
+      keepAwakeWhileAgentsWork: true,
       defaultThreadEnvMode: "worktree",
     });
   });

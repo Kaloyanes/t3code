@@ -222,6 +222,10 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
   );
   const disabled =
     pendingWrites > 0 || !hasConnectedSelection || (projectSelected && !supportsProjectOverrides);
+  const supportsKeepAwake =
+    !projectSelected &&
+    targets.length === 1 &&
+    reference?.environment.serverConfig.environment.capabilities.keepAwakeWhileAgentsWork === true;
   const supportsContinuation = targets.every(
     (target) =>
       target.environment.serverConfig.environment.capabilities.threadRestartContinuation === true,
@@ -592,6 +596,22 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                       ))}
                     </SettingsSection>
                   ) : null}
+                  <SettingsSection title="Power">
+                    <FanoutSwitchRow
+                      icon="moon"
+                      label="Keep computer awake while agents work"
+                      subtitle={
+                        projectSelected || targets.length !== 1
+                          ? "Select one environment and All projects to change this setting."
+                          : !supportsKeepAwake
+                            ? "Requires a Mac running a server that supports keeping awake."
+                            : "Prevent idle sleep on this Mac while agents work. The display can still sleep."
+                      }
+                      value={uniform("keepAwakeWhileAgentsWork")}
+                      disabled={disabledFor("keepAwakeWhileAgentsWork") || !supportsKeepAwake}
+                      onValueChange={(value) => write({ keepAwakeWhileAgentsWork: value })}
+                    />
+                  </SettingsSection>
                   <SettingsSection title="Updates">
                     <FanoutSwitchRow
                       icon="arrow.clockwise"

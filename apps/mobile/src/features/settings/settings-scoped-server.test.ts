@@ -123,5 +123,12 @@ describe("mobile project settings scope", () => {
     expect(
       planMobileScopedSettingsPatch(targets, true, { enableProviderUpdateChecks: false }),
     ).toEqual([]);
+    expect(
+      planMobileScopedSettingsPatch(targets, true, { keepAwakeWhileAgentsWork: true }),
+    ).toEqual([]);
+    const hostTargets = resolveMobileSettingsTargets([environment(firstId, settings)], null);
+    expect(
+      planMobileScopedSettingsPatch(hostTargets, false, { keepAwakeWhileAgentsWork: true }),
+    ).toEqual([{ environmentId: firstId, patch: { keepAwakeWhileAgentsWork: true } }]);
   });
 });

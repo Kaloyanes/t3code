@@ -399,6 +399,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "environment-defaults",
   },
   {
+    id: "keep-awake-while-agents-work",
+    title: "Keep computer awake while agents work",
+    to: "/settings/general",
+    scope: "environment-defaults",
+    searchTerms: ["caffeinate sleep awake mac power battery agent background"],
+  },
+  {
     id: "continue-threads-after-server-update",
     title: "Continue threads after restarts",
     to: "/settings/general",

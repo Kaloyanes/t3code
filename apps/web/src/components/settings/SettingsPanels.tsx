@@ -2224,6 +2224,9 @@ export function GeneralSettingsPanel() {
     connectedEnvironments.every(
       (target) => target.serverConfig?.environment.capabilities.threadAutoSettlement === true,
     );
+  const supportsKeepAwake =
+    scope.kind === "environment" &&
+    environment?.serverConfig?.environment.capabilities.keepAwakeWhileAgentsWork === true;
   const supportsRestartContinuation =
     connectedEnvironments.length > 0 &&
     connectedEnvironments.every(
@@ -2915,6 +2918,39 @@ export function GeneralSettingsPanel() {
                 updateSettings({ enableProviderUpdateChecks: Boolean(checked) })
               }
               aria-label="Check provider versions"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("keep-awake-while-agents-work")}
+          serverScoped
+          settingKeys={["keepAwakeWhileAgentsWork"]}
+          description="Prevent idle sleep on this Mac while agents are working. The display can still sleep."
+          status={
+            scope.kind !== "environment"
+              ? "Select one environment and All projects to change this setting."
+              : !supportsKeepAwake
+                ? "Requires a Mac running a server that supports keeping awake."
+                : undefined
+          }
+          resetAction={
+            supportsKeepAwake && settings.keepAwakeWhileAgentsWork ? (
+              <SettingResetButton
+                label="keep computer awake"
+                onClick={() => updateSettings({ keepAwakeWhileAgentsWork: false })}
+              />
+            ) : null
+          }
+          control={
+            <ScopedSwitch
+              settingKeys={["keepAwakeWhileAgentsWork"]}
+              checked={settings.keepAwakeWhileAgentsWork}
+              disabled={!supportsKeepAwake}
+              onCheckedChange={(checked) =>
+                updateSettings({ keepAwakeWhileAgentsWork: Boolean(checked) })
+              }
+              aria-label="Keep computer awake while agents work"
             />
           }
         />

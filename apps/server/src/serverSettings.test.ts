@@ -30,6 +30,7 @@ import { resolveProviderInstanceTerminalEnvironment } from "./terminal/Manager.t
 
 const decodeSettingsPatch = Schema.decodeUnknownEffect(ServerSettingsPatch);
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
+const decodeServerSettingsJson = Schema.decodeUnknownEffect(Schema.fromJsonString(ServerSettings));
 
 const makeServerSettingsLayer = () =>
   ServerSettingsModule.layer.pipe(
@@ -331,6 +332,23 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         "promptEnhancementSystemPrompt",
       );
     }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("persists and broadcasts keep awake, including reset to off", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const settings = yield* ServerSettingsModule.ServerSettingsService;
+      for (const enabled of [true, false]) {
+        const changes = yield* settings.subscribeChanges;
+        yield* settings.updateSettings({ keepAwakeWhileAgentsWork: enabled });
+        const change = yield* Stream.runHead(changes);
+        assert.strictEqual(Option.getOrThrow(change).keepAwakeWhileAgentsWork, enabled);
+        const raw = yield* fs.readFileString(config.settingsPath);
+        const persisted = yield* decodeServerSettingsJson(raw);
+        assert.strictEqual(persisted.keepAwakeWhileAgentsWork, enabled);
+      }
+    }).pipe(Effect.scoped, Effect.provide(makeServerSettingsLayer())),
   );
 
   it.effect("persists and broadcasts thread settlement settings", () =>

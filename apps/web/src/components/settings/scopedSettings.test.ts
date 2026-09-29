@@ -356,6 +356,14 @@ describe("scoped settings writes", () => {
     }
   });
 
+  it("writes keep awake only to the selected environment and refuses project overrides", () => {
+    const patch = { keepAwakeWhileAgentsWork: true };
+    expect(planScopedSettingsPatch(named, environments, patch).serverWrites).toEqual([
+      { environmentId: server.environmentId, label: server.label, patch },
+    ]);
+    expect(planScopedSettingsPatch(project, environments, patch).serverWrites).toEqual([]);
+  });
+
   it("refuses environment-wide keys and older servers at project scope", () => {
     expect(
       planScopedSettingsPatch(project, environments, { enableProviderUpdateChecks: false }),

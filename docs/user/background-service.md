@@ -40,6 +40,20 @@ downloaded versions after showing you the list and asking once. Your projects,
 threads, and settings under `~/.t3/userdata` are kept. Pass `--yes` from a
 script.
 
+## Keep a Mac awake during agent work
+
+In Settings > General, select the Mac's environment and All projects, then enable
+**Keep computer awake while agents work**. On mobile, use the environment's
+maintenance settings. This is off by default and applies only to the selected
+host, including work started remotely.
+
+The Mac stays awake while turns start or run, while agents wait for approval or
+input, and while background agents work. Idle sessions and monitoring-only tasks
+do not keep it awake. The display can still sleep. Turning the setting off or
+finishing the last active task releases the sleep prevention. This prevents idle
+sleep; it does not guarantee operation with the lid closed or override explicit
+system sleep.
+
 ## Platform support
 
 Linux needs systemd user services. Setup enables lingering so T3 Code starts at
