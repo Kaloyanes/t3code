@@ -1780,6 +1780,9 @@ function WorktreeSetupTimelineRow({
   );
 }
 
+const queuedMessageBubbleClassName =
+  "max-w-[80%] rounded-2xl border border-dashed border-border p-3 text-message-foreground/80";
+
 /** A message waiting for the running turn: a dashed user bubble with icon actions inside it. */
 function QueuedMessageTimelineRow({
   row,
@@ -1800,11 +1803,11 @@ function QueuedMessageTimelineRow({
     : queuedMessage.holdUntilUserAction
       ? "Waits for Send now"
       : row.isNext
-        ? "Sends after the next tool call or when the turn ends"
+        ? "Sends after the current turn ends"
         : "Sends after the messages above it";
   return (
     <div className="flex flex-col items-end" data-queued-message-id={queuedMessage.id}>
-      <div className="max-w-[80%] rounded-2xl border border-dashed border-border p-3 text-message-foreground/80">
+      <div className={queuedMessageBubbleClassName}>
         {text.length > 0 ? (
           <UserMessageBody text={text} skills={ctx.skills} markdownCwd={ctx.markdownCwd} />
         ) : null}
@@ -2114,14 +2117,19 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   );
 
   return (
-    <div className="group flex flex-col items-end gap-1">
+    <div
+      className="group flex flex-col items-end gap-1"
+      data-queued-message-id={row.queued ? row.message.id : undefined}
+    >
       <div
         className={cn(
-          "relative min-w-0 max-w-[80%] rounded-2xl p-3 text-message-foreground",
-          row.queued ? "border border-dashed border-border" : "bg-message",
+          "relative min-w-0",
+          row.queued
+            ? queuedMessageBubbleClassName
+            : "max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground",
         )}
       >
-        <MessageAuthorHeading>You</MessageAuthorHeading>
+        {!row.queued && <MessageAuthorHeading>You</MessageAuthorHeading>}
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[210px] grid-cols-2 gap-2">
             {regularImages.map((image) => (
@@ -2235,48 +2243,65 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           </div>
         </BashMessageDisclosure>
         {row.queued ? (
-          <div className="mt-2 flex items-center gap-1 text-secondary-label text-xs">
-            <ClockIcon className="size-3.5" aria-hidden />
-            Queued
+          <div
+            className="mt-2 flex items-center gap-4 text-secondary-label text-xs"
+            data-scroll-anchor-ignore
+          >
+            <Tooltip>
+              <TooltipTrigger
+                render={<span className="inline-flex h-6 items-center gap-1" />}
+                aria-label="Queued. Sends after the current turn and the messages ahead of it."
+              >
+                <ClockIcon className="size-3.5" aria-hidden />
+                Queued
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">
+                Sends after the current turn and the messages ahead of it
+              </TooltipPopup>
+            </Tooltip>
           </div>
         ) : null}
       </div>
-      <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover:opacity-100">
-        <div className="flex shrink-0 items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
-              {formatDayAwareTimestamp(row.message.createdAt, ctx.timestampFormat)}
-            </TooltipTrigger>
-            <TooltipPopup>
-              {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat)}
-            </TooltipPopup>
-          </Tooltip>
-          <div className="flex items-center gap-0.5">
-            {typeof revertTurnCount === "number" && (
-              <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
-            )}
-            {resolvedContext.text && (
-              <MessageCopyButton
-                // Structured paste needs the canonical links to retain their positions.
-                text={
-                  contextClipboardFragment
-                    ? resolvedContext.text
-                    : replaceComposerContextReferences(
-                        resolvedContext.text,
-                        (reference) => reference.label,
-                      )
-                }
-                {...(contextClipboardFragment
-                  ? {
-                      extraFlavors: { [COMPOSER_CONTEXT_CLIPBOARD_MIME]: contextClipboardFragment },
-                    }
-                  : {})}
-                variant="ghost"
-              />
-            )}
+      {!row.queued && (
+        <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover:opacity-100">
+          <div className="flex shrink-0 items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
+                {formatDayAwareTimestamp(row.message.createdAt, ctx.timestampFormat)}
+              </TooltipTrigger>
+              <TooltipPopup>
+                {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat)}
+              </TooltipPopup>
+            </Tooltip>
+            <div className="flex items-center gap-0.5">
+              {typeof revertTurnCount === "number" && (
+                <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
+              )}
+              {resolvedContext.text && (
+                <MessageCopyButton
+                  // Structured paste needs the canonical links to retain their positions.
+                  text={
+                    contextClipboardFragment
+                      ? resolvedContext.text
+                      : replaceComposerContextReferences(
+                          resolvedContext.text,
+                          (reference) => reference.label,
+                        )
+                  }
+                  {...(contextClipboardFragment
+                    ? {
+                        extraFlavors: {
+                          [COMPOSER_CONTEXT_CLIPBOARD_MIME]: contextClipboardFragment,
+                        },
+                      }
+                    : {})}
+                  variant="ghost"
+                />
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

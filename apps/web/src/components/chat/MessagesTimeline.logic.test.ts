@@ -1131,7 +1131,7 @@ describe("deriveMessagesTimelineRows", () => {
     ]);
   });
 
-  it("keeps server-queued follow-ups after the active turn", () => {
+  it("keeps server-queued follow-ups at the bottom until each one is sent", () => {
     const activeUser = {
       id: "active-user",
       kind: "message",
@@ -1175,7 +1175,7 @@ describe("deriveMessagesTimelineRows", () => {
       },
     } as const;
 
-    const rows = deriveMessagesTimelineRows({
+    const input = {
       timelineEntries: [activeUser, activeAssistant, queuedUser],
       latestTurn: {
         turnId: TurnId.make("turn-1"),
@@ -1189,7 +1189,8 @@ describe("deriveMessagesTimelineRows", () => {
       turnDiffSummaries: [],
       supportsConversationRollback: false,
       queuedMessageIds: new Set([MessageId.make("queued-user")]),
-    });
+    } satisfies Parameters<typeof deriveMessagesTimelineRows>[0];
+    const rows = deriveMessagesTimelineRows(input);
 
     expect(rows.map((row) => [row.kind, row.id])).toEqual([
       ["message", "active-user"],
@@ -1199,6 +1200,49 @@ describe("deriveMessagesTimelineRows", () => {
       ["message", "queued-user"],
     ]);
     expect(rows.at(-1)).toMatchObject({ kind: "message", queued: true });
+
+    const secondQueuedUser = {
+      ...queuedUser,
+      id: "second-queued-user",
+      message: { ...queuedUser.message, id: MessageId.make("second-queued-user") },
+    };
+    const laterAssistant = {
+      ...activeAssistant,
+      id: "later-assistant",
+      createdAt: "2026-01-01T00:00:03Z",
+      message: {
+        ...activeAssistant.message,
+        id: MessageId.make("later-assistant"),
+        createdAt: "2026-01-01T00:00:03Z",
+      },
+    };
+    const timelineEntries = [...input.timelineEntries, secondQueuedUser, laterAssistant];
+    const queuedMessageIds = new Set([queuedUser.message.id, secondQueuedUser.message.id]);
+    const streamingRows = deriveMessagesTimelineRows({
+      ...input,
+      timelineEntries,
+      queuedMessageIds,
+    });
+    expect(streamingRows.slice(-2)).toMatchObject([
+      { id: queuedUser.id, queued: true },
+      { id: secondQueuedUser.id, queued: true },
+    ]);
+
+    queuedMessageIds.delete(queuedUser.message.id);
+    const sentRows = deriveMessagesTimelineRows({ ...input, timelineEntries, queuedMessageIds });
+    expect(sentRows.at(-1)).toMatchObject({ id: secondQueuedUser.id, queued: true });
+    expect(sentRows.find((row) => row.id === queuedUser.id)).not.toHaveProperty("queued", true);
+    expect(sentRows.findIndex((row) => row.id === queuedUser.id)).toBeLessThan(
+      sentRows.findIndex((row) => row.id === laterAssistant.id),
+    );
+
+    queuedMessageIds.clear();
+    const deliveredRows = deriveMessagesTimelineRows({
+      ...input,
+      timelineEntries,
+      queuedMessageIds,
+    });
+    expect(deliveredRows.filter((row) => row.kind === "message" && row.queued)).toEqual([]);
   });
 
   it("leads the worktree setup card with the working header", () => {
