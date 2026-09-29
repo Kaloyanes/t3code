@@ -8,6 +8,18 @@ import type {
 export const USAGE_RESUME_PROMPT =
   "Continue from where you stopped. Check what is already done before proceeding.";
 
+export function usageResumeDriver(thread: OrchestrationThreadShell | undefined) {
+  const error = thread?.session?.lastError;
+  // These messages come from typed quota errors at the adapter boundary.
+  if (error?.startsWith("Codex usage limit reached.")) return "codex";
+  if (
+    error?.startsWith("Claude usage limit reached.") ||
+    error === "Claude stopped: a usage limit blocked the request."
+  )
+    return "claudeAgent";
+  return undefined;
+}
+
 export function usageResumeEligibility(
   thread: OrchestrationThreadShell | undefined,
   provider: ServerProvider | undefined,
@@ -19,18 +31,21 @@ export function usageResumeEligibility(
     reason,
     defaultPrompt: null,
   });
-  if (
-    thread?.session?.lastError?.startsWith("Claude usage limit reached.") ||
-    thread?.session?.lastError === "Claude stopped: a usage limit blocked the request."
-  )
-    return unavailable("Scheduled usage reset resumes are not yet supported for Claude.");
-  // This prefix is produced only for Codex's typed usageLimitExceeded error.
-  if (!thread?.session?.lastError?.startsWith("Codex usage limit reached."))
-    return unavailable(null);
+  const driver = usageResumeDriver(thread);
+  if (!thread || !driver) return unavailable(null);
   if (thread.archivedAt) return unavailable("This thread is archived.");
-  if (provider?.driver !== "codex" || !provider.enabled || !provider.installed)
+  if (provider?.driver !== driver || !provider.enabled || !provider.installed)
     return unavailable("This provider cannot schedule a usage reset resume.");
-  if (thread.modelSelection.model.toLowerCase().includes("spark"))
+  if (
+    driver === "claudeAgent" &&
+    (thread.session?.activeTurnId ||
+      thread.session?.status === "starting" ||
+      thread.session?.status === "running" ||
+      thread.latestTurn?.state === "running")
+  )
+    return unavailable("Claude still has an active turn and may resume itself after the reset.");
+  if (driver === "claudeAgent" && thread.latestTurn?.state !== "error") return unavailable(null);
+  if (driver === "codex" && thread.modelSelection.model.toLowerCase().includes("spark"))
     return unavailable("The provider does not report a reliable reset for this model.");
   const limits = provider.usageLimits;
   if (!limits || limits.unavailable)

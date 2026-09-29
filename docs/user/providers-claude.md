@@ -61,6 +61,18 @@ Claude Code holds the turn until that window reopens, so it can keep showing as
 working. Wait for the reset, or stop the turn and continue later. The warning's
 timestamp shows when the displayed wait started.
 
+If the turn ends with a usage-limit error, choose **Resume when usage resets**,
+review the continuation message, and select **Schedule resume**. The host sends
+one continuation in the same thread after checking fresh quota. A turn still
+paused inside Claude Code keeps its own retry; it cannot receive a scheduled
+continuation at the same time.
+
+The host waits for every reported exhausted window, including model-specific
+windows. If Claude does not provide reliable reset times, scheduling is
+unavailable. Keep the host awake with T3 running; clients can disconnect.
+Schedules survive host restarts. Cancel from any connected client, or send a
+message manually to cancel the pending resume.
+
 ## Skills
 
 Claude skills come from the config directory's `skills` folder and the project's

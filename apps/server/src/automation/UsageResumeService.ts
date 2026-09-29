@@ -31,9 +31,10 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { OrchestrationCommandReceiptRepository } from "../persistence/Services/OrchestrationCommandReceipts.ts";
-import { usageResumeEligibility } from "./usageResumeEligibility.ts";
+import { usageResumeDriver, usageResumeEligibility } from "./usageResumeEligibility.ts";
 
 const Execution = Schema.Struct({
+  providerDriver: Schema.optional(Schema.Literals(["codex", "claudeAgent"])),
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
@@ -177,6 +178,7 @@ export const layer = Layer.effect(
                 return yield* fail("This thread already has a scheduled resume.");
               const at = iso(now);
               const execution = {
+                providerDriver: provider.driver,
                 modelSelection: thread.value.modelSelection,
                 runtimeMode: thread.value.runtimeMode,
                 interactionMode: thread.value.interactionMode,
@@ -221,7 +223,10 @@ export const layer = Layer.effect(
     const dispatch = (row: Row) =>
       Effect.gen(function* () {
         const threadId = ThreadId.make(row.thread_id);
-        const execution = yield* decodeExecution(row.execution_json);
+        // Rows created before Claude support contain only Codex execution settings.
+        const { providerDriver = "codex", ...execution } = yield* decodeExecution(
+          row.execution_json,
+        );
         const thread = yield* snapshots.getThreadShellById(threadId);
         if (
           Option.isNone(thread) ||
@@ -230,6 +235,14 @@ export const layer = Layer.effect(
           JSON.stringify(thread.value.modelSelection) !== JSON.stringify(execution.modelSelection)
         ) {
           yield* update(row, "canceled", "The thread changed after this resume was scheduled.");
+          return;
+        }
+        if (
+          providerDriver === "claudeAgent" &&
+          (usageResumeDriver(thread.value) !== providerDriver ||
+            thread.value.latestTurn?.state !== "error")
+        ) {
+          yield* update(row, "canceled", "Claude is no longer stopped at a usage limit.");
           return;
         }
         if (
@@ -253,10 +266,11 @@ export const layer = Layer.effect(
         );
         if (
           !provider ||
-          provider.driver !== "codex" ||
+          provider.driver !== providerDriver ||
           !provider.enabled ||
           !provider.installed ||
-          execution.modelSelection.model.toLowerCase().includes("spark") ||
+          (providerDriver === "codex" &&
+            execution.modelSelection.model.toLowerCase().includes("spark")) ||
           identity(provider) !== row.auth_identity
         ) {
           yield* update(row, "canceled", "The provider or signed-in account changed.");

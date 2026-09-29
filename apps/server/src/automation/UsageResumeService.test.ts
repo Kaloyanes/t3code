@@ -5,7 +5,9 @@ import {
   ProviderDriverKind,
   ServerProvider,
   ThreadId,
+  TurnId,
   type OrchestrationCommand,
+  type ServerProviderUsageWindow,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -31,17 +33,27 @@ const threadId = ThreadId.make("resume-thread");
 const at = (millis: number) => DateTime.formatIso(DateTime.makeUnsafe(millis));
 const decodeShell = Schema.decodeUnknownSync(OrchestrationThreadShell);
 const decodeProvider = Schema.decodeSync(ServerProvider);
-const shell = () =>
+const shell = (driver: "codex" | "claudeAgent" = "codex") =>
   decodeShell({
     id: threadId,
     projectId: "project",
     title: "Quota stop",
-    modelSelection: { instanceId: "codex", model: "gpt-5" },
+    modelSelection: {
+      instanceId: driver,
+      model: driver === "codex" ? "gpt-5" : "claude-sonnet-4-6",
+    },
     runtimeMode: "approval-required",
     interactionMode: "default",
     branch: null,
     worktreePath: null,
-    latestTurn: null,
+    latestTurn: {
+      turnId: "quota-turn",
+      state: "error",
+      requestedAt: at(0),
+      startedAt: at(0),
+      completedAt: at(0),
+      assistantMessageId: null,
+    },
     createdAt: at(0),
     updatedAt: at(0),
     latestUserMessageAt: at(0),
@@ -51,17 +63,20 @@ const shell = () =>
     session: {
       threadId,
       status: "error",
-      providerName: "codex",
+      providerName: driver,
       providerSessionId: "session",
       activeTurnId: null,
-      lastError: "Codex usage limit reached.",
+      lastError:
+        driver === "codex"
+          ? "Codex usage limit reached."
+          : "Claude usage limit reached. Send the message again once the limit resets.",
       updatedAt: at(0),
     },
   });
-const provider = (now: number, exhausted = true) =>
+const provider = (now: number, exhausted = true, driver: "codex" | "claudeAgent" = "codex") =>
   decodeProvider({
-    instanceId: "codex",
-    driver: "codex",
+    instanceId: driver,
+    driver,
     enabled: true,
     installed: true,
     version: "1",
@@ -73,7 +88,7 @@ const provider = (now: number, exhausted = true) =>
       checkedAt: at(now),
       windows: [
         {
-          id: "primary",
+          id: driver === "codex" ? "primary" : "five_hour",
           kind: "session",
           label: "Session",
           usedPercent: exhausted ? 100 : 20,
@@ -83,9 +98,10 @@ const provider = (now: number, exhausted = true) =>
     },
   });
 
-const harness = Effect.gen(function* () {
+const makeHarness = Effect.fnUntraced(function* (driver: "codex" | "claudeAgent" = "codex") {
   yield* TestClock.setTime(0);
-  let thread = shell();
+  let thread = shell(driver);
+  let windows: readonly ServerProviderUsageWindow[] | undefined;
   let limited = true;
   let unavailable = false;
   let gate: Deferred.Deferred<void> | undefined;
@@ -99,14 +115,17 @@ const harness = Effect.gen(function* () {
   const commands: OrchestrationCommand[] = [];
   const sql = yield* SqlClient.SqlClient;
   const readProviders = Effect.gen(function* () {
-    const original = provider(yield* Clock.currentTimeMillis, limited);
+    const original = provider(yield* Clock.currentTimeMillis, limited, driver);
     const value = differentAccount
       ? { ...original, auth: { ...original.auth, email: "other@example.com" } }
       : original;
     return [
       {
         ...value,
-        ...(differentDriver ? { driver: ProviderDriverKind.make("claudeAgent") } : {}),
+        ...(differentDriver
+          ? { driver: ProviderDriverKind.make(driver === "codex" ? "claudeAgent" : "codex") }
+          : {}),
+        ...(windows ? { usageLimits: { ...original.usageLimits!, windows } } : {}),
         ...(unavailable
           ? {
               usageLimits: {
@@ -181,6 +200,12 @@ const harness = Effect.gen(function* () {
     setLimited: (value: boolean) => {
       limited = value;
     },
+    setWindows: (value: readonly ServerProviderUsageWindow[]) => {
+      windows = value;
+    },
+    setThread: (value: OrchestrationThreadShell) => {
+      thread = value;
+    },
     setUnavailable: () => {
       unavailable = true;
     },
@@ -206,8 +231,99 @@ const harness = Effect.gen(function* () {
     },
   };
 });
+const harness = makeHarness();
 
 const testLayer = Layer.mergeAll(SqlitePersistenceMemory, NodeServices.layer);
+it.effect(
+  "resumes an overdue Claude quota failure once after reconstructing the host service",
+  () =>
+    Effect.gen(function* () {
+      const { service, rebuild, commands, setLimited } = yield* makeHarness("claudeAgent");
+      const saved = yield* service.schedule({ threadId, prompt: "Continue the Claude task." });
+      assert.equal(saved.schedule?.scheduledAt, at(60_000));
+      yield* service.tick();
+      assert.lengthOf(commands, 0);
+      yield* TestClock.adjust("60 seconds");
+      setLimited(false);
+      const restarted = yield* rebuild;
+      yield* restarted.tick();
+      yield* restarted.tick();
+      assert.lengthOf(commands, 1);
+      const command = commands[0]!;
+      assert.equal(command.type, "thread.turn.start");
+      if (command.type === "thread.turn.start") {
+        assert.equal(command.modelSelection?.instanceId, "claudeAgent");
+        assert.equal(command.message.text, "Continue the Claude task.");
+      }
+      assert.equal((yield* restarted.get(threadId)).schedule?.status, "dispatched");
+    }).pipe(Effect.provide(testLayer)),
+);
+it.effect("postpones Claude until all reported exhausted windows reopen", () =>
+  Effect.gen(function* () {
+    const { service, commands, setWindows } = yield* makeHarness("claudeAgent");
+    yield* service.schedule({ threadId, prompt: "Continue" });
+    yield* TestClock.adjust("60 seconds");
+    const session = provider(60_000, false, "claudeAgent").usageLimits!.windows[0]!;
+    setWindows([
+      session,
+      { ...session, id: "seven_day", kind: "weekly", usedPercent: 100, resetsAt: at(120_000) },
+    ]);
+    yield* service.tick();
+    assert.lengthOf(commands, 0);
+    assert.equal((yield* service.get(threadId)).schedule?.scheduledAt, at(120_000));
+    yield* TestClock.adjust("60 seconds");
+    setWindows([session, { ...session, id: "seven_day", kind: "weekly", usedPercent: 20 }]);
+    yield* service.tick();
+    assert.lengthOf(commands, 1);
+  }).pipe(Effect.provide(testLayer)),
+);
+it.effect.each(["account", "driver", "recovered"] as const)(
+  "cancels Claude when %s changes",
+  (change) =>
+    Effect.gen(function* () {
+      const { service, commands, setLimited, setThread, changeAccount, changeDriver } =
+        yield* makeHarness("claudeAgent");
+      yield* service.schedule({ threadId, prompt: "Continue" });
+      if (change === "account") changeAccount();
+      if (change === "driver") changeDriver();
+      if (change === "recovered") {
+        const thread = shell("claudeAgent");
+        setThread({ ...thread, latestTurn: { ...thread.latestTurn!, state: "completed" } });
+      }
+      setLimited(false);
+      yield* TestClock.adjust("60 seconds");
+      yield* service.tick();
+      assert.lengthOf(commands, 0);
+      assert.equal((yield* service.get(threadId)).schedule?.status, "canceled");
+    }).pipe(Effect.provide(testLayer)),
+);
+it.effect("rejects a Claude schedule while the SDK still owns the active turn", () =>
+  Effect.gen(function* () {
+    const { service, setThread } = yield* makeHarness("claudeAgent");
+    const thread = shell("claudeAgent");
+    setThread({
+      ...thread,
+      session: { ...thread.session!, activeTurnId: TurnId.make("sdk-paused"), status: "running" },
+    });
+    assert.equal(
+      (yield* Effect.exit(service.schedule({ threadId, prompt: "Continue" })))._tag,
+      "Failure",
+    );
+    assert.isNull((yield* service.get(threadId)).schedule);
+  }).pipe(Effect.provide(testLayer)),
+);
+it.effect("retains legacy Codex schedules without a stored provider driver", () =>
+  Effect.gen(function* () {
+    const { service, commands, setLimited } = yield* harness;
+    yield* service.schedule({ threadId, prompt: "Continue" });
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`UPDATE usage_resumes SET execution_json=json_remove(execution_json, '$.providerDriver') WHERE thread_id=${threadId}`;
+    setLimited(false);
+    yield* TestClock.adjust("60 seconds");
+    yield* service.tick();
+    assert.lengthOf(commands, 1);
+  }).pipe(Effect.provide(testLayer)),
+);
 it.effect("rejects scheduling if Stop arrives during the usage refresh", () =>
   Effect.gen(function* () {
     const { service, blockProbe } = yield* harness;
@@ -434,31 +550,88 @@ it.effect("cancels when an instance ID is replaced with another driver", () =>
   }).pipe(Effect.provide(testLayer)),
 );
 
-it("uses the latest exhausted window and refuses incomplete reset metadata", () => {
-  const thread = shell();
-  const source = provider(0);
-  const limits = source.usageLimits!;
-  const weekly = { ...limits.windows[0]!, id: "secondary", resetsAt: at(120_000) };
-  assert.equal(
-    usageResumeEligibility(
-      thread,
-      { ...source, usageLimits: { ...limits, windows: [...limits.windows, weekly] } },
-      0,
-    ).resetsAt,
-    at(120_000),
+it.each([
+  "Claude usage limit reached. Send the message again once the limit resets.",
+  "Claude stopped: a usage limit blocked the request.",
+])("accepts terminal Claude quota evidence: %s", (lastError) => {
+  const thread = shell("claudeAgent");
+  const result = usageResumeEligibility(
+    { ...thread, session: { ...thread.session!, lastError } },
+    provider(0, true, "claudeAgent"),
+    0,
   );
+  assert.isTrue(result.available);
+  assert.equal(result.resetsAt, at(60_000));
+});
+
+it.each(["running", "completed", "interrupted"] as const)(
+  "does not schedule a Claude %s turn from a stale quota error",
+  (state) => {
+    const thread = shell("claudeAgent");
+    assert.isFalse(
+      usageResumeEligibility(
+        { ...thread, latestTurn: { ...thread.latestTurn!, state } },
+        provider(0, true, "claudeAgent"),
+        0,
+      ).available,
+    );
+  },
+);
+
+it.each(["starting", "running"] as const)("does not schedule a Claude %s session", (status) => {
+  const thread = shell("claudeAgent");
   assert.isFalse(
     usageResumeEligibility(
-      thread,
-      {
-        ...source,
-        usageLimits: {
-          ...limits,
-          windows: [{ id: "primary", kind: "session", label: "Session", usedPercent: 100 }],
-        },
-      },
+      { ...thread, session: { ...thread.session!, status } },
+      provider(0, true, "claudeAgent"),
       0,
     ).available,
   );
-  assert.isNull(usageResumeEligibility({ ...thread, session: null }, source, 0).reason);
 });
+
+it.each(["codex", "claudeAgent"] as const)(
+  "%s uses the latest exhausted window and refuses incomplete reset metadata",
+  (driver) => {
+    const thread = shell(driver);
+    const source = provider(0, true, driver);
+    const limits = source.usageLimits!;
+    const weekly = {
+      ...limits.windows[0]!,
+      id: driver === "codex" ? "secondary" : "seven_day_model_a",
+      resetsAt: at(120_000),
+    };
+    assert.equal(
+      usageResumeEligibility(
+        thread,
+        { ...source, usageLimits: { ...limits, windows: [...limits.windows, weekly] } },
+        0,
+      ).resetsAt,
+      at(120_000),
+    );
+    assert.isFalse(
+      usageResumeEligibility(
+        thread,
+        {
+          ...source,
+          usageLimits: {
+            ...limits,
+            windows: [{ id: "primary", kind: "session", label: "Session", usedPercent: 100 }],
+          },
+        },
+        0,
+      ).available,
+    );
+    assert.isNull(usageResumeEligibility({ ...thread, session: null }, source, 0).reason);
+    assert.isFalse(usageResumeEligibility(thread, source, 60_000).available);
+    assert.isFalse(
+      usageResumeEligibility(
+        thread,
+        {
+          ...source,
+          usageLimits: { checkedAt: at(0), windows: [], unavailable: { reason: "unsupported" } },
+        },
+        0,
+      ).available,
+    );
+  },
+);
