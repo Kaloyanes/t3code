@@ -1,3 +1,4 @@
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -66,7 +67,8 @@ const projectGroup = {
   remoteEnvironmentLabels: [],
 };
 
-function thread(id: string) {
+/** Carries only the fields worktree grouping reads. */
+function thread(id: string): EnvironmentThreadShell {
   return {
     id: ThreadId.make(id),
     environmentId,
@@ -78,8 +80,8 @@ function thread(id: string) {
     branch: "feature",
     worktreePath: "/worktrees/feature",
     pullRequests: [],
-    session: null,
-    latestTurn: null,
+    runtime: null,
+    latestRun: null,
     createdAt: "2026-09-01T00:00:00.000Z",
     updatedAt: "2026-09-01T00:00:00.000Z",
     archivedAt: null,
@@ -89,7 +91,7 @@ function thread(id: string) {
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
-  };
+  } as unknown as EnvironmentThreadShell;
 }
 
 describe("sidebar worktree grouping", () => {

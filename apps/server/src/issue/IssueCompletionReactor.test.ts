@@ -1,17 +1,11 @@
 import {
-  EventId,
   IssueOperationError,
   ProjectId,
-  ProviderInstanceId,
   ThreadId,
   type IssueCloseInput,
   type IssueCommentCreateInput,
   type IssueComment,
   type IssueDetail,
-  type OrchestrationEvent,
-  type OrchestrationProjectShell,
-  type OrchestrationShellSnapshot,
-  type OrchestrationThreadShell,
   type WorktreePullRequestLink,
 } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
@@ -23,8 +17,7 @@ import * as Stream from "effect/Stream";
 
 import { ServerActivation } from "../serverActivation.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectWorktreeLinks from "../project/ProjectWorktreeLinks.ts";
 import { IssueService } from "./IssueService.ts";
 import * as IssueCompletionReactor from "./IssueCompletionReactor.ts";
 
@@ -60,13 +53,8 @@ function pullRequest(state: "open" | "closed" | "merged"): WorktreePullRequestLi
   };
 }
 
-function snapshot(state: "open" | "closed" | "merged"): OrchestrationShellSnapshot {
-  const project: OrchestrationProjectShell = {
-    id: PROJECT_ID,
-    title: "Project",
-    workspaceRoot: "/workspace/project",
-    defaultModelSelection: null,
-    scripts: [],
+function links(state: "open" | "closed" | "merged"): ProjectWorktreeLinks.ProjectWorktreeLinkSet {
+  return {
     worktreePullRequests: [pullRequest(state)],
     worktreeIssues: [
       {
@@ -79,32 +67,7 @@ function snapshot(state: "open" | "closed" | "merged"): OrchestrationShellSnapsh
         source: "manual",
       },
     ],
-    createdAt: NOW,
-    updatedAt: NOW,
   };
-  const thread: OrchestrationThreadShell = {
-    id: THREAD_ID,
-    projectId: PROJECT_ID,
-    title: "Thread",
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    branch: "feature",
-    worktreePath: WORKTREE_PATH,
-    pullRequests: [],
-    latestTurn: null,
-    createdAt: NOW,
-    updatedAt: NOW,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    session: null,
-    latestUserMessageAt: null,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    hasActionableProposedPlan: false,
-  };
-  return { snapshotSequence: 1, projects: [project], threads: [thread], updatedAt: NOW };
 }
 
 function detail(state: "open" | "closed"): IssueDetail {
@@ -131,20 +94,6 @@ function detail(state: "open" | "closed"): IssueDetail {
   };
 }
 
-const projectUpdated = (state: "open" | "closed" | "merged"): OrchestrationEvent => ({
-  type: "project.meta-updated",
-  sequence: 1,
-  eventId: EventId.make("project-updated"),
-  aggregateKind: "project",
-  aggregateId: PROJECT_ID,
-  occurredAt: NOW,
-  commandId: null,
-  causationEventId: null,
-  correlationId: null,
-  metadata: {},
-  payload: { projectId: PROJECT_ID, worktreePullRequests: [pullRequest(state)], updatedAt: NOW },
-});
-
 function runCase(input: {
   readonly enabled: boolean;
   readonly pullRequestState: "open" | "closed" | "merged";
@@ -159,32 +108,23 @@ function runCase(input: {
 }) {
   return Effect.scoped(
     Effect.gen(function* () {
-      const currentSnapshot = snapshot(input.pullRequestState);
-      const project = currentSnapshot.projects[0]!;
-      const projectSnapshot = {
-        ...currentSnapshot,
-        projects: [
-          {
-            ...project,
-            ...(input.noIssue ? { worktreeIssues: [] } : {}),
-            ...(input.otherPullRequestState
-              ? {
-                  worktreePullRequests: [
-                    ...(project.worktreePullRequests ?? []),
-                    {
-                      ...pullRequest(input.otherPullRequestState),
-                      number: 8,
-                      url: "https://github.com/acme/repo/pull/8",
-                    },
-                  ],
-                }
-              : {}),
-          },
-        ],
+      const current = links(input.pullRequestState);
+      const projectLinks: ProjectWorktreeLinks.ProjectWorktreeLinkSet = {
+        worktreeIssues: input.noIssue ? [] : current.worktreeIssues,
+        worktreePullRequests: input.otherPullRequestState
+          ? [
+              ...current.worktreePullRequests,
+              {
+                ...pullRequest(input.otherPullRequestState),
+                number: 8,
+                url: "https://github.com/acme/repo/pull/8",
+              },
+            ]
+          : current.worktreePullRequests,
       };
       const activation = yield* Deferred.make<void>();
-      const snapshotRead = yield* Deferred.make<void>();
-      const events = yield* PubSub.unbounded<OrchestrationEvent>();
+      const linksRead = yield* Deferred.make<void>();
+      const changes = yield* PubSub.unbounded<ProjectId>();
       const closes: IssueCloseInput[] = [];
       const comments: IssueCommentCreateInput[] = [];
       const calls: string[] = [];
@@ -197,12 +137,12 @@ function runCase(input: {
       const layer = IssueCompletionReactor.layer.pipe(
         Layer.provide(
           Layer.mergeAll(
-            Layer.mock(ProjectionSnapshotQuery)({
-              getShellSnapshot: () =>
-                Deferred.succeed(snapshotRead, undefined).pipe(Effect.as(projectSnapshot)),
-            }),
-            Layer.mock(OrchestrationEngineService)({
-              subscribeDomainEvents: PubSub.subscribe(events).pipe(
+            Layer.mock(ProjectWorktreeLinks.ProjectWorktreeLinks)({
+              forProjects: () =>
+                Deferred.succeed(linksRead, undefined).pipe(
+                  Effect.as(new Map([[PROJECT_ID, projectLinks]])),
+                ),
+              subscribeChanges: PubSub.subscribe(changes).pipe(
                 Effect.map((subscription) => Stream.fromSubscription(subscription)),
               ),
             }),
@@ -260,8 +200,8 @@ function runCase(input: {
         const reactor = yield* IssueCompletionReactor.IssueCompletionReactor;
         yield* reactor.start();
         yield* Deferred.succeed(activation, undefined);
-        yield* PubSub.publish(events, projectUpdated(input.pullRequestState));
-        if (input.pullRequestState === "merged") yield* Deferred.await(snapshotRead);
+        yield* PubSub.publish(changes, PROJECT_ID);
+        yield* Deferred.await(linksRead);
         yield* reactor.drain;
         const cleanupAllowed = input.repeat
           ? yield* reactor.completeWorktree(PROJECT_ID, WORKTREE_PATH)

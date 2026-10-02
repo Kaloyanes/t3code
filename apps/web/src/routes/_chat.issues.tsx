@@ -530,14 +530,19 @@ function IssuesRouteView() {
   const panelControls = (
     <PanelLayoutControls
       showTerminalControl={false}
+      showThreadPanelControl={false}
       terminalAvailable={false}
       terminalOpen={false}
       terminalShortcutLabel={null}
+      threadPanelOpen={false}
+      threadPanelPresentation="inline"
+      threadPanelShortcutLabel={null}
+      threadPanelHasAttention={false}
+      onToggleThreadPanel={() => undefined}
       rightPanelAvailable={selectedIssueSurface !== null}
       rightPanelOpen={rightPanelState.isOpen}
       rightPanelShortcutLabel={shortcutLabelForCommand(keybindings, "rightPanel.toggle")}
       rightPanelUnavailableLabel="Select an issue first"
-      liveAgentCount={0}
       onToggleTerminal={() => undefined}
       onToggleRightPanel={toggleRightPanel}
     />
@@ -780,7 +785,6 @@ function IssuesRouteView() {
             onAddPullRequest={() => undefined}
             onAddPullRequests={() => undefined}
             onAddIssue={() => undefined}
-            onAddAgents={() => undefined}
             onAddDevice={() => undefined}
             browserAvailable={false}
             terminalAvailable={false}
@@ -789,9 +793,7 @@ function IssuesRouteView() {
             pullRequestAvailable={false}
             pullRequestsAvailable={false}
             issueAvailable={false}
-            agentsAvailable={false}
             deviceAvailable={false}
-            liveAgentCount={0}
           >
             {renderedIssueSurface.kind === "issue" ? (
               <IssueDetailPanel

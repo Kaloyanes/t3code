@@ -112,8 +112,9 @@ describe("linked pull request badges", () => {
         badge={{ kind: "pull-request", others: 1, state: "open" }}
         number={42}
         url="https://github.com/acme/repo/pull/42"
+        pullRequests={[]}
         status={null}
-        onOpenStack={() => {}}
+        onOpenList={() => {}}
         onOpenPullRequest={() => {}}
         openAggregate
       />,

@@ -1,19 +1,17 @@
-import {
-  DEFAULT_WORKTREE_BRANCH_PREFIX,
-  type VcsRef,
-  type SourceControlProviderInfo,
-  type VcsStatusLocalResult,
-  type VcsStatusRemoteResult,
-  type VcsStatusResult,
-  type VcsStatusStreamEvent,
-  type WorktreeBranchPrefix,
+import type {
+  BranchNamingOptions,
+  VcsRef,
+  SourceControlProviderInfo,
+  VcsStatusLocalResult,
+  VcsStatusRemoteResult,
+  VcsStatusResult,
+  VcsStatusStreamEvent,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { detectSourceControlProviderFromRemoteUrl } from "./sourceControl.ts";
 
-// Kept for existing server-side consumers; the canonical default lives in contracts.
-export const WORKTREE_BRANCH_PREFIX = DEFAULT_WORKTREE_BRANCH_PREFIX;
+export const WORKTREE_BRANCH_PREFIX = "t3code";
 
 export function resolveProjectWorktreeOptions(input: {
   refs: ReadonlyArray<Pick<VcsRef, "name" | "current" | "worktreePath">>;
@@ -193,6 +191,24 @@ export function buildConventionalWorktreeBranchName(
   return `${purpose}/${sanitizeBranchFragment(fragment).replaceAll("/", "-").replace(/-+/g, "-")}`;
 }
 
+/** Custom naming preserves the model's complete ref; Git validates it on rename. */
+export function formatGeneratedBranchName(raw: string, naming?: BranchNamingOptions): string {
+  if (naming?.mode === "custom") return raw.trim();
+  const branch = sanitizeBranchFragment(raw);
+  if (naming?.mode !== "static") return branch;
+  const prefix = naming.prefix
+    .split("/")
+    .map((part) =>
+      part
+        .replace(/[^a-zA-Z0-9_-]+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-+|-+$/g, ""),
+    )
+    .filter(Boolean)
+    .join("/");
+  return prefix ? `${prefix}/${branch}` : branch;
+}
+
 /**
  * Sanitize a string into a `feature/…` refName name.
  * Preserves an existing `feature/` prefix or slash-separated namespace.
@@ -246,7 +262,7 @@ export function deriveLocalBranchNameFromRemoteRef(branchName: string): string {
 
 export function buildTemporaryWorktreeBranchName(
   randomHex: (byteLength: number) => string,
-  prefix: WorktreeBranchPrefix = DEFAULT_WORKTREE_BRANCH_PREFIX,
+  prefix: string = WORKTREE_BRANCH_PREFIX,
 ): string {
   // Normalize to exactly 8 lowercase hex chars so a UUID-shaped callback
   // still produces the canonical temporary branch form.
@@ -259,7 +275,7 @@ export function buildTemporaryWorktreeBranchName(
 
 export function isTemporaryWorktreeBranch(
   refName: string,
-  prefix: string = DEFAULT_WORKTREE_BRANCH_PREFIX,
+  prefix: string = WORKTREE_BRANCH_PREFIX,
 ): boolean {
   const normalizedRefName = refName.trim().toLowerCase();
   const separatorIndex = normalizedRefName.indexOf("/");
@@ -272,7 +288,7 @@ export function isTemporaryWorktreeBranch(
   const normalizedPrefix = prefix.trim().toLowerCase();
   const isCurrentPrefix = branchPrefix === normalizedPrefix;
 
-  if (branchPrefix === DEFAULT_WORKTREE_BRANCH_PREFIX) {
+  if (branchPrefix === WORKTREE_BRANCH_PREFIX) {
     return LEGACY_TEMP_WORKTREE_TOKEN_PATTERN.test(token);
   }
   return isCurrentPrefix && TEMP_WORKTREE_TOKEN_PATTERN.test(token);

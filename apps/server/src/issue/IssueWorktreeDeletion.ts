@@ -3,7 +3,6 @@ import type {
   IssueDetachedWorkspace,
   IssueRef,
   ProjectId,
-  ThreadId,
   IssueState,
   IssueWorktreeDeleteInput,
   IssueWorktreeDeleteItemResult,
@@ -12,7 +11,8 @@ import type {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+
+import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 
 export const deleteIssueWorktree = Effect.fn("deleteIssueWorktree")(function* (
   input: IssueWorktreeDeleteInput,
@@ -113,26 +113,20 @@ export function resolveIssueWorktreeAttachment(
     : null;
 }
 
+/** The project's threads with whether an agent is still working in them. */
 export const readIssueWorktreeThreads = Effect.fn("readIssueWorktreeThreads")(function* (
   projectId: ProjectId,
 ) {
-  const sql = yield* SqlClient.SqlClient;
-  const rows = yield* sql<{
-    id: ThreadId;
-    projectId: ProjectId;
-    branch: string | null;
-    worktreePath: string | null;
-    status: string | null;
-    providerName: string | null;
-  }>`
-    SELECT threads.thread_id AS id, threads.project_id AS "projectId", threads.branch,
-      threads.worktree_path AS "worktreePath", sessions.status, sessions.provider_name AS "providerName"
-    FROM projection_threads threads
-    LEFT JOIN projection_thread_sessions sessions ON sessions.thread_id = threads.thread_id
-    WHERE threads.project_id = ${projectId} AND threads.deleted_at IS NULL
-  `;
-  return rows.map(({ status, providerName, ...thread }) => ({
-    ...thread,
-    session: status === null ? null : { status, providerName },
+  const threads = yield* ThreadManagement.ThreadManagementService;
+  const shells = yield* threads.listProjectThreads({ projectId, includeSubagents: false });
+  return shells.map((thread) => ({
+    id: thread.id,
+    projectId: thread.projectId,
+    branch: thread.branch,
+    worktreePath: thread.worktreePath,
+    session:
+      thread.activeRunId === null
+        ? null
+        : { status: "running", providerName: thread.providerInstanceId as string },
   }));
 });

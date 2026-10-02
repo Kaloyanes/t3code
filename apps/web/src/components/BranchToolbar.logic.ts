@@ -8,7 +8,6 @@ import type {
 import * as Schema from "effect/Schema";
 import { sanitizeNewRefName } from "@t3tools/shared/git";
 import { toSortableTimestamp } from "../lib/threadSort";
-
 export {
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
@@ -65,6 +64,8 @@ export function shouldShowEnvironmentIndicator(input: {
 }
 
 export function shouldShowComposerContextStrip(input: {
+  isDraftHeroState: boolean;
+  persistInActiveThreads: boolean;
   hasActiveProject: boolean;
   isGitRepo: boolean;
   showEnvironmentIndicator: boolean;
@@ -73,6 +74,7 @@ export function shouldShowComposerContextStrip(input: {
 }): boolean {
   return (
     input.hasActiveProject &&
+    (input.isDraftHeroState || input.persistInActiveThreads) &&
     (input.isGitRepo || input.showEnvironmentIndicator || input.hostsRestingComposerControls)
   );
 }
@@ -119,6 +121,61 @@ export function resolveLockedWorkspaceLabel(
   return effectiveEnvMode === "worktree" ? resolveEnvModeLabel("worktree") : "Local checkout";
 }
 
+export function resolveWorkspaceDisplayName(path: string | null): string | null {
+  if (!path) return null;
+  const normalizedPath = path.replace(/[\\/]+$/, "");
+  if (normalizedPath.length === 0) return path;
+  return normalizedPath.split(/[\\/]/).at(-1) ?? normalizedPath;
+}
+
+export interface PreviousWorktreeSeed {
+  branch: string | null;
+  worktreePath: string;
+}
+
+// The most recently touched worktree in the project that the composer isn't
+// already pointing at. Backs the "Previous worktree" entry in the workspace
+// selector so a follow-up thread can hop back into the worktree you just
+// worked in without hunting for its branch. Archived threads don't compete —
+// the rest of the UI hides them, so their worktrees shouldn't resurface here.
+export function resolvePreviousWorktreeSeed(input: {
+  threads: ReadonlyArray<{
+    branch: string | null;
+    worktreePath: string | null;
+    updatedAt: string;
+    archivedAt?: string | null;
+  }>;
+  currentWorktreePath: string | null;
+}): PreviousWorktreeSeed | null {
+  let latest: { branch: string | null; worktreePath: string; updatedAt: number } | null = null;
+  for (const thread of input.threads) {
+    if (
+      !thread.worktreePath ||
+      thread.worktreePath === input.currentWorktreePath ||
+      (thread.archivedAt ?? null) !== null
+    ) {
+      continue;
+    }
+    const updatedAt = toSortableTimestamp(thread.updatedAt);
+    if (updatedAt === null) {
+      continue;
+    }
+    if (latest === null || updatedAt > latest.updatedAt) {
+      latest = {
+        branch: thread.branch,
+        worktreePath: thread.worktreePath,
+        updatedAt,
+      };
+    }
+  }
+  return latest === null ? null : { branch: latest.branch, worktreePath: latest.worktreePath };
+}
+
+export function resolvePreviousWorktreeLabel(seed: PreviousWorktreeSeed): string {
+  return seed.branch ? `Previous worktree (${seed.branch})` : "Previous worktree";
+}
+
+/** A worktree Git reports for the project, offered as a workspace for a new thread. */
 export interface ExistingWorktreeOption {
   readonly branch: string;
   readonly worktreePath: string;
@@ -133,14 +190,15 @@ export function resolveWorktreeDisplayLabel(
   return (
     options.find((option) => option.worktreePath === path)?.label ??
     branch ??
-    path
-      .replace(/[\\/]+$/, "")
-      .split(/[\\/]/)
-      .pop() ??
+    resolveWorkspaceDisplayName(path) ??
     "Worktree"
   );
 }
 
+/**
+ * Git's worktrees for the project, mapped to the project folder inside each one.
+ * A project nested in its repository opens at the same relative path.
+ */
 export function resolveExistingWorktreeOptions(input: {
   readonly refs: ReadonlyArray<Pick<VcsRef, "name" | "worktreePath">>;
   readonly workspaceRoot: string;
@@ -165,11 +223,7 @@ export function resolveExistingWorktreeOptions(input: {
     const worktreePath = `${worktreeRoot}${relativeProjectPath}`;
     const pathKey = caseInsensitive ? worktreePath.toLowerCase() : worktreePath;
     if (pathKey === normalizedWorkspaceRoot || byPath.has(pathKey)) continue;
-    byPath.set(pathKey, {
-      branch: ref.name,
-      worktreePath,
-      label: ref.name,
-    });
+    byPath.set(pathKey, { branch: ref.name, worktreePath, label: ref.name });
   }
   return [...byPath.values()].sort(
     (left, right) =>
@@ -177,6 +231,7 @@ export function resolveExistingWorktreeOptions(input: {
   );
 }
 
+/** The most recently used thread worktree that still exists, other than the current one. */
 export function resolvePreviousWorktreeOption(input: {
   readonly currentWorktreePath: string | null;
   readonly options: ReadonlyArray<ExistingWorktreeOption>;
@@ -197,8 +252,8 @@ export function resolvePreviousWorktreeOption(input: {
       continue;
     }
     const option = optionsByPath.get(thread.worktreePath);
-    const updatedAt = Date.parse(thread.updatedAt);
-    if (!option || !Number.isFinite(updatedAt)) continue;
+    const updatedAt = toSortableTimestamp(thread.updatedAt);
+    if (!option || updatedAt === null) continue;
     if (!latest || updatedAt > latest.updatedAt) latest = { option, updatedAt };
   }
   return latest?.option ?? null;
@@ -321,6 +376,7 @@ export function resolveBranchSelectionTarget(input: {
     };
   }
 
+  // A branch without its own worktree checks out where the thread already works.
   return {
     checkoutCwd: activeWorktreePath ?? activeProjectCwd,
     nextWorktreePath: activeWorktreePath,

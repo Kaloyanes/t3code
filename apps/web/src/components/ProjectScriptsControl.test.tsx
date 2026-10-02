@@ -77,6 +77,7 @@ vi.mock("./ui/menu", () => ({
   Menu: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   MenuGroup: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   MenuGroupLabel: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  MenuItemLabel: ({ children }: { children?: ReactNode }) => <span>{children}</span>,
   MenuItem: ({ children, ...props }: { children?: ReactNode } & Record<string, unknown>) => (
     <button data-slot="menu-item" {...props}>
       {children}

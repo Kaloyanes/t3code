@@ -1,6 +1,6 @@
 import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import {
-  CommandId,
+  type CommandId,
   pullRequestHostOf,
   type GitRunStackedActionResult,
   type OrchestrationProjectShell,
@@ -12,8 +12,9 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
-import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as ProjectService from "../project/ProjectService.ts";
+import * as ProjectWorktreeLinks from "../project/ProjectWorktreeLinks.ts";
 
 export interface CreatedPullRequestKey {
   readonly host: string;
@@ -56,6 +57,7 @@ export function createdPullRequestKey(
  * ran beside. Never fails: the git action already succeeded and its result is
  * on its way to the client, so a link that cannot be made is logged and
  * dropped. A duplicate link is the decider saying the thread already knew.
+ * Worktree scope also links it to the worktree, so every thread there shows it.
  */
 export const linkCreatedPullRequest = <E>(input: {
   readonly threadId: ThreadId;
@@ -65,51 +67,39 @@ export const linkCreatedPullRequest = <E>(input: {
 }): Effect.Effect<
   void,
   never,
-  OrchestrationEngine.OrchestrationEngineService | ProjectionSnapshotQuery.ProjectionSnapshotQuery
+  | Orchestrator.OrchestratorV2
+  | ProjectService.ProjectService
+  | ProjectWorktreeLinks.ProjectWorktreeLinks
 > =>
   Effect.gen(function* () {
-    const engine = yield* OrchestrationEngine.OrchestrationEngineService;
-    const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
-    const thread = yield* snapshots.getThreadShellById(input.threadId);
+    const engine = yield* Orchestrator.OrchestratorV2;
+    const projects = yield* ProjectService.ProjectService;
+    const thread = yield* engine
+      .getThreadShell(input.threadId)
+      .pipe(Effect.map(Option.fromNullishOr));
     if (Option.isNone(thread)) return;
-    const project = Option.getOrUndefined(
-      yield* snapshots.getProjectShellById(thread.value.projectId),
-    );
+    const project = Option.getOrUndefined(yield* projects.getShell(thread.value.projectId));
     const key = createdPullRequestKey(input.result, project);
     if (key === null) return;
     const commandId = yield* input.commandId;
     if (input.createdPullRequestScope === "worktree") {
-      yield* engine
-        .dispatch({
-          type: "project.worktree-pull-request.link",
-          commandId: CommandId.make(`${commandId}:worktree`),
-          projectId: thread.value.projectId,
-          worktreePath: thread.value.worktreePath,
-          ...key,
-          source: "created",
-        })
-        .pipe(Effect.catchTags({ OrchestrationCommandInvariantError: () => Effect.void }));
-      // Keep the originating thread row as a compatibility shadow for older clients.
-      yield* engine
-        .dispatch({
-          type: "thread.pull-request.link",
-          commandId: CommandId.make(`${commandId}:shadow`),
-          threadId: input.threadId,
-          ...key,
-          source: "created",
-        })
-        .pipe(Effect.catchTags({ OrchestrationCommandInvariantError: () => Effect.void }));
-    } else {
-      yield* engine
-        .dispatch({
-          type: "thread.pull-request.link",
-          commandId,
-          threadId: input.threadId,
-          ...key,
-          source: "created",
-        })
-        .pipe(Effect.catchTags({ OrchestrationCommandInvariantError: () => Effect.void }));
+      const worktreeLinks = yield* ProjectWorktreeLinks.ProjectWorktreeLinks;
+      yield* worktreeLinks.linkPullRequest({
+        projectId: thread.value.projectId,
+        worktreePath: thread.value.worktreePath,
+        ...key,
+        source: "created",
+      });
     }
+    yield* engine
+      .dispatch({
+        type: "thread.pull-request.link",
+        commandId,
+        threadId: input.threadId,
+        ...key,
+        source: "created",
+      })
+      .pipe(Effect.asVoid);
   }).pipe(
     Effect.withSpan("linkCreatedPullRequest"),
     Effect.catchCause((cause) =>

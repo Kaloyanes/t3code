@@ -15,8 +15,8 @@ import {
   type ProjectScopedServerSettingKey,
 } from "@t3tools/contracts";
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
-import { useRef, useState, type ComponentProps } from "react";
-import { Alert, Platform, Pressable, View } from "react-native";
+import { useRef, useState } from "react";
+import { Platform, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { RUNTIME_MODE_CHOICES } from "../threads/thread-settings-options";
@@ -32,8 +32,9 @@ import {
   AndroidSettingsEnvironmentFilter,
   SettingsEnvironmentFilterHeader,
 } from "./components/SettingsEnvironmentFilterHeader";
+import { BranchNamingSettings } from "./components/BranchNamingSettings";
+import { SettingsChoiceRow } from "./components/SettingsChoiceRow";
 import { SettingsSection } from "./components/SettingsSection";
-import { SettingsControlRow } from "./components/SettingsControlRow";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 import { SettingsProjectOverridesSection } from "./components/SettingsProjectOverridesSection";
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
@@ -41,6 +42,7 @@ import {
   planMobileScopedSettingsClear,
   planMobileScopedSettingsPatch,
   resolveMobileSettingsTargets,
+  uniformMobileSetting,
   type ScopedMobileSettingsTarget,
 } from "./settings-scoped-server";
 
@@ -64,6 +66,9 @@ const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettin
   "source-control": [
     "defaultAutoPull",
     "newWorktreesStartFromOrigin",
+    "branchNamingMode",
+    "branchNamePrefix",
+    "branchNameInstructions",
     "completeLinkedIssueOnMerge",
   ],
   "agent-behavior": ["responseStreamingMode", "enableAgentBrowserAccess"],
@@ -128,11 +133,6 @@ const STREAMING_CHOICES: ReadonlyArray<{
     label: "Finished paragraphs",
     description: "Show each paragraph or code block as it completes.",
   },
-  {
-    mode: "token",
-    label: "Token by token (legacy)",
-    description: "Repaint for every token; this can be slower.",
-  },
 ];
 
 export function SettingsEnvironmentNewThreadsRouteScreen() {
@@ -169,11 +169,8 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
   const displayTargets = pendingWrites > 0 && pendingTargets !== null ? pendingTargets : targets;
   const hasConnectedSelection = targets.length > 0;
   const reference = displayTargets[0] ?? null;
-  const uniform = <K extends keyof ServerSettings>(key: K): ServerSettings[K] | null => {
-    if (reference === null) return null;
-    const value = reference.settings[key];
-    return displayTargets.every((entry) => entry.settings[key] === value) ? value : null;
-  };
+  const uniform = <K extends keyof ServerSettings>(key: K) =>
+    uniformMobileSetting(displayTargets, key);
   // `uniform` folds a real null into "mixed"; nullable keys need the distinction.
   const isMixed = (key: keyof ServerSettings) =>
     reference === null ||
@@ -317,7 +314,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     {WORKSPACE_CHOICES.filter(
                       (choice) => choice.mode !== null || !projectSelected,
                     ).map((choice, index) => (
-                      <ChoiceRow
+                      <SettingsChoiceRow
                         key={choice.mode ?? "inherit"}
                         label={choice.label}
                         description={choice.description}
@@ -342,7 +339,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     {SUBMODULE_CHOICES.filter(
                       (choice) => choice.mode !== null || !projectSelected,
                     ).map((choice, index) => (
-                      <ChoiceRow
+                      <SettingsChoiceRow
                         key={choice.mode ?? "inherit"}
                         label={choice.label}
                         description={choice.description}
@@ -365,7 +362,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     }
                   >
                     {RUNTIME_MODE_CHOICES.map((choice, index) => (
-                      <ChoiceRow
+                      <SettingsChoiceRow
                         key={choice.mode}
                         label={choice.label}
                         description={choice.description}
@@ -471,8 +468,18 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
 
               {props.page === "source-control" ? (
                 <>
+                  <BranchNamingSettings
+                    key={targets
+                      .map((target) => `${target.environment.environmentId}:${target.projectId}`)
+                      .join(",")}
+                    mode={uniform("branchNamingMode")}
+                    prefix={uniform("branchNamePrefix")}
+                    instructions={uniform("branchNameInstructions")}
+                    disabled={disabledFor("branchNamingMode")}
+                    onChange={write}
+                  />
                   <SettingsSection title="Default branch">
-                    <FanoutSwitchRow
+                    <SettingsSwitchRow
                       icon="arrow.down.circle"
                       label="Automatically pull"
                       subtitle="Keep the default branch current when there are no local changes."
@@ -482,7 +489,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     />
                   </SettingsSection>
                   <SettingsSection title="Worktrees">
-                    <FanoutSwitchRow
+                    <SettingsSwitchRow
                       icon="arrow.triangle.branch"
                       label="Start from origin"
                       subtitle="Base new worktrees on the remote branch."
@@ -490,26 +497,10 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                       disabled={disabledFor("newWorktreesStartFromOrigin")}
                       onValueChange={(value) => write({ newWorktreesStartFromOrigin: value })}
                     />
-                    <ChoiceRow
-                      label="Conventional branch prefixes"
-                      description="Use feature/, bug/, issue/, or maintenance/ based on the work."
-                      selected={uniform("worktreeBranchNamingMode") === "conventional"}
-                      separated
-                      disabled={disabledFor("worktreeBranchNamingMode")}
-                      onPress={() => write({ worktreeBranchNamingMode: "conventional" })}
-                    />
-                    <ChoiceRow
-                      label="T3 Code branch prefix"
-                      description="Keep using the configured T3 Code prefix for generated branches."
-                      selected={uniform("worktreeBranchNamingMode") === "prefix"}
-                      separated
-                      disabled={disabledFor("worktreeBranchNamingMode")}
-                      onPress={() => write({ worktreeBranchNamingMode: "prefix" })}
-                    />
                   </SettingsSection>
                   {supportsIssueCompletion ? (
                     <SettingsSection title="Automation">
-                      <FanoutSwitchRow
+                      <SettingsSwitchRow
                         icon="checkmark.circle"
                         label="Complete linked issue on merge"
                         subtitle="Mark the linked issue completed once every pull request for its worktree has merged."
@@ -533,35 +524,19 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     }
                   >
                     {STREAMING_CHOICES.map((choice, index) => (
-                      <ChoiceRow
+                      <SettingsChoiceRow
                         key={choice.mode}
                         label={choice.label}
                         description={choice.description}
                         selected={uniform("responseStreamingMode") === choice.mode}
                         separated={index > 0}
                         disabled={disabledFor("responseStreamingMode")}
-                        onPress={() => {
-                          if (choice.mode !== "token") {
-                            write({ responseStreamingMode: choice.mode });
-                            return;
-                          }
-                          Alert.alert(
-                            "Use legacy token streaming?",
-                            "Repainting every token can make the app slower.",
-                            [
-                              { text: "Cancel", style: "cancel" },
-                              {
-                                text: "Use token streaming",
-                                onPress: () => write({ responseStreamingMode: "token" }),
-                              },
-                            ],
-                          );
-                        }}
+                        onPress={() => write({ responseStreamingMode: choice.mode })}
                       />
                     ))}
                   </SettingsSection>
                   <SettingsSection title="Preview browser">
-                    <FanoutSwitchRow
+                    <SettingsSwitchRow
                       icon="globe"
                       label="Agent browser access"
                       subtitle="Allow agents to use the in-app preview browser."
@@ -597,7 +572,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     </SettingsSection>
                   ) : null}
                   <SettingsSection title="Power">
-                    <FanoutSwitchRow
+                    <SettingsSwitchRow
                       icon="moon"
                       label="Keep computer awake while agents work"
                       subtitle={
@@ -613,7 +588,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     />
                   </SettingsSection>
                   <SettingsSection title="Updates">
-                    <FanoutSwitchRow
+                    <SettingsSwitchRow
                       icon="arrow.clockwise"
                       label="Check provider updates"
                       subtitle={
@@ -626,7 +601,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                       onValueChange={(value) => write({ enableProviderUpdateChecks: value })}
                     />
                     <View className="border-t border-border-subtle">
-                      <FanoutSwitchRow
+                      <SettingsSwitchRow
                         icon="arrow.uturn.forward"
                         label="Continue after restart"
                         subtitle={
@@ -773,46 +748,5 @@ function MixedValuesLabel(props: { readonly projectSelected: boolean }) {
     >
       Mixed
     </Text>
-  );
-}
-
-function FanoutSwitchRow(props: {
-  readonly icon: ComponentProps<typeof SymbolView>["name"];
-  readonly label: string;
-  readonly subtitle: string;
-  readonly value: boolean | null;
-  readonly disabled: boolean;
-  readonly onValueChange: (value: boolean) => void;
-}) {
-  if (props.value !== null) {
-    return (
-      <SettingsSwitchRow
-        icon={props.icon}
-        label={props.label}
-        subtitle={props.subtitle}
-        value={props.value}
-        disabled={props.disabled}
-        onValueChange={props.onValueChange}
-      />
-    );
-  }
-
-  return (
-    <SettingsControlRow
-      disabled={props.disabled}
-      icon={props.icon}
-      label={props.label}
-      subtitle={props.subtitle}
-    >
-      <Pressable
-        accessibilityLabel={`Set ${props.label} on for selected environments`}
-        accessibilityRole="button"
-        disabled={props.disabled}
-        className="rounded-full bg-subtle px-3 py-2 active:opacity-70"
-        onPress={() => props.onValueChange(true)}
-      >
-        <Text className="text-sm font-t3-medium text-foreground">Mixed · Set on</Text>
-      </Pressable>
-    </SettingsControlRow>
   );
 }

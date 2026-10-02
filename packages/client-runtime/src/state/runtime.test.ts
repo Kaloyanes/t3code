@@ -705,17 +705,20 @@ describe("executeAtomQuery", () => {
 
 describe("runtime command runner", () => {
   it("interrupts a generated command when its caller aborts", async () => {
-    const started = Latch.makeUnsafe();
+    let markStarted = () => {};
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
     const runtime = Atom.runtime(Layer.empty);
     const command = createRuntimeCommand(runtime, {
       label: "test.abortable",
-      execute: () => Effect.sync(() => started.openUnsafe()).pipe(Effect.andThen(Effect.never)),
+      execute: () => Effect.sync(markStarted).pipe(Effect.andThen(Effect.never)),
     });
     const registry = AtomRegistry.make();
     const controller = new AbortController();
     const pending = command.run(registry, undefined, { signal: controller.signal });
 
-    await started.await;
+    await started;
     controller.abort();
 
     const result = await pending;

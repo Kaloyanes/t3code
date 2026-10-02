@@ -7,12 +7,11 @@ import type {
 import {
   VcsActionUnavailableError,
   type VcsActionOperation,
+  type RunVcsStackedActionInput,
 } from "@t3tools/client-runtime/state/vcs";
 import type {
   EnvironmentId,
-  GitActionProgressEvent,
   GitResolvePullRequestResult,
-  GitStackedAction,
   SourceControlCloneProtocol,
   SourceControlRepositoryVisibility,
   ThreadId,
@@ -192,7 +191,7 @@ export function useVcsPullAction(scope: SourceControlActionScope) {
   }, [pull, scope]);
   return useAction({
     kind: "pull",
-    label: "Pulling latest changes",
+    label: "Pulling latest changes...",
     scope,
     action,
     onSuccess: status.refresh,
@@ -219,16 +218,7 @@ export function useGitStackedAction(scope: SourceControlActionScope) {
       : undefined;
 
   const action = useCallback(
-    async (input: {
-      actionId: string;
-      action: GitStackedAction;
-      commitMessage?: string;
-      featureBranch?: boolean;
-      filePaths?: string[];
-      threadId?: ThreadId;
-      createdPullRequestScope?: "thread" | "worktree";
-      onProgress?: (event: GitActionProgressEvent) => void;
-    }) => {
+    async (input: RunVcsStackedActionInput) => {
       if (resolveScope(scope) === null) {
         return AsyncResult.failure<never, VcsActionUnavailableError>(
           Cause.fail(
@@ -241,18 +231,10 @@ export function useGitStackedAction(scope: SourceControlActionScope) {
         );
       }
       return runStackedAction({
-        actionId: input.actionId,
-        action: input.action,
-        ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
-        ...(input.featureBranch ? { featureBranch: true } : {}),
-        ...(input.filePaths?.length ? { filePaths: input.filePaths } : {}),
-        ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
-        ...(input.createdPullRequestScope !== undefined
-          ? { createdPullRequestScope: input.createdPullRequestScope }
-          : createdPullRequestScope !== undefined
-            ? { createdPullRequestScope }
-            : {}),
-        ...(input.onProgress ? { onProgress: input.onProgress } : {}),
+        ...input,
+        ...(input.createdPullRequestScope === undefined && createdPullRequestScope !== undefined
+          ? { createdPullRequestScope }
+          : {}),
       });
     },
     [createdPullRequestScope, runStackedAction, scope],

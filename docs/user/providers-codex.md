@@ -1,10 +1,37 @@
 # Codex
 
-For one account, use the default Codex provider with your normal Codex login.
-[Provider setup](./install.md#providers) covers installation, Settings > Providers,
-and custom binaries or environment variables.
+Use your ChatGPT plan or an existing Codex CLI login to code in T3 Code.
+
+## Connect with ChatGPT
+
+Connect during onboarding or in **Settings → Providers**. For a remote machine,
+select that environment first. T3 Code handles Codex installation; sign in on
+OpenAI and allow sharing of your ChatGPT plan.
+
+Manage shared usage and credits in ChatGPT through **Manage usage** in T3 Code.
+If a request uses a feature that ChatGPT sharing does not support, use another
+provider for that request.
+
+When reconnecting, choose the same account in T3 Code and on OpenAI's sign-in
+page. Disconnecting stops running threads but keeps their history and lets you
+reconnect later.
+
+If remote sign-in cannot return automatically, paste the full URL from the final
+localhost page into the sign-in panel, even if that page could not load.
+
+## Use an existing Codex login
+
+T3 Code can use your installed Codex and its existing login. Run `codex login`
+on the environment's machine to sign in. [Provider setup](./install.md#providers)
+covers installation and custom configuration.
 
 ## Use multiple accounts
+
+Add another ChatGPT account in **Settings → Providers**, then select the account
+from the thread's model picker. Compatible accounts can continue the same thread.
+Connecting accounts through T3 Code leaves your CLI login unchanged.
+
+### Multiple CLI logins
 
 A shared Codex home with a shadow home lets work and personal accounts continue
 the same threads. The accounts share Codex sessions and configuration while keeping
@@ -49,23 +76,6 @@ reported accounts, refresh provider status, and confirm the second instance has
 its own shadow path and login. A shadow-home conflict usually means the directory
 contains a copied Codex setup. Use a fresh shadow directory and sign in again.
 
-## Resume after a usage limit
-
-When a Codex thread stops at a usage limit with a known reset time, choose
-**Resume when usage resets**. Review the continuation message and select
-**Schedule resume**. This schedules one message in the same thread; it does not
-enable ongoing automatic retries. Codex Spark is not supported.
-
-The schedule runs on the connected host. You can close the web, desktop client,
-or mobile app, provided the host's T3 server keeps running. If the desktop app
-is the host, keep it running. After sleep or a server restart, the host checks
-overdue schedules and usage before sending.
-
-You can cancel from any connected client. Sending a message manually, stopping
-the thread, or changing its model cancels the pending resume. If usage remains
-limited, the host waits for the next reported reset. Failed checks or an
-interrupted dispatch appear in the thread so you can review before retrying.
-
 ## Answer questions while Codex works
 
 Codex can ask a question and keep working. Answer it in the thread's question
@@ -85,8 +95,7 @@ for command and file approvals.
 ## Codex says I hit a usage limit
 
 When Codex stops on a usage limit, the thread names the window that ran out and
-when it resets, when Codex reports them. You can [schedule a continuation](#resume-after-a-usage-limit)
-or send a message after the reset. On a workspace plan the
+when it resets, when Codex reports them. Send the message again after the reset. On a workspace plan the
 message also says whether your workspace owner needs to add credits or raise the
 spend limit to continue sooner.
 

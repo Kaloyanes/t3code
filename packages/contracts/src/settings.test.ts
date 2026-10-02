@@ -8,12 +8,9 @@ import {
   ClaudeSettings,
   DEFAULT_SERVER_SETTINGS,
   DEFAULT_PROMPT_ENHANCEMENT_SYSTEM_PROMPT,
-  DEFAULT_WORKTREE_BRANCH_PREFIX,
-  DEFAULT_WORKTREE_BRANCH_NAMING_MODE,
   resolveProviderInstanceEnabled,
   ServerSettings,
   ServerSettingsPatch,
-  WorktreeBranchPrefix,
 } from "./settings.ts";
 
 const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
@@ -22,7 +19,6 @@ const encodeClientSettings = Schema.encodeSync(ClientSettingsSchema);
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
-const decodeWorktreeBranchPrefix = Schema.decodeUnknownSync(WorktreeBranchPrefix);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
 describe("keep awake settings", () => {
@@ -34,6 +30,34 @@ describe("keep awake settings", () => {
     expect(decodeServerSettings({ keepAwakeWhileAgentsWork: true }).keepAwakeWhileAgentsWork).toBe(
       true,
     );
+  });
+});
+
+describe("ServerSettings response streaming", () => {
+  it("defaults to paragraph buffering", () => {
+    expect(decodeServerSettings({}).responseStreamingMode).toBe("paragraph");
+  });
+
+  it.each(["turn", "paragraph"])(
+    "round-trips %s as an environment setting and project override",
+    (responseStreamingMode) => {
+      const input = {
+        responseStreamingMode,
+        projectSettingsOverrides: { project: { responseStreamingMode } },
+      };
+      expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
+      expect(decodeServerSettingsPatch(input)).toEqual(input);
+    },
+  );
+
+  it.each(["token", "unsupported"])("rejects %s in settings snapshots and writes", (mode) => {
+    for (const input of [
+      { responseStreamingMode: mode },
+      { projectSettingsOverrides: { project: { responseStreamingMode: mode } } },
+    ]) {
+      expect(() => decodeServerSettings(input)).toThrow();
+      expect(() => decodeServerSettingsPatch(input)).toThrow();
+    }
   });
 });
 
@@ -415,6 +439,15 @@ describe("ClientSettings load balancing", () => {
     expect(decodeClientSettingsPatch({ loadBalancingEnabled }).loadBalancingEnabled).toBe(
       loadBalancingEnabled,
     );
+  });
+});
+
+describe("ClientSettings composer context strip", () => {
+  it("defaults to draft-only and accepts a persistent strip preference", () => {
+    expect(decodeClientSettings({}).persistComposerContextStrip).toBe(false);
+    expect(
+      decodeClientSettingsPatch({ persistComposerContextStrip: true }).persistComposerContextStrip,
+    ).toBe(true);
   });
 });
 
@@ -969,50 +1002,39 @@ describe("ServerSettings worktree defaults", () => {
     expect(decodeServerSettingsPatch({ worktreeSubmodules: null }).worktreeSubmodules).toBeNull();
   });
 });
-describe("ServerSettings.worktreeBranchPrefix", () => {
-  it("defaults legacy settings to the canonical prefix", () => {
-    expect(decodeServerSettings({}).worktreeBranchPrefix).toBe(DEFAULT_WORKTREE_BRANCH_PREFIX);
-    expect(DEFAULT_SERVER_SETTINGS.worktreeBranchPrefix).toBe(DEFAULT_WORKTREE_BRANCH_PREFIX);
+describe("ServerSettings Cursor legacy settings", () => {
+  it("preserves V1 Cursor CLI settings when reading and writing shared settings", () => {
+    const decoded = decodeServerSettings({
+      providers: {
+        cursor: {
+          enabled: true,
+          binaryPath: "cursor-agent",
+          apiEndpoint: "http://127.0.0.1:3774",
+        },
+      },
+    });
+
+    expect(decoded.providers.cursor.enabled).toBe(true);
+    expect(encodeServerSettings(decoded).providers?.cursor).toMatchObject({
+      binaryPath: "cursor-agent",
+      apiEndpoint: "http://127.0.0.1:3774",
+    });
   });
 
-  it("accepts a bounded Git-safe component and trims the value", () => {
-    const prefix = " Team.alpha_1-2 ";
-    expect(decodeWorktreeBranchPrefix(prefix)).toBe("Team.alpha_1-2");
-    expect(decodeServerSettingsPatch({ worktreeBranchPrefix: prefix }).worktreeBranchPrefix).toBe(
-      "Team.alpha_1-2",
-    );
-  });
+  it("ignores obsolete Cursor CLI settings in patches", () => {
+    const patch = decodeServerSettingsPatch({
+      providers: {
+        cursor: {
+          enabled: true,
+          binaryPath: "cursor-agent",
+          apiEndpoint: "http://127.0.0.1:3774",
+        },
+      },
+    });
 
-  it.each([
-    ".leading",
-    "trailing.",
-    "contains/slash",
-    "contains space",
-    "contains..dots",
-    "ends.lock",
-    "équipe",
-    "a".repeat(65),
-  ])("rejects invalid prefix %j", (prefix) => {
-    expect(() => decodeWorktreeBranchPrefix(prefix)).toThrow();
-    expect(() => decodeServerSettingsPatch({ worktreeBranchPrefix: prefix })).toThrow();
-  });
-});
-
-describe("ServerSettings.worktreeBranchNamingMode", () => {
-  it("defaults legacy settings to the existing prefix mode", () => {
-    expect(decodeServerSettings({}).worktreeBranchNamingMode).toBe(
-      DEFAULT_WORKTREE_BRANCH_NAMING_MODE,
-    );
-  });
-
-  it.each(["prefix", "conventional"] as const)("accepts %s", (mode) => {
-    expect(
-      decodeServerSettingsPatch({ worktreeBranchNamingMode: mode }).worktreeBranchNamingMode,
-    ).toBe(mode);
-  });
-
-  it("rejects unknown modes", () => {
-    expect(() => decodeServerSettingsPatch({ worktreeBranchNamingMode: "semantic" })).toThrow();
+    expect(patch.providers?.cursor?.enabled).toBe(true);
+    expect(patch.providers?.cursor).not.toHaveProperty("binaryPath");
+    expect(patch.providers?.cursor).not.toHaveProperty("apiEndpoint");
   });
 });
 
@@ -1169,4 +1191,27 @@ it("validates remote device hosts and rejects ambiguous host ids", () => {
     decodeDeviceHostSettings({ deviceHosts: [{ ...host, target: "-oProxyCommand=bad" }] }),
   ).toThrow();
   expect(() => decodeDeviceHostSettings({ deviceHosts: [{ ...host, port: 0 }] })).toThrow();
+});
+
+describe("branch naming settings", () => {
+  it("defaults existing settings to the t3code static prefix", () => {
+    expect(decodeServerSettings({})).toMatchObject({
+      branchNamingMode: "static",
+      branchNamePrefix: "t3code",
+      branchNameInstructions: "",
+    });
+  });
+  it.each(["static", "semantic", "custom"])(
+    "round-trips %s and project overrides",
+    (branchNamingMode) => {
+      const naming = {
+        branchNamingMode,
+        branchNamePrefix: "team/",
+        branchNameInstructions: "Include the issue ID.",
+      };
+      const input = { ...naming, projectSettingsOverrides: { project: naming } };
+      expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
+      expect(decodeServerSettingsPatch(input)).toEqual(input);
+    },
+  );
 });

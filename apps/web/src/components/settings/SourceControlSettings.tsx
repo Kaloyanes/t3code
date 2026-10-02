@@ -1,33 +1,24 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
-import {
-  DEFAULT_WORKTREE_BRANCH_NAMING_MODE,
-  DEFAULT_WORKTREE_BRANCH_PREFIX,
-  WorktreeBranchPrefix,
-  type WorktreeBranchNamingMode,
-  type BackgroundActivitySettings,
-  type SourceControlProviderKind,
-  type SourceControlDiscoveryResult,
-  type SourceControlProviderAuth,
-  type SourceControlProviderDiscoveryItem,
-  type VcsDriverKind,
-  type VcsDiscoveryItem,
-} from "@t3tools/contracts";
-import { ChevronDownIcon, GitPullRequestIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import * as Duration from "effect/Duration";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import { useEffect, useState, type ReactNode } from "react";
+import type {
+  BackgroundActivitySettings,
+  SourceControlProviderKind,
+  SourceControlDiscoveryResult,
+  SourceControlProviderAuth,
+  SourceControlProviderDiscoveryItem,
+  VcsDriverKind,
+  VcsDiscoveryItem,
+} from "@t3tools/contracts";
 import {
   getBackgroundActivityBaseProfile,
   getBackgroundActivityPresetSettings,
   resolveServerBackgroundActivitySettings,
 } from "@t3tools/shared/backgroundActivitySettings";
 
-import {
-  useScopedSettings,
-  useScopedSettingsMixed,
-  useUpdateScopedSettings,
-} from "./useScopedSettings";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { cn } from "../../lib/utils";
@@ -53,8 +44,6 @@ import {
   NumberFieldInput,
 } from "../ui/number-field";
 import { Switch } from "../ui/switch";
-import { Input } from "../ui/input";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 import {
@@ -67,13 +56,13 @@ import {
   JujutsuIcon,
   type Icon,
 } from "../Icons";
+import { BitbucketCredentialsSettings } from "./BitbucketCredentialsSettings";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
 import {
   PolicyTooltip,
   SettingResetButton,
   SettingsPageContainer,
-  SettingsRow,
   SettingsSearchTarget,
   SettingsSection,
   useSettingsSearchTargetId,
@@ -246,7 +235,9 @@ function itemSummary({
       );
     }
 
-    if (!item.executable) {
+    // API integrations have no CLI to sign in with; an unverified saved credential falls
+    // through to the "could not verify" detail instead of repeating the setup hint.
+    if (!item.executable && auth.status === "unauthenticated") {
       return <span>Available. {item.installHint}</span>;
     }
 
@@ -289,7 +280,11 @@ function DiscoveryItemRow({
   const searchTargetId = useSettingsSearchTargetId();
 
   useEffect(() => {
-    if (item.kind === "git" && searchTargetId === searchableSetting("git-fetch-interval").id) {
+    if (
+      (item.kind === "git" && searchTargetId === searchableSetting("git-fetch-interval").id) ||
+      (item.kind === "bitbucket" &&
+        searchTargetId === searchableSetting("bitbucket-credentials").id)
+    ) {
       setIsExpanded(true);
     }
   }, [item.kind, searchTargetId]);
@@ -434,127 +429,6 @@ function GitFetchIntervalSettings() {
     </SettingsSearchTarget>
   );
 }
-function WorktreeBranchPrefixSettings() {
-  const settings = useScopedSettings();
-  const updateSettings = useUpdateScopedSettings();
-  const prefixMixed = useScopedSettingsMixed(["worktreeBranchPrefix"]);
-  const modeMixed = useScopedSettingsMixed(["worktreeBranchNamingMode"]);
-  const [draft, setDraft] = useState(prefixMixed ? "" : settings.worktreeBranchPrefix);
-  const [modeDraft, setModeDraft] = useState<WorktreeBranchNamingMode | "">(
-    modeMixed ? "" : settings.worktreeBranchNamingMode,
-  );
-  const [invalid, setInvalid] = useState(false);
-  const setting = searchableSetting("worktree-branch-prefix");
-
-  useEffect(() => {
-    setDraft(prefixMixed ? "" : settings.worktreeBranchPrefix);
-    setModeDraft(modeMixed ? "" : settings.worktreeBranchNamingMode);
-    setInvalid(false);
-  }, [modeMixed, prefixMixed, settings.worktreeBranchNamingMode, settings.worktreeBranchPrefix]);
-
-  const commit = () => {
-    const next = draft.trim();
-    if (!Schema.is(WorktreeBranchPrefix)(next)) {
-      setInvalid(true);
-      return;
-    }
-    setDraft(next);
-    setInvalid(false);
-    updateSettings({ worktreeBranchPrefix: next });
-  };
-
-  return (
-    <SettingsSection title="Worktrees">
-      <SettingsRow
-        serverScoped
-        settingKeys={["worktreeBranchNamingMode"]}
-        title="branch naming"
-        description={
-          modeMixed || modeDraft === ""
-            ? "Choose how T3 Code names branches created for worktrees."
-            : modeDraft === "conventional"
-              ? "Use prefixes such as feature/, bug/, issue/, or maintenance/ based on the work."
-              : "Keep using the configured T3 Code prefix for generated worktree branches."
-        }
-        control={
-          <div className="w-full sm:w-52">
-            <Select
-              value={modeMixed ? null : modeDraft || DEFAULT_WORKTREE_BRANCH_NAMING_MODE}
-              onValueChange={(value) => {
-                if (value !== "prefix" && value !== "conventional") return;
-                const next = value as WorktreeBranchNamingMode;
-                setModeDraft(next);
-                updateSettings({ worktreeBranchNamingMode: next });
-              }}
-            >
-              <SelectTrigger size="sm" aria-label="Worktree branch naming">
-                <SelectValue>
-                  {modeMixed
-                    ? "Mixed"
-                    : modeDraft === "conventional"
-                      ? "Conventional prefixes"
-                      : "T3 Code prefix"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem value="prefix">T3 Code prefix</SelectItem>
-                <SelectItem value="conventional">Conventional prefixes</SelectItem>
-              </SelectPopup>
-            </Select>
-          </div>
-        }
-      />
-      <SettingsRow
-        serverScoped
-        settingKeys={["worktreeBranchPrefix"]}
-        {...setting}
-        description={`Configured prefix for temporary worktree branches, such as ${prefixMixed ? "custom" : settings.worktreeBranchPrefix}/a1b2c3d4. Existing branches are unchanged.`}
-        resetAction={
-          !prefixMixed && settings.worktreeBranchPrefix !== DEFAULT_WORKTREE_BRANCH_PREFIX ? (
-            <SettingResetButton
-              label="worktree branch prefix"
-              onClick={() =>
-                updateSettings({ worktreeBranchPrefix: DEFAULT_WORKTREE_BRANCH_PREFIX })
-              }
-            />
-          ) : null
-        }
-        control={
-          <div className="w-full sm:w-52">
-            <Input
-              size="sm"
-              value={draft}
-              onChange={(event) => {
-                setDraft(event.target.value);
-                if (invalid) setInvalid(false);
-              }}
-              onBlur={commit}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") event.currentTarget.blur();
-              }}
-              maxLength={64}
-              placeholder={prefixMixed ? "Mixed" : DEFAULT_WORKTREE_BRANCH_PREFIX}
-              spellCheck={false}
-              autoCapitalize="none"
-              aria-label="Worktree branch prefix"
-              aria-invalid={invalid}
-              aria-describedby={invalid ? "worktree-branch-prefix-error" : undefined}
-            />
-            {invalid ? (
-              <p
-                id="worktree-branch-prefix-error"
-                className="mt-1.5 text-xs leading-relaxed text-destructive"
-              >
-                Use 1–64 letters, numbers, periods, underscores, or hyphens; start and end with a
-                letter or number.
-              </p>
-            ) : null}
-          </div>
-        }
-      />
-    </SettingsSection>
-  );
-}
 
 function SourceControlSectionSkeleton({
   title,
@@ -678,7 +552,6 @@ export function SourceControlSettingsPanel() {
   return (
     <SettingsPageContainer>
       <ProjectDefaultsSettings category="source-control" />
-      <WorktreeBranchPrefixSettings />
       {environmentId === null ? (
         <SettingsSection id={searchableSetting("source-control").id} title="Server environment">
           <p className="px-4 py-3 text-sm text-muted-foreground">
@@ -720,7 +593,18 @@ export function SourceControlSettingsPanel() {
               headerAction={hasVersionControlSystems ? null : scanButton}
             >
               {result.sourceControlProviders.map((item) => (
-                <DiscoveryItemRow key={`provider:${item.kind}`} item={item} />
+                <DiscoveryItemRow key={`provider:${item.kind}`} item={item}>
+                  {item.kind === "bitbucket" ? (
+                    <SettingsSearchTarget id={searchableSetting("bitbucket-credentials").id}>
+                      <BitbucketCredentialsSettings
+                        // Drafts belong to one environment; switching must not carry them over.
+                        key={environmentId}
+                        environmentId={environmentId}
+                        onSaved={handleScan}
+                      />
+                    </SettingsSearchTarget>
+                  ) : undefined}
+                </DiscoveryItemRow>
               ))}
             </SettingsSection>
           ) : null}

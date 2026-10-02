@@ -11,7 +11,7 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
-import { useEnvironments } from "../../state/environments";
+import { useEnvironments, usePullRequestsSupported } from "../../state/environments";
 import { useHandleNewThread } from "../../hooks/useHandleNewThread";
 import { T3Wordmark } from "../T3Wordmark";
 import {
@@ -166,9 +166,7 @@ export const SidebarPrimaryMenu = memo(function SidebarPrimaryMenu() {
   const issuesSupported = environments.some(
     (environment) => environment.serverConfig?.environment.capabilities.issues === true,
   );
-  const pullRequestsSupported = environments.some(
-    (environment) => environment.serverConfig?.environment.capabilities.pullRequests === true,
-  );
+  const pullRequestsSupported = usePullRequestsSupported();
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) {
       setOpenMobile(false);

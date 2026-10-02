@@ -106,7 +106,7 @@ export function SidebarThreadHeader({
           <TooltipPopup side="top">{newThreadTooltip}</TooltipPopup>
         </Tooltip>
         {hasProjects ? (
-          <SidebarHeaderIconButton label="New project" onClick={onNewProject}>
+          <SidebarHeaderIconButton label="Add project" onClick={onNewProject}>
             <FolderPlusIcon />
           </SidebarHeaderIconButton>
         ) : null}

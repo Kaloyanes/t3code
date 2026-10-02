@@ -1,4 +1,4 @@
-import type { OrchestrationEvent } from "@t3tools/contracts";
+import type { OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -10,8 +10,7 @@ import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
-import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
-import { ThreadBackgroundLivenessService } from "./orchestration/ThreadBackgroundLiveness.ts";
+import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
 import { forkParked } from "./serverActivation.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 
@@ -23,20 +22,21 @@ export const supportsKeepAwake = Effect.gen(function* () {
   return yield* fs.exists(CAFFEINATE).pipe(Effect.orElseSucceed(() => false));
 });
 
-type ActivityEvent = Extract<
-  OrchestrationEvent,
-  { type: "thread.session-set" | "thread.activity-appended" | "thread.deleted" }
->;
-export type KeepAwakeEvent = {
-  [Type in ActivityEvent["type"]]: Pick<Extract<ActivityEvent, { type: Type }>, "type" | "payload">;
-}[ActivityEvent["type"]];
+/** A thread keeps the host awake while a run is active or non-monitor background work is pending. */
+export function threadKeepsHostAwake(
+  thread: Pick<OrchestrationV2ThreadShell, "activeRunId" | "pendingBackgroundTasks"> | null,
+): boolean {
+  return (
+    thread !== null &&
+    (thread.activeRunId !== null ||
+      (thread.pendingBackgroundTasks ?? []).some((task) => task.kind !== "monitor"))
+  );
+}
 
 export const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const background = yield* ThreadBackgroundLivenessService;
   const supported = yield* supportsKeepAwake;
   const lock = yield* Semaphore.make(1);
-  const active = new Set<string>();
   const working = new Set<string>();
   let enabled = false;
   let child: { scope: Scope.Closeable; handle: ChildProcessSpawner.ChildProcessHandle } | undefined;
@@ -49,7 +49,7 @@ export const make = Effect.gen(function* () {
   yield* Effect.addFinalizer(() => stop);
 
   const reconcile = Effect.gen(function* () {
-    if (!supported || !enabled || (active.size === 0 && working.size === 0)) {
+    if (!supported || !enabled || working.size === 0) {
       yield* stop;
       return;
     }
@@ -86,25 +86,11 @@ export const make = Effect.gen(function* () {
           yield* reconcile;
         }),
       ),
-    onEvent: (event: KeepAwakeEvent) =>
+    setThreadWorking: (threadId: ThreadId, isWorking: boolean) =>
       lock.withPermit(
         Effect.gen(function* () {
-          const id = event.payload.threadId;
-          if (event.type === "thread.deleted") {
-            active.delete(id);
-            working.delete(id);
-          } else {
-            if (event.type === "thread.session-set") {
-              const status = event.payload.session.status;
-              if (status === "starting" || status === "running") active.add(id);
-              else active.delete(id);
-              if (status === "stopped" || status === "error") working.delete(id);
-            }
-            if (event.type === "thread.activity-appended") {
-              if (background.getThreadBackgroundLiveness(id) === "working") working.add(id);
-              else working.delete(id);
-            }
-          }
+          if (isWorking) working.add(threadId);
+          else working.delete(threadId);
           yield* reconcile;
         }),
       ),
@@ -113,24 +99,29 @@ export const make = Effect.gen(function* () {
 
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
-    const engine = yield* OrchestrationEngineService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
     const settings = yield* ServerSettingsService;
-    // Subscribe before activation; historical sessions are deliberately not replayed.
-    const events = yield* engine.subscribeDomainEvents;
     const changes = yield* settings.subscribeChanges;
     const controller = yield* make;
     yield* controller.setEnabled((yield* settings.getSettings).keepAwakeWhileAgentsWork);
+    // Run and node updates mark every start, finish and background-task change.
     yield* forkParked(
-      events.pipe(
-        Stream.filter((event) => event.metadata.historyImport !== true),
+      threads.streamDomainEvents.pipe(
         Stream.filter(
-          (event): event is ActivityEvent =>
-            event.type === "thread.session-set" ||
-            event.type === "thread.deleted" ||
-            (event.type === "thread.activity-appended" &&
-              event.payload.activity.kind.startsWith("task.")),
+          (event) =>
+            event.type === "run.updated" ||
+            event.type === "node.updated" ||
+            event.type === "thread.deleted",
         ),
-        Stream.runForEach(controller.onEvent),
+        Stream.runForEach((event) =>
+          threads.getThreadShell(event.threadId).pipe(
+            Effect.orElseSucceed(() => null),
+            Effect.flatMap((thread) =>
+              controller.setThreadWorking(event.threadId, threadKeepsHostAwake(thread)),
+            ),
+          ),
+        ),
+        Effect.ignoreCause({ log: true }),
       ),
     );
     yield* forkParked(

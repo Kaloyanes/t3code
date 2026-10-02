@@ -1,4 +1,4 @@
-import { type OrchestrationEvent, type ProjectId } from "@t3tools/contracts";
+import { type ProjectId } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as Context from "effect/Context";
@@ -10,8 +10,7 @@ import * as Stream from "effect/Stream";
 
 import { forkParked } from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectWorktreeLinks from "../project/ProjectWorktreeLinks.ts";
 import { issuesToCompleteOnMerge } from "./IssueCompletionPolicy.ts";
 import * as Issues from "./IssueService.ts";
 
@@ -28,8 +27,7 @@ export class IssueCompletionReactor extends Context.Service<
 >()("t3/issue/IssueCompletionReactor") {}
 
 export const make = Effect.gen(function* () {
-  const engine = yield* OrchestrationEngine.OrchestrationEngineService;
-  const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const worktreeLinks = yield* ProjectWorktreeLinks.ProjectWorktreeLinks;
   const settings = yield* ServerSettings.ServerSettingsService;
   const issues = yield* Issues.IssueService;
   const handled = new Set<string>();
@@ -39,14 +37,11 @@ export const make = Effect.gen(function* () {
     function* (projectId: ProjectId, worktreePath: string | null) {
       const enabled = resolveProjectSettings(yield* settings.getSettings, projectId).settings
         .completeLinkedIssueOnMerge;
-      const project = (yield* snapshots.getShellSnapshot()).projects.find(
-        (candidate) => candidate.id === projectId,
-      );
-      if (project === undefined) return false;
-      const linkedIssues = (project.worktreeIssues ?? []).filter(
+      const project = (yield* worktreeLinks.forProjects([projectId])).get(projectId);
+      const linkedIssues = (project?.worktreeIssues ?? []).filter(
         (link) => link.worktreePath === worktreePath,
       );
-      const pullRequests = (project.worktreePullRequests ?? []).filter(
+      const pullRequests = (project?.worktreePullRequests ?? []).filter(
         (link) => link.worktreePath === worktreePath,
       );
       if (pullRequests.some((link) => link.snapshot?.state !== "merged")) return false;
@@ -95,8 +90,7 @@ export const make = Effect.gen(function* () {
   const completeProject = Effect.fn("IssueCompletionReactor.completeProject")(function* (
     projectId: ProjectId,
   ) {
-    const snapshot = yield* snapshots.getShellSnapshot();
-    const project = snapshot.projects.find((candidate) => candidate.id === projectId);
+    const project = (yield* worktreeLinks.forProjects([projectId])).get(projectId);
     if (project === undefined) return;
     const enabled = resolveProjectSettings(yield* settings.getSettings, projectId).settings
       .completeLinkedIssueOnMerge;
@@ -111,18 +105,20 @@ export const make = Effect.gen(function* () {
     });
   });
 
-  const worker = yield* makeDrainableWorker(completeProject);
-  const processEvent = (event: OrchestrationEvent) =>
-    event.type === "project.meta-updated" &&
-    event.payload.worktreePullRequests?.some((link) => link.snapshot?.state === "merged")
-      ? worker.enqueue(event.payload.projectId)
-      : Effect.void;
+  const worker = yield* makeDrainableWorker((projectId: ProjectId) =>
+    completeProject(projectId).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("linked issue completion sweep failed", { projectId, error }),
+      ),
+    ),
+  );
 
   const start: IssueCompletionReactor["Service"]["start"] = Effect.fn(
     "IssueCompletionReactor.start",
   )(function* () {
-    const events = yield* engine.subscribeDomainEvents;
-    yield* forkParked(Stream.runForEach(events, processEvent));
+    // A worktree link change may be the merge sync that completes its issues.
+    const changes = yield* worktreeLinks.subscribeChanges;
+    yield* forkParked(Stream.runForEach(changes, (projectId) => worker.enqueue(projectId)));
   });
 
   return {

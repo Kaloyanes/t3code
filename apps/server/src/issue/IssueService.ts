@@ -1,5 +1,4 @@
 import {
-  DEFAULT_WORKTREE_BRANCH_PREFIX,
   CommandId,
   IssueOperationError,
   IssueUnavailableError,
@@ -62,6 +61,7 @@ import {
   buildConventionalWorktreeBranchName,
   resolveWorktreeBranchNaming,
   sanitizeBranchFragment,
+  WORKTREE_BRANCH_PREFIX,
   type WorktreeBranchPurpose,
 } from "@t3tools/shared/git";
 import * as Clock from "effect/Clock";
@@ -70,7 +70,6 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
-import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -91,8 +90,9 @@ import {
 } from "./IssueWorktreeDeletion.ts";
 
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
-import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import * as ProjectService from "../project/ProjectService.ts";
+import * as ProjectWorktreeLinks from "../project/ProjectWorktreeLinks.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
@@ -419,7 +419,7 @@ export function issueWorktreeBranch(
   number: number,
   name: string,
   suffix?: number,
-  prefix: string = DEFAULT_WORKTREE_BRANCH_PREFIX,
+  prefix: string = WORKTREE_BRANCH_PREFIX,
   purpose?: WorktreeBranchPurpose,
 ): string {
   const fragment = issueWorktreeFragment(number, name);
@@ -600,18 +600,29 @@ export class IssueService extends Context.Service<
     readonly authCancel: (
       input: IssueAuthCancelInput,
     ) => Effect.Effect<IssueAuthStatus, IssueError>;
+    /** True once the thread's issue worktree was deleted and not replaced. */
+    readonly isWorkspaceDetached: (threadId: ThreadIdType) => Effect.Effect<boolean>;
   }
 >()("t3/issue/IssueService") {}
 
 export const make = Effect.gen(function* () {
   const gh = yield* GitHubCli.GitHubCli;
-  const projections = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const projectService = yield* ProjectService.ProjectService;
+  const threadManagement = yield* ThreadManagement.ThreadManagementService;
+  const worktreeLinks = yield* ProjectWorktreeLinks.ProjectWorktreeLinks;
+  // Issue flows read enriched project shells and current thread shells.
+  const projections = {
+    getProjectShellById: (projectId: ProjectIdType) => projectService.getShell(projectId),
+    getProjectShells: (projectIds: ReadonlyArray<ProjectIdType> | undefined) =>
+      projectService.listShells(projectIds === undefined ? undefined : { projectIds }),
+    getThreadShellById: (threadId: ThreadIdType) =>
+      threadManagement.getThreadShell(threadId).pipe(Effect.map(Option.fromNullishOr)),
+  };
   const git = yield* GitWorkflowService.GitWorkflowService;
   const sql = yield* SqlClient.SqlClient;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig.ServerConfig;
-  const engine = yield* OrchestrationEngine.OrchestrationEngineService;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const worktreeRuns = yield* WorktreeRunManager.WorktreeRunManager;
@@ -1421,9 +1432,9 @@ export const make = Effect.gen(function* () {
   ): Effect.Effect<void, IssueError> =>
     Effect.gen(function* () {
       const currentTime = yield* Clock.currentTimeMillis;
-      yield* engine
+      yield* threadManagement
         .dispatch({
-          type: "thread.meta.update",
+          type: "thread.metadata.update",
           commandId: CommandId.make(`issue-${operation}-${++commandSequence}-${currentTime}`),
           threadId,
           branch,
@@ -1436,21 +1447,7 @@ export const make = Effect.gen(function* () {
           Effect.asVoid,
         );
     });
-  const publishWorktreeIssues = (projectId: ProjectIdType) =>
-    Effect.gen(function* () {
-      const currentTime = yield* Clock.currentTimeMillis;
-      yield* engine
-        .dispatch({
-          type: "project.meta.update",
-          commandId: CommandId.make(`issue-worktree-refresh-${++commandSequence}-${currentTime}`),
-          projectId,
-        })
-        .pipe(
-          Effect.mapError((cause) =>
-            operationError("worktree.delete", "Unable to refresh project issues.", cause),
-          ),
-        );
-    });
+  const publishWorktreeIssues = (projectId: ProjectIdType) => worktreeLinks.publish(projectId);
   const persistLink = (
     input: IssueLinkInput,
     repo: Repo,
@@ -1498,6 +1495,7 @@ export const make = Effect.gen(function* () {
           operationError("link.write", "Unable to save issue link.", cause),
         ),
       );
+      yield* publishWorktreeIssues(input.projectId);
       return linkedWork;
     });
 
@@ -1570,11 +1568,13 @@ export const make = Effect.gen(function* () {
           operationError("worktree.settings", "Unable to read worktree settings.", cause),
         ),
       );
-      const worktreeBranchPrefix = settings.worktreeBranchPrefix;
+      // Issue branches follow the branch naming setting: semantic names take a
+      // conventional purpose from the issue, other modes use the configured prefix.
+      const worktreeBranchPrefix = settings.branchNamePrefix.trim() || WORKTREE_BRANCH_PREFIX;
       const baseBranch = yield* resolveBaseBranch(repo, input.baseBranch);
       const issue = yield* detail(input);
       const purpose =
-        settings.worktreeBranchNamingMode === "conventional"
+        settings.branchNamingMode === "semantic"
           ? resolveWorktreeBranchNaming({
               firstMessage: issue.title,
               issue: {
@@ -1706,7 +1706,7 @@ export const make = Effect.gen(function* () {
 
   const projectWorktreeThreads = (projectId: ProjectIdType) =>
     readIssueWorktreeThreads(projectId).pipe(
-      Effect.provideService(SqlClient.SqlClient, sql),
+      Effect.provideService(ThreadManagement.ThreadManagementService, threadManagement),
       Effect.mapError((cause) =>
         operationError("worktree.delete", "Unable to resolve worktree threads.", cause),
       ),
@@ -1730,23 +1730,31 @@ export const make = Effect.gen(function* () {
 
   const worktreeIssues = (projectId: ProjectIdType, worktreePath: string) =>
     Effect.gen(function* () {
-      const rows = yield* sql<{
+      const linkRows = yield* sql<{
+        threadId: ThreadIdType;
         host: string;
         repository: string;
         number: number;
         worktreePath: string | null;
-        attachedPath: string | null;
       }>`
-        SELECT links.host, links.repository, links.number,
-          links.worktree_path AS "worktreePath", threads.worktree_path AS "attachedPath"
-        FROM projection_issue_links links
-        LEFT JOIN projection_threads threads ON threads.thread_id = links.thread_id
-        WHERE links.project_id = ${projectId}
+        SELECT thread_id AS "threadId", host, repository, number, worktree_path AS "worktreePath"
+        FROM projection_issue_links
+        WHERE project_id = ${projectId}
       `.pipe(
         Effect.mapError((cause) =>
           operationError("worktree.delete", "Unable to resolve linked issues.", cause),
         ),
       );
+      // A linked thread may have moved to another checkout since it was linked.
+      const attachedPaths = new Map(
+        (yield* projectWorktreeThreads(projectId)).map(
+          (thread) => [thread.id, thread.worktreePath] as const,
+        ),
+      );
+      const rows = linkRows.map((row) => ({
+        ...row,
+        attachedPath: attachedPaths.get(row.threadId) ?? null,
+      }));
       const unique = new Map<string, IssueRef>();
       for (const row of rows) {
         if (
@@ -2326,6 +2334,11 @@ export const make = Effect.gen(function* () {
     authStatus,
     authStart,
     authCancel,
+    isWorkspaceDetached: (threadId) =>
+      findDetached(threadId).pipe(
+        Effect.map((row) => row !== null),
+        Effect.orElseSucceed(() => false),
+      ),
   } satisfies IssueService["Service"];
 });
 
