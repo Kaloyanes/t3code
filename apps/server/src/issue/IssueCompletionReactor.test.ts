@@ -105,12 +105,17 @@ function runCase(input: {
   readonly repeat?: boolean;
   readonly noIssue?: boolean;
   readonly otherPullRequestState?: "open" | "closed" | "merged";
+  readonly linkState?: "open" | "closed";
 }) {
   return Effect.scoped(
     Effect.gen(function* () {
       const current = links(input.pullRequestState);
       const projectLinks: ProjectWorktreeLinks.ProjectWorktreeLinkSet = {
-        worktreeIssues: input.noIssue ? [] : current.worktreeIssues,
+        worktreeIssues: input.noIssue
+          ? []
+          : current.worktreeIssues.map((link) =>
+              input.linkState === undefined ? link : { ...link, state: input.linkState },
+            ),
         worktreePullRequests: input.otherPullRequestState
           ? [
               ...current.worktreePullRequests,
@@ -128,6 +133,7 @@ function runCase(input: {
       const closes: IssueCloseInput[] = [];
       const comments: IssueCommentCreateInput[] = [];
       const calls: string[] = [];
+      let detailReads = 0;
       const savedComments: IssueComment[] = input.existingComment
         ? [{ id: "existing", author: null, body: COMMENT_BODY, createdAt: NOW, url: null }]
         : [];
@@ -148,7 +154,7 @@ function runCase(input: {
             }),
             ServerSettingsService.layerTest({ completeLinkedIssueOnMerge: input.enabled }),
             Layer.mock(IssueService)({
-              detail: () => Effect.succeed(currentDetail),
+              detail: () => Effect.sync(() => (detailReads += 1)).pipe(Effect.as(currentDetail)),
               invalidate: () => Effect.void,
               close: (closeInput) =>
                 Effect.gen(function* () {
@@ -206,7 +212,7 @@ function runCase(input: {
         const cleanupAllowed = input.repeat
           ? yield* reactor.completeWorktree(PROJECT_ID, WORKTREE_PATH)
           : undefined;
-        return { closes, comments, calls, cleanupAllowed };
+        return { closes, comments, calls, cleanupAllowed, detailReads };
       }).pipe(Effect.provide(layer));
     }),
   );
@@ -261,6 +267,20 @@ describe("IssueCompletionReactor", () => {
         });
         assert.deepStrictEqual(completed.calls, ["comment"]);
       }),
+  );
+
+  it.effect("reads linked issues once their worktree merges so their state refreshes", () =>
+    Effect.gen(function* () {
+      const merged = yield* runCase({ enabled: false, pullRequestState: "merged" });
+      assert.strictEqual(merged.detailReads, 1);
+      assert.deepStrictEqual(merged.calls, []);
+      for (const input of [
+        { enabled: false, pullRequestState: "open" },
+        { enabled: false, pullRequestState: "merged", linkState: "closed" },
+      ] as const) {
+        assert.strictEqual((yield* runCase(input)).detailReads, 0);
+      }
+    }),
   );
 
   it.effect("finds a previous completion comment on later pages without posting it again", () =>

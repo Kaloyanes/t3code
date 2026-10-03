@@ -952,6 +952,24 @@ export const make = Effect.gen(function* () {
       Effect.map((row) => (row === null ? null : linkedWorkFromRow(repo, number, row))),
     );
 
+  // Keeps the stored state of linked issues current; worktree chips read it from shells.
+  const recordLinkedState = (repo: Repo, number: number, state: IssueDetail["state"]) =>
+    sql<{ readonly projectId: string }>`
+      UPDATE projection_issue_links SET state = ${state}
+      WHERE host = ${repo.host} AND repository = ${repo.repository} AND number = ${number}
+        AND state IS NOT ${state}
+      RETURNING project_id AS "projectId"
+    `.pipe(
+      Effect.flatMap((rows) =>
+        Effect.forEach(
+          new Set(rows.map((row) => ProjectId.make(row.projectId))),
+          worktreeLinks.publish,
+          { discard: true },
+        ),
+      ),
+      Effect.catch((cause) => Effect.logWarning("failed to record linked issue state", { cause })),
+    );
+
   const detail = (input: IssueRef): Effect.Effect<IssueDetail, IssueError> =>
     cached(
       detailCache,
@@ -973,6 +991,7 @@ export const make = Effect.gen(function* () {
         if (issue === null) return yield* operationError("detail", "Issue was not found.");
         const viewer = stringValue(record(record(response.data).viewer).login).trim();
         const linked = yield* linkedWork(repo, input.number);
+        if (linked !== null) yield* recordLinkedState(repo, input.number, issue.state);
         return {
           ...issue,
           projectTitle: repo.projectTitle,

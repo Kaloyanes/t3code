@@ -422,6 +422,8 @@ export const IssueLinkedWork = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedAt: IsoDateTime,
   source: IssueLinkSource,
+  /** Last state the server observed; absent until the issue is first read. */
+  state: Schema.optional(IssueState),
 });
 export type IssueLinkedWork = typeof IssueLinkedWork.Type;
 

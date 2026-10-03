@@ -1550,6 +1550,13 @@ function WorkspaceServersPopover(props: {
   );
 }
 
+// Matches GitHub: open issues are green, closed ones purple like merged pull requests.
+const ISSUE_CHIP_TONE = {
+  open: "text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300",
+  closed:
+    "text-violet-600 hover:text-violet-700 dark:text-violet-300/90 dark:hover:text-violet-200",
+} as const;
+
 const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
@@ -1778,7 +1785,9 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
         ) : null}
         {props.issues.map((issue) => {
           const url = issueLinkExternalUrl(issue.issue);
-          const label = `GitHub issue #${issue.issue.number} · ${issue.issue.repository}`;
+          const closed = issue.state === "closed";
+          const label = `GitHub issue #${issue.issue.number}${closed ? " (closed)" : ""} · ${issue.issue.repository}`;
+          const Icon = closed ? CircleCheckIcon : CircleDotIcon;
           return (
             <Tooltip key={`${issue.issue.host}/${issue.issue.repository}#${issue.issue.number}`}>
               <TooltipTrigger
@@ -1790,11 +1799,14 @@ const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
                     aria-label={label}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => handleIssueOpen(event, issue)}
-                    className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-0.5 whitespace-nowrap text-xs tabular-nums text-emerald-600 underline-offset-2 hover:text-emerald-700 hover:underline focus-visible:outline-2 focus-visible:outline-ring dark:text-emerald-400 dark:hover:text-emerald-300"
+                    className={cn(
+                      "inline-flex h-7 shrink-0 cursor-pointer items-center gap-0.5 whitespace-nowrap text-xs tabular-nums underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-ring",
+                      ISSUE_CHIP_TONE[closed ? "closed" : "open"],
+                    )}
                   />
                 }
               >
-                <CircleDotIcon aria-hidden className="size-3 shrink-0" />#{issue.issue.number}
+                <Icon aria-hidden className="size-3 shrink-0" />#{issue.issue.number}
               </TooltipTrigger>
               <TooltipPopup side="top">{label}</TooltipPopup>
             </Tooltip>

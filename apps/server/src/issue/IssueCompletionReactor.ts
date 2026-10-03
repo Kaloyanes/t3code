@@ -1,4 +1,4 @@
-import { type ProjectId } from "@t3tools/contracts";
+import { type IssueLinkedWork, type ProjectId } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as Context from "effect/Context";
@@ -87,6 +87,28 @@ export const make = Effect.gen(function* () {
     ),
   );
 
+  // GitHub closes issues a merged PR references; reading one records its state on the link.
+  const refreshState = (projectId: ProjectId, link: IssueLinkedWork, urls: string) => {
+    const key = `refresh:${link.issue.host}/${link.issue.repository}#${link.issue.number}:${urls}`;
+    if (handled.has(key)) return Effect.void;
+    handled.add(key);
+    const reference = {
+      projectId,
+      host: link.issue.host,
+      repository: link.issue.repository,
+      number: link.issue.number,
+    };
+    return issues.invalidate({ reference }).pipe(
+      Effect.andThen(issues.detail(reference)),
+      Effect.asVoid,
+      Effect.catch((error) =>
+        Effect.logWarning("linked issue state refresh failed", { error }).pipe(
+          Effect.andThen(Effect.sync(() => handled.delete(key))),
+        ),
+      ),
+    );
+  };
+
   const completeProject = Effect.fn("IssueCompletionReactor.completeProject")(function* (
     projectId: ProjectId,
   ) {
@@ -103,6 +125,24 @@ export const make = Effect.gen(function* () {
       concurrency: 4,
       discard: true,
     });
+    yield* Effect.forEach(
+      (project.worktreeIssues ?? []).filter(
+        (link) => link.state !== "closed" && !candidates.includes(link),
+      ),
+      (link) => {
+        const pullRequests = (project.worktreePullRequests ?? []).filter(
+          (pullRequest) => pullRequest.worktreePath === link.worktreePath,
+        );
+        if (
+          pullRequests.length === 0 ||
+          pullRequests.some((pullRequest) => pullRequest.snapshot?.state !== "merged")
+        )
+          return Effect.void;
+        const urls = [...new Set(pullRequests.map((pullRequest) => pullRequest.url))].sort();
+        return refreshState(projectId, link, urls.join(","));
+      },
+      { concurrency: 4, discard: true },
+    );
   });
 
   const worker = yield* makeDrainableWorker((projectId: ProjectId) =>
