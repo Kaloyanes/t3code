@@ -53,12 +53,53 @@ export function PullRequestReactionBar({
   readonly onRefresh: () => void;
   readonly className?: string | undefined;
 }) {
+  const setReaction = useAtomCommand(pullRequestEnvironment.setReaction, { reportFailure: false });
+  return (
+    <ReactionBar
+      reactions={reactions}
+      canReact={canReact}
+      className={className}
+      onSetReaction={async (content, reacted) => {
+        const result = await setReaction({
+          environmentId,
+          input: {
+            ...reference,
+            ...(subjectId === undefined ? {} : { subjectId }),
+            content,
+            reacted,
+          },
+        });
+        if (result._tag === "Failure") return false;
+        onRefresh();
+        return true;
+      }}
+    />
+  );
+}
+
+/**
+ * The reaction pills and picker for any host subject. The caller sends the request; a press
+ * shows at once and is taken back if `onSetReaction` reports that the host refused it.
+ */
+export function ReactionBar({
+  reactions,
+  canReact,
+  onSetReaction,
+  className,
+}: {
+  readonly reactions: ReadonlyArray<PullRequestReaction>;
+  readonly canReact: boolean;
+  readonly onSetReaction: (
+    content: PullRequestReactionContent,
+    reacted: boolean,
+  ) => Promise<boolean>;
+  readonly className?: string | undefined;
+}) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pending, setPending] = useState<{
     readonly signature: string;
     readonly values: ReadonlyMap<PullRequestReactionContent, boolean>;
   }>({ signature: "", values: EMPTY_PENDING });
-  const setReaction = useAtomCommand(pullRequestEnvironment.setReaction, { reportFailure: false });
 
   const signature = reactionsSignature(reactions);
   const values = pending.signature === signature ? pending.values : EMPTY_PENDING;
@@ -66,25 +107,13 @@ export function PullRequestReactionBar({
 
   const toggle = async (content: PullRequestReactionContent, reacted: boolean) => {
     setPending({ signature, values: new Map([...values, [content, reacted]]) });
-    const result = await setReaction({
-      environmentId,
-      input: {
-        ...reference,
-        ...(subjectId === undefined ? {} : { subjectId }),
-        content,
-        reacted,
-      },
+    if (await onSetReaction(content, reacted)) return;
+    setPending((current) => {
+      const next = new Map(current.values);
+      next.delete(content);
+      return { signature: current.signature, values: next };
     });
-    if (result._tag === "Failure") {
-      setPending((current) => {
-        const next = new Map(current.values);
-        next.delete(content);
-        return { signature: current.signature, values: next };
-      });
-      toastManager.add({ type: "error", title: "The reaction could not be saved" });
-      return;
-    }
-    onRefresh();
+    toastManager.add({ type: "error", title: "The reaction could not be saved" });
   };
 
   if (shown.length === 0 && !canReact) return null;

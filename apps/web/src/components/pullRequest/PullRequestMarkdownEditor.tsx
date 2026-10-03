@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type Ref } from "react";
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 
 import { cn } from "~/lib/utils";
@@ -44,7 +44,6 @@ export function PullRequestMarkdownEditor({
   readonly onCancel: () => void;
 }) {
   const [draft, setDraft] = useState(value);
-  const [preview, setPreview] = useState(false);
   // The words this draft started from. React keeps a component instance wherever the same
   // position and key come round again, so an editor opened on one remark can be handed another's
   // words without being rebuilt — and saving would then write the first remark's text onto the
@@ -78,11 +77,66 @@ export function PullRequestMarkdownEditor({
         onCancel();
       }}
     >
+      <MarkdownWritePreview
+        value={draft}
+        onChange={setDraft}
+        cwd={cwd}
+        environmentId={environmentId}
+        threadRef={threadRef}
+        placeholder={placeholder}
+        label={label}
+        disabled={saving}
+      />
+      <div className="flex justify-end gap-2">
+        <Button size="xs" variant="ghost" disabled={saving} onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button size="xs" variant="outline" disabled={saveDisabled} onClick={() => onSave(draft)}>
+          {saving ? "Saving..." : "Save"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The Write / Preview pair on its own, for a body whose draft its caller keeps — a new issue's
+ * autosaved text, or a comment that clears once it is sent. Preview renders through the same
+ * component the posted body will be read through.
+ */
+export function MarkdownWritePreview({
+  value,
+  onChange,
+  cwd,
+  environmentId,
+  threadRef = null,
+  placeholder,
+  label,
+  disabled = false,
+  rows = 6,
+  autoFocus = true,
+  textareaRef,
+}: {
+  readonly value: string;
+  readonly onChange: (next: string) => void;
+  readonly cwd: string;
+  readonly environmentId: EnvironmentId;
+  readonly threadRef?: ScopedThreadRef | null;
+  readonly placeholder?: string | undefined;
+  readonly label: string;
+  readonly disabled?: boolean;
+  readonly rows?: number;
+  readonly autoFocus?: boolean;
+  readonly textareaRef?: Ref<HTMLTextAreaElement> | undefined;
+}) {
+  const [preview, setPreview] = useState(false);
+  return (
+    <>
       <ToggleGroup
         aria-label="Markdown editor mode"
         variant="segmented"
         value={[preview ? "preview" : "write"]}
-        disabled={saving}
+        disabled={disabled}
         onValueChange={(next) => {
           const mode = next[0];
           if (mode === "write" || mode === "preview") setPreview(mode === "preview");
@@ -93,11 +147,11 @@ export function PullRequestMarkdownEditor({
       </ToggleGroup>
       {preview ? (
         <div className="rounded-lg border border-border/60 px-3 py-2">
-          {empty ? (
+          {value.trim().length === 0 ? (
             <p className="text-xs text-muted-foreground">Nothing to preview.</p>
           ) : (
             <PullRequestMarkdown
-              text={draft}
+              text={value}
               cwd={cwd}
               environmentId={environmentId}
               threadRef={threadRef}
@@ -106,23 +160,16 @@ export function PullRequestMarkdownEditor({
         </div>
       ) : (
         <Textarea
-          autoFocus
-          disabled={saving}
-          value={draft}
-          rows={6}
+          ref={textareaRef}
+          autoFocus={autoFocus}
+          disabled={disabled}
+          value={value}
+          rows={rows}
           placeholder={placeholder}
           aria-label={label}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => onChange(event.target.value)}
         />
       )}
-      <div className="flex justify-end gap-2">
-        <Button size="xs" variant="ghost" disabled={saving} onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button size="xs" variant="outline" disabled={saveDisabled} onClick={() => onSave(draft)}>
-          {saving ? "Saving..." : "Save"}
-        </Button>
-      </div>
-    </div>
+    </>
   );
 }

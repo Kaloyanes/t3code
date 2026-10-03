@@ -1,8 +1,16 @@
-import type { EnvironmentId, IssueRepositorySelection, ProjectId } from "@t3tools/contracts";
-import { CircleDotIcon, ExternalLinkIcon } from "lucide-react";
+import type {
+  EnvironmentId,
+  IssueRef,
+  IssueRepositorySelection,
+  ProjectId,
+} from "@t3tools/contracts";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { CircleDotIcon, ExternalLinkIcon, GitBranchIcon, TagIcon, UsersIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { readLocalApi } from "../../localApi";
+import { useProject } from "../../state/entities";
+import { refreshEnvironmentShell } from "../../state/shell";
 import {
   issueEnvironment,
   readIssueDraft,
@@ -12,14 +20,6 @@ import {
 } from "../../state/issues";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
-import {
-  Combobox,
-  ComboboxEmpty,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-  ComboboxPopup,
-} from "../ui/combobox";
 import {
   Dialog,
   DialogDescription,
@@ -32,9 +32,16 @@ import {
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
-import { Textarea } from "../ui/textarea";
+import { MetaRow } from "../workItem/WorkItemSummaryParts";
+import { MarkdownWritePreview } from "../pullRequest/PullRequestMarkdownEditor";
+import {
+  PullRequestActorLabel,
+  PullRequestLabelChip,
+} from "../pullRequest/pullRequestPresentation";
 import { issueRepositoryUrl } from "./issue.logic";
-import { IssueLabelPill } from "./IssueLabelPill";
+import { issueCandidatesInput, toggleIssueName } from "./issueDetail.logic";
+import { IssueAssigneePicker, IssueLabelPicker } from "./IssuePickers";
+import { IssueWorktreeDialog } from "./IssueWorktreeDialog";
 
 const BLANK_ISSUE_TEMPLATE = "__blank__";
 
@@ -51,6 +58,15 @@ interface IssueCreateDialogProps {
     readonly url: string;
   }) => void;
 }
+
+/** The issue just created with "Create & start work", waiting for its worktree to be chosen. */
+interface StartWorkTarget {
+  readonly environmentId: EnvironmentId;
+  readonly reference: IssueRef;
+  readonly title: string;
+  readonly canLink: boolean;
+}
+
 export function IssueCreateDialog({
   open,
   onOpenChange,
@@ -58,41 +74,25 @@ export function IssueCreateDialog({
   environmentId,
   onCreated,
 }: IssueCreateDialogProps) {
-  const templatesQuery = useIssueTemplates(
-    open && selection && environmentId ? { environmentId, input: selection } : null,
+  const active = open && selection !== null && environmentId !== null;
+  const templatesQuery = useIssueTemplates(active ? { environmentId, input: selection } : null);
+  const project = useProject(
+    selection && environmentId ? scopeProjectRef(environmentId, selection.projectId) : null,
   );
   const [templateId, setTemplateId] = useState("");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [labels, setLabels] = useState("");
-  const [assignees, setAssignees] = useState("");
+  const [labels, setLabels] = useState<ReadonlyArray<string>>([]);
+  const [assignees, setAssignees] = useState<ReadonlyArray<string>>([]);
   const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const assigneeQuery = assignees.split(",").at(-1)?.trim().slice(0, 200) ?? "";
-  const labelsCandidatesQuery = useIssueCandidates(
-    open && selection && environmentId
-      ? {
-          environmentId,
-          input: {
-            ...selection,
-            kind: "labels",
-            limit: 100,
-          },
-        }
-      : null,
+  const [submitting, setSubmitting] = useState<"create" | "start" | null>(null);
+  const [startWork, setStartWork] = useState<StartWorkTarget | null>(null);
+  // The same reads the pickers make, so chips carry their label colors and faces.
+  const labelCandidatesQuery = useIssueCandidates(
+    active ? { environmentId, input: issueCandidatesInput(selection, "labels") } : null,
   );
-  const assigneesCandidatesQuery = useIssueCandidates(
-    open && selection && environmentId
-      ? {
-          environmentId,
-          input: {
-            ...selection,
-            kind: "assignees",
-            limit: 100,
-            ...(assigneeQuery ? { query: assigneeQuery } : {}),
-          },
-        }
-      : null,
+  const assigneeCandidatesQuery = useIssueCandidates(
+    active ? { environmentId, input: issueCandidatesInput(selection, "assignees") } : null,
   );
   const create = useAtomCommand(issueEnvironment.create, { reportFailure: false });
   useEffect(() => {
@@ -104,10 +104,10 @@ export function IssueCreateDialog({
     setTemplateId(draft?.templateId ?? "");
     setTitle(draft?.title ?? "");
     setBody(draft?.body ?? "");
-    setLabels(draft?.labels.join(", ") ?? "");
-    setAssignees(draft?.assignees.join(", ") ?? "");
+    setLabels(draft?.labels ?? []);
+    setAssignees(draft?.assignees ?? []);
     setError(null);
-    setIsSubmitting(false);
+    setSubmitting(null);
   }, [open, selection]);
   useEffect(() => {
     if (!open || !selection) return;
@@ -116,19 +116,7 @@ export function IssueCreateDialog({
         writeIssueDraft(
           typeof window === "undefined" ? undefined : window.localStorage,
           selection,
-          {
-            ...(templateId ? { templateId } : {}),
-            title,
-            body,
-            labels: labels
-              .split(",")
-              .map((value) => value.trim())
-              .filter(Boolean),
-            assignees: assignees
-              .split(",")
-              .map((value) => value.trim())
-              .filter(Boolean),
-          },
+          { ...(templateId ? { templateId } : {}), title, body, labels, assignees },
         ),
       250,
     );
@@ -136,32 +124,25 @@ export function IssueCreateDialog({
   }, [assignees, body, labels, open, selection, templateId, title]);
   const selectedTemplate =
     templatesQuery.data?.templates.find((template) => template.id === templateId) ?? null;
+  const isForm = selectedTemplate?.kind === "issue-form";
+  const isSubmitting = submitting !== null;
   const applyTemplate = (id: string) => {
     setTemplateId(id);
     const template = templatesQuery.data?.templates.find((entry) => entry.id === id);
-    if (!template) {
-      setTitle("");
-      setBody("");
-      setLabels("");
-      setAssignees("");
-      return;
-    }
-    setTitle(template.title ?? "");
-    setBody(template.body ?? "");
-    setLabels(template.labels.join(", "));
-    setAssignees(template.assignees.join(", "));
+    setTitle(template?.title ?? "");
+    setBody(template?.body ?? "");
+    setLabels(template?.labels ?? []);
+    setAssignees(template?.assignees ?? []);
   };
-  const submit = async () => {
-    if (
-      isSubmitting ||
-      selectedTemplate?.kind === "issue-form" ||
-      !selection ||
-      environmentId === null ||
-      title.trim().length === 0
-    ) {
-      return;
-    }
-    setIsSubmitting(true);
+  const canSubmit =
+    !isSubmitting &&
+    !isForm &&
+    selection !== null &&
+    environmentId !== null &&
+    title.trim().length > 0;
+  const submit = async (mode: "create" | "start") => {
+    if (!canSubmit || !selection || environmentId === null) return;
+    setSubmitting(mode);
     setError(null);
     try {
       const confirmed =
@@ -174,26 +155,25 @@ export function IssueCreateDialog({
           title: title.trim(),
           body,
           ...(templateId ? { templateId } : {}),
-          ...(labels.trim()
-            ? {
-                labels: labels
-                  .split(",")
-                  .map((value) => value.trim())
-                  .filter(Boolean),
-              }
-            : {}),
-          ...(assignees.trim()
-            ? {
-                assignees: assignees
-                  .split(",")
-                  .map((value) => value.trim())
-                  .filter(Boolean),
-              }
-            : {}),
+          ...(labels.length > 0 ? { labels } : {}),
+          ...(assignees.length > 0 ? { assignees } : {}),
         },
       });
       if (result._tag === "Success") {
         const issue = result.value.issue;
+        if (mode === "start") {
+          setStartWork({
+            environmentId,
+            reference: {
+              projectId: issue.projectId,
+              host: issue.host,
+              repository: issue.repository,
+              number: issue.number,
+            },
+            title: issue.title,
+            canLink: issue.viewerPermissions?.link !== false,
+          });
+        }
         onCreated({
           projectId: issue.projectId,
           host: issue.host,
@@ -207,305 +187,243 @@ export function IssueCreateDialog({
     } catch {
       setError("Could not create the issue. Your draft is still saved; try again.");
     } finally {
-      setIsSubmitting(false);
+      setSubmitting(null);
     }
   };
   const openExternalForm = () => {
     if (!selection || isSubmitting) return;
     void readLocalApi()?.shell.openExternal(`${issueRepositoryUrl(selection)}/issues/new`);
   };
-  const labelCandidates =
-    labelsCandidatesQuery.data?._tag === "labels"
-      ? labelsCandidatesQuery.data.candidates.map((candidate) => ({
-          value: candidate.name,
-          label: candidate.name,
-          color: candidate.color,
-        }))
-      : [];
-  const assigneeCandidates =
-    assigneesCandidatesQuery.data?._tag === "assignees"
-      ? assigneesCandidatesQuery.data.candidates.map((candidate) => ({
-          value: candidate.login,
-          label: candidate.login,
-          detail: candidate.name,
-        }))
-      : [];
+  const labelColors = new Map(
+    labelCandidatesQuery.data?._tag === "labels"
+      ? labelCandidatesQuery.data.candidates.map(
+          (candidate) => [candidate.name.toLowerCase(), candidate.color] as const,
+        )
+      : [],
+  );
+  const assigneeActors = new Map(
+    assigneeCandidatesQuery.data?._tag === "assignees"
+      ? assigneeCandidatesQuery.data.candidates.map(
+          (candidate) => [candidate.login.toLowerCase(), candidate] as const,
+        )
+      : [],
+  );
+  const fieldsDisabled = isSubmitting || isForm;
+
   return (
-    <Dialog open={open} onOpenChange={isSubmitting ? undefined : onOpenChange}>
-      <DialogPopup className="max-w-2xl" showCloseButton={!isSubmitting}>
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <CircleDotIcon className="size-4" />
-            New issue
-          </DialogTitle>
-          <DialogDescription>
-            Create an issue in {selection?.repository ?? "the selected repository"}.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogPanel className="space-y-4">
-          {templatesQuery.isPending ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Spinner aria-label="Loading issue templates" /> Checking available templates…
-            </div>
-          ) : null}
-          {templatesQuery.error ? (
-            <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/25 bg-destructive/6 p-3 text-sm">
-              <span className="text-destructive">
-                Templates could not be loaded. You can still create a blank issue.
+    <>
+      <Dialog open={open} onOpenChange={isSubmitting ? undefined : onOpenChange}>
+        <DialogPopup className="max-w-2xl" showCloseButton={!isSubmitting}>
+          <DialogHeader>
+            <DialogTitle>
+              <span className="flex items-center gap-2">
+                <CircleDotIcon className="size-4" />
+                New issue
               </span>
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={templatesQuery.refresh}
-                disabled={templatesQuery.isPending}
-              >
-                Retry
-              </Button>
-            </div>
-          ) : null}
-          <div>
-            <label className="text-sm font-medium" id="issue-template-label">
-              Template
-            </label>
-            <Select
-              value={templateId || BLANK_ISSUE_TEMPLATE}
-              onValueChange={(value) =>
-                applyTemplate(value === BLANK_ISSUE_TEMPLATE || value === null ? "" : value)
-              }
-            >
-              <SelectTrigger
-                className="mt-1"
-                aria-labelledby="issue-template-label"
-                disabled={templatesQuery.isPending || isSubmitting}
-              >
-                <SelectValue>
-                  {selectedTemplate
-                    ? `${selectedTemplate.name}${selectedTemplate.kind === "issue-form" ? " · structured form" : ""}`
-                    : "Blank issue"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup alignItemWithTrigger={false}>
-                <SelectItem value={BLANK_ISSUE_TEMPLATE}>Blank issue</SelectItem>
-                {templatesQuery.data?.templates.map((template) => (
-                  <SelectItem key={template.id} value={template.id}>
-                    {template.name}
-                    {template.kind === "issue-form" ? " · structured form" : ""}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          </div>
-          {selectedTemplate?.kind === "issue-form" ? (
-            <div className="rounded-lg border border-warning/30 bg-warning-surface/35 p-3 text-sm">
-              <p className="font-medium">This template is a structured GitHub form.</p>
-              <p className="mt-1 text-muted-foreground">
-                T3 Code keeps the form fields on GitHub so validation and dropdowns work correctly.
-              </p>
-              <Button size="sm" variant="outline" className="mt-3" onClick={openExternalForm}>
-                Open form on GitHub <ExternalLinkIcon />
-              </Button>
-            </div>
-          ) : null}
-          <label className="block text-sm font-medium">
-            Title
-            <Input
-              className="mt-1"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="What needs attention?"
-              autoFocus
-              disabled={isSubmitting || selectedTemplate?.kind === "issue-form"}
-            />
-          </label>
-          <label className="block text-sm font-medium">
-            Body
-            <Textarea
-              className="mt-1"
-              value={body}
-              onChange={(event) => setBody(event.target.value)}
-              placeholder="Describe the problem or idea"
-              rows={10}
-              disabled={isSubmitting || selectedTemplate?.kind === "issue-form"}
-            />
-          </label>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <IssueCandidateField
-              label="Labels"
-              value={labels}
-              onChange={setLabels}
-              placeholder="bug, enhancement"
-              candidates={labelCandidates}
-              isPending={labelsCandidatesQuery.isPending}
-              error={labelsCandidatesQuery.error}
-              disabled={isSubmitting || selectedTemplate?.kind === "issue-form"}
-            />
-            <IssueCandidateField
-              label="Assignees"
-              value={assignees}
-              onChange={setAssignees}
-              placeholder="github-login"
-              candidates={assigneeCandidates}
-              isPending={assigneesCandidatesQuery.isPending}
-              error={assigneesCandidatesQuery.error}
-              disabled={isSubmitting || selectedTemplate?.kind === "issue-form"}
-            />
-          </div>
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
-        </DialogPanel>
-        <DialogFooter>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isSubmitting}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => void submit()}
-            disabled={
-              isSubmitting ||
-              selectedTemplate?.kind === "issue-form" ||
-              !selection ||
-              environmentId === null ||
-              title.trim().length === 0
-            }
-          >
-            {isSubmitting ? <Spinner aria-label="Creating issue" /> : null}
-            {isSubmitting ? "Creating issue…" : "Create issue"}
-          </Button>
-        </DialogFooter>
-      </DialogPopup>
-    </Dialog>
-  );
-}
-
-interface IssueCandidate {
-  readonly value: string;
-  readonly label: string;
-  readonly detail?: string | null;
-  readonly color?: string | null;
-}
-
-function IssueCandidateField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  candidates,
-  isPending,
-  error,
-  disabled,
-}: {
-  readonly label: string;
-  readonly value: string;
-  readonly onChange: (value: string) => void;
-  readonly placeholder: string;
-  readonly candidates: ReadonlyArray<IssueCandidate>;
-  readonly isPending: boolean;
-  readonly error: string | null;
-  readonly disabled: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const query = value.split(",").at(-1)?.trim().toLowerCase() ?? "";
-  const filteredCandidates = candidates.filter((candidate) =>
-    candidate.label.toLowerCase().includes(query),
-  );
-  const items = candidates.map((candidate) => candidate.value);
-  const filteredItems = filteredCandidates.map((candidate) => candidate.value);
-  const selectedValues = value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const selectCandidate = (candidateValue: string | null) => {
-    if (candidateValue === null) return;
-    const selected = candidates.find((candidate) => candidate.value === candidateValue);
-    if (!selected) return;
-    const committed = value
-      .split(",")
-      .slice(0, -1)
-      .map((item) => item.trim())
-      .filter(Boolean);
-    if (committed.some((item) => item.toLowerCase() === selected.value.toLowerCase())) return;
-    onChange([...committed, selected.value].join(", "));
-    setOpen(false);
-  };
-  return (
-    <label className="block text-sm font-medium">
-      {label}
-      <Combobox
-        items={items}
-        filteredItems={filteredItems}
-        filter={null}
-        value={null}
-        open={open}
-        onOpenChange={setOpen}
-        onValueChange={selectCandidate}
-      >
-        {label === "Labels" && selectedValues.length > 0 ? (
-          <span className="mt-1 flex flex-wrap gap-1">
-            {selectedValues.map((name) => (
-              <IssueLabelPill
-                key={name}
-                name={name}
-                color={candidates.find((candidate) => candidate.value === name)?.color}
-              />
-            ))}
-          </span>
-        ) : null}
-        <ComboboxInput
-          className="mt-1"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onFocus={() => setOpen(true)}
-          placeholder={placeholder}
-          aria-label={label}
-          disabled={disabled}
-          showTrigger
-        />
-        <ComboboxPopup align="start" className="w-72">
-          <ComboboxList className="max-h-48">
-            {isPending ? (
-              <div className="flex items-center gap-2 p-2 text-xs text-muted-foreground">
-                <Spinner aria-label={`Loading ${label.toLowerCase()}`} /> Loading suggestions…
+            </DialogTitle>
+            <DialogDescription>
+              Create an issue in {selection?.repository ?? "the selected repository"}.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            {templatesQuery.isPending ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Spinner aria-label="Loading issue templates" /> Checking available templates…
               </div>
-            ) : error !== null ? (
-              <p className="p-2 text-xs text-muted-foreground">
-                Suggestions unavailable. Enter {label.toLowerCase()} manually.
-              </p>
-            ) : filteredCandidates.length === 0 ? (
-              <ComboboxEmpty>
-                {query ? `No matching ${label.toLowerCase()}.` : `No ${label.toLowerCase()} found.`}
-              </ComboboxEmpty>
-            ) : (
-              filteredCandidates.map((candidate, index) => (
-                <ComboboxItem
-                  key={candidate.value}
-                  index={index}
-                  value={candidate.value}
-                  disabled={isPending}
+            ) : null}
+            {templatesQuery.error ? (
+              <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/25 bg-destructive/6 p-3 text-sm">
+                <span className="text-destructive">
+                  Templates could not be loaded. You can still create a blank issue.
+                </span>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={templatesQuery.refresh}
+                  disabled={templatesQuery.isPending}
                 >
-                  <span className="flex items-center justify-between gap-2">
-                    {label === "Labels" ? (
-                      <IssueLabelPill name={candidate.label} color={candidate.color} />
+                  Retry
+                </Button>
+              </div>
+            ) : null}
+            <div className="space-y-1">
+              <label className="text-sm font-medium" id="issue-template-label">
+                Template
+              </label>
+              <Select
+                value={templateId || BLANK_ISSUE_TEMPLATE}
+                onValueChange={(value) =>
+                  applyTemplate(value === BLANK_ISSUE_TEMPLATE || value === null ? "" : value)
+                }
+              >
+                <SelectTrigger
+                  aria-labelledby="issue-template-label"
+                  disabled={templatesQuery.isPending || isSubmitting}
+                >
+                  <SelectValue>
+                    {selectedTemplate
+                      ? `${selectedTemplate.name}${isForm ? " · structured form" : ""}`
+                      : "Blank issue"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup alignItemWithTrigger={false}>
+                  <SelectItem value={BLANK_ISSUE_TEMPLATE}>Blank issue</SelectItem>
+                  {templatesQuery.data?.templates.map((template) => (
+                    <SelectItem key={template.id} value={template.id}>
+                      {template.name}
+                      {template.kind === "issue-form" ? " · structured form" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </div>
+            {isForm ? (
+              <div className="rounded-lg border border-warning/30 bg-warning-surface/35 p-3 text-sm">
+                <p className="font-medium">This template is a structured GitHub form.</p>
+                <p className="mt-1 text-muted-foreground">
+                  T3 Code keeps the form fields on GitHub so validation and dropdowns work
+                  correctly.
+                </p>
+                <div className="mt-3">
+                  <Button size="sm" variant="outline" onClick={openExternalForm}>
+                    Open form on GitHub <ExternalLinkIcon />
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+            <label className="block space-y-1 text-sm font-medium">
+              <span>Title</span>
+              <Input
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="What needs attention?"
+                autoFocus
+                disabled={fieldsDisabled}
+              />
+            </label>
+            {environmentId ? (
+              <div className="space-y-2">
+                <span className="block text-sm font-medium">Description</span>
+                <MarkdownWritePreview
+                  value={body}
+                  onChange={setBody}
+                  cwd={project?.workspaceRoot ?? ""}
+                  environmentId={environmentId}
+                  placeholder="Describe the problem or idea"
+                  label="Issue description"
+                  disabled={fieldsDisabled}
+                  rows={10}
+                  autoFocus={false}
+                />
+              </div>
+            ) : null}
+            {selection && environmentId ? (
+              <div className="space-y-1">
+                <MetaRow icon={<UsersIcon className="size-3.5" />} label="Assignees">
+                  <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                    {assignees.length === 0 ? (
+                      <span className="text-muted-foreground">None</span>
                     ) : (
-                      <span className="truncate">{candidate.label}</span>
+                      assignees.map((login) => (
+                        <PullRequestActorLabel
+                          key={login}
+                          actor={
+                            assigneeActors.get(login.toLowerCase()) ?? {
+                              login,
+                              name: null,
+                              avatarUrl: null,
+                            }
+                          }
+                        />
+                      ))
                     )}
-                    {candidate.detail ? (
-                      <span className="truncate text-xs text-muted-foreground">
-                        {candidate.detail}
-                      </span>
-                    ) : null}
+                    <IssueAssigneePicker
+                      environmentId={environmentId}
+                      selection={selection}
+                      selected={assignees}
+                      allowed={!fieldsDisabled}
+                      onToggle={(login, applied) =>
+                        setAssignees((current) => toggleIssueName(current, login, applied))
+                      }
+                    />
                   </span>
-                </ComboboxItem>
-              ))
-            )}
-          </ComboboxList>
-        </ComboboxPopup>
-      </Combobox>
-    </label>
+                </MetaRow>
+                <MetaRow icon={<TagIcon className="size-3.5" />} label="Labels">
+                  <span className="flex min-w-0 flex-wrap items-center gap-1">
+                    {labels.length === 0 ? (
+                      <span className="text-muted-foreground">None</span>
+                    ) : (
+                      labels.map((name) => (
+                        <PullRequestLabelChip
+                          key={name}
+                          label={{ name, color: labelColors.get(name.toLowerCase()) ?? null }}
+                          size="default"
+                          className="max-w-48"
+                        />
+                      ))
+                    )}
+                    <IssueLabelPicker
+                      environmentId={environmentId}
+                      selection={selection}
+                      selected={labels}
+                      allowed={!fieldsDisabled}
+                      onToggle={(name, applied) =>
+                        setLabels((current) => toggleIssueName(current, name, applied))
+                      }
+                    />
+                  </span>
+                </MetaRow>
+              </div>
+            ) : null}
+            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          </DialogPanel>
+          <DialogFooter>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void submit("start")}
+              disabled={!canSubmit}
+            >
+              {submitting === "start" ? <Spinner aria-label="Creating issue" /> : <GitBranchIcon />}
+              Create & start work
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void submit("create")}
+              disabled={!canSubmit}
+            >
+              {submitting === "create" ? <Spinner aria-label="Creating issue" /> : null}
+              {submitting === "create" ? "Creating issue…" : "Create issue"}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+      {/* Outside the create dialog, which the caller closes once the issue exists. */}
+      {startWork ? (
+        <IssueWorktreeDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setStartWork(null);
+          }}
+          environmentId={startWork.environmentId}
+          reference={startWork.reference}
+          issueTitle={startWork.title}
+          linkedWork={null}
+          canLink={startWork.canLink}
+          onActed={() => refreshEnvironmentShell(startWork.environmentId)}
+        />
+      ) : null}
+    </>
   );
 }
