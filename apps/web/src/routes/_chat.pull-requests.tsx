@@ -1,4 +1,3 @@
-import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { Spinner } from "~/components/ui/spinner";
 import { pullRequestHostOf, resolveEnvironmentMachineKind } from "@t3tools/contracts";
 import type {
@@ -19,7 +18,6 @@ import {
   ArrowDownUpIcon,
   CalendarArrowDownIcon,
   CalendarArrowUpIcon,
-  ChevronDownIcon,
   ClockIcon,
   EyeIcon,
   LayersIcon,
@@ -29,20 +27,10 @@ import {
   Plug2Icon,
   Maximize2Icon,
   Minimize2Icon,
-  SearchIcon,
   UserLockIcon,
   type LucideIcon,
 } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useEffectEvent,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-  type RefObject,
-} from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import {
   filterPullRequestsByInvolvement,
@@ -97,7 +85,6 @@ import { environmentMachineIcon } from "../components/EnvironmentMachineIcon";
 import { PullRequestDetailPanel } from "../components/pullRequest/PullRequestDetailPanel";
 import {
   PullRequestFiltersMenu,
-  PullRequestFilterOptionIcon,
   PullRequestSearchInput,
   pullRequestHostLabel,
   pullRequestProjectKey,
@@ -112,22 +99,14 @@ import {
 } from "../components/pullRequest/PullRequestRow";
 import { PullRequestsUnavailableState } from "../components/pullRequest/PullRequestsUnavailableState";
 import { RightPanelTabs, type PullRequestTabStatusSeed } from "../components/RightPanelTabs";
-import {
-  WorkspaceBreadcrumb,
-  WorkspaceBreadcrumbItem,
-  WorkspaceBreadcrumbSeparator,
-} from "../components/WorkspaceBreadcrumb";
-import { WorkspacePageContainer } from "../components/WorkspacePageContainer";
-import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
+import { CompactFilterMenu, WorkItemListColumn } from "../components/workItem/WorkItemListColumn";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { isElectron } from "../env";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls";
 import { Button } from "../components/ui/button";
-import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../components/ui/menu";
 import { SidebarInset } from "../components/ui/sidebar";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
@@ -1938,20 +1917,59 @@ function PullRequestsRouteView() {
       }
     />
   );
+  const condensedFilters = (
+    <>
+      <CompactFilterMenu
+        label="Filter by state"
+        value={search.state}
+        options={STATE_TABS}
+        onChange={(state) => updateListScope({ state })}
+        className="shrink-0"
+      />
+      <CompactFilterMenu
+        label="Filter by involvement"
+        value={search.involvement}
+        options={INVOLVEMENT_TABS}
+        onChange={(involvement) => updateListScope({ involvement })}
+      />
+      {hostMenuOptions.length > 2 ? (
+        <CompactFilterMenu
+          label="Filter by host"
+          value={search.host ?? ""}
+          options={hostMenuOptions}
+          onChange={(next) => updateListScope({ host: next === "" ? undefined : next })}
+        />
+      ) : null}
+    </>
+  );
+  const toolbar = (
+    <>
+      {sortMenu}
+      {filtersMenu}
+      <CompactFilterMenu
+        label="Filter by provider"
+        outlined
+        iconOnly={search.host !== undefined}
+        triggerIcon={<Plug2Icon aria-hidden className="size-4" />}
+        triggerLabel="All"
+        value={search.host ?? ""}
+        options={hostMenuOptions}
+        onChange={(next) => updateListScope({ host: next === "" ? undefined : next })}
+      />
+    </>
+  );
   const columnProps = {
+    title: "Pull Requests",
+    scopeAriaLabel: "Pull request scope",
+    breadcrumbAriaLabel: "Pull requests breadcrumb",
+    searchAriaLabel: "Search pull requests",
+    refreshAriaLabel: "Refresh pull requests",
     refreshing,
     onRefresh: () => void refreshFromHost(),
     searchValue: search.q ?? "",
-    involvement: search.involvement,
-    state: search.state,
-    host: search.host,
-    hostMenuOptions,
-    onInvolvement: (involvement: PullRequestInvolvement) => updateListScope({ involvement }),
-    onState: (state: PullRequestListState) => updateListScope({ state }),
-    onHost: (host: string | undefined) => updateListScope({ host }),
     searchInput,
-    sortMenu,
-    filtersMenu,
+    condensedFilters,
+    toolbar,
     rightPanelControl:
       // Footprint reserve while the panel is closed: the toggle itself stays
       // mounted at the fixed titlebar inset in both states so it cannot move
@@ -2079,7 +2097,7 @@ function PullRequestsRouteView() {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       <div className="relative flex min-h-0 flex-1">
         {pullRequestsSupported && rightPanelPresent ? openPanelControls : null}
-        <PullRequestsColumn {...columnProps} />
+        <WorkItemListColumn {...columnProps} />
 
         {rightPanelPresent && renderedPullRequestSurface && panelEnvironmentId !== null ? (
           <RightPanelTabs
@@ -2208,393 +2226,5 @@ function PullRequestsRouteView() {
         ) : null}
       </div>
     </SidebarInset>
-  );
-}
-
-/** A compact stand-in for one pill group when the header is narrow. */
-function CompactFilterMenu<Value extends string>({
-  label,
-  triggerIcon,
-  triggerLabel,
-  outlined = false,
-  iconOnly = false,
-  value,
-  options,
-  onChange,
-  className,
-}: {
-  label: string;
-  triggerIcon?: ReactNode;
-  triggerLabel?: string;
-  outlined?: boolean;
-  iconOnly?: boolean;
-  value: Value;
-  options: ReadonlyArray<PullRequestFilterOption<Value>>;
-  onChange: (value: Value) => void;
-  className?: string;
-}) {
-  const current = options.find((option) => option.value === value) ?? options[0];
-  if (!current) return null;
-  return (
-    <Menu>
-      <MenuTrigger
-        aria-label={triggerLabel || iconOnly ? `${label}: ${current.label}` : label}
-        title={iconOnly ? `${label}: ${current.label}` : undefined}
-        render={
-          outlined ? (
-            <Button variant="outline" size={iconOnly ? "icon" : "default"} />
-          ) : (
-            <Button variant="ghost-muted" size="sm" />
-          )
-        }
-        className={cn("min-w-0", className)}
-      >
-        {iconOnly ? (
-          <current.Icon aria-hidden className="size-4" />
-        ) : triggerLabel ? (
-          <>
-            {triggerIcon}
-            <span>{triggerLabel}</span>
-          </>
-        ) : (
-          <>
-            <span className="truncate">{current.label}</span>
-            <ChevronDownIcon aria-hidden className="size-3 shrink-0 text-muted-foreground/70" />
-          </>
-        )}
-      </MenuTrigger>
-      <MenuPopup align="start" side="bottom">
-        <MenuRadioGroup value={value} onValueChange={(next) => onChange(next as Value)}>
-          {options.map((option) => {
-            const item = (
-              <MenuRadioItem
-                key={option.value}
-                value={option.value}
-                disabled={option.unavailable !== undefined}
-                className="data-disabled:pointer-events-auto"
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <PullRequestFilterOptionIcon option={option} />
-                  {option.label}
-                </span>
-              </MenuRadioItem>
-            );
-            return option.unavailable === undefined ? (
-              item
-            ) : (
-              <Tooltip key={option.value}>
-                <TooltipTrigger render={item} />
-                <TooltipPopup side="right">{option.unavailable}</TooltipPopup>
-              </Tooltip>
-            );
-          })}
-        </MenuRadioGroup>
-      </MenuPopup>
-    </Menu>
-  );
-}
-
-/**
- * The search, folded to an icon until asked for. Opening moves focus into the input — the
- * whole point of pressing it is to type. It stays open while it holds a query, so an active
- * search is never invisible; empty and blurred, it folds back.
- */
-function ExpandableSearch({
-  searchInput,
-  searchValue,
-  open,
-  onOpenChange,
-  focusToken,
-  onFocusWithin,
-}: {
-  searchInput: ReactNode;
-  searchValue: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  /** Bumped to pull focus into the input while it is already showing — the Mod+F path. */
-  focusToken: number;
-  /**
-   * Focus entering and leaving the expanded input. An unmount fires no blur, which is the
-   * point: whoever unmounted this can still see the reader was mid-typing and move the
-   * focus somewhere that continues the sentence.
-   */
-  onFocusWithin?: (focused: boolean) => void;
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    containerRef.current?.querySelector("input")?.focus();
-  }, [open]);
-  const appliedFocusToken = useRef(focusToken);
-  useEffect(() => {
-    if (appliedFocusToken.current === focusToken) return;
-    appliedFocusToken.current = focusToken;
-    const input = containerRef.current?.querySelector("input");
-    input?.focus();
-    input?.select();
-  }, [focusToken]);
-  if (open || searchValue.length > 0) {
-    return (
-      <div
-        ref={containerRef}
-        className="w-56 min-w-24 shrink"
-        onFocus={() => onFocusWithin?.(true)}
-        onBlur={() => {
-          onFocusWithin?.(false);
-          if (searchValue.length === 0) onOpenChange(false);
-        }}
-      >
-        {searchInput}
-      </div>
-    );
-  }
-  return (
-    <Button
-      size="icon-sm"
-      variant="ghost"
-      aria-label="Search pull requests"
-      onClick={() => onOpenChange(true)}
-    >
-      <SearchIcon className="size-4" />
-    </Button>
-  );
-}
-
-/**
- * The pull request list column. The full controls live at the top of the scroll flow; once
- * they scroll away, the title transforms into the scope itself — "Pull Requests / Open ▾
- * Authored ▾" — where each segment is the menu for that filter, and a folded search sits on
- * the right. Scrolled back up, the topbar returns to the plain title. The topbar is the
- * window drag region throughout; its interactive children opt out through the `.drag-region`
- * descendant rules.
- */
-function PullRequestsColumn({
-  refreshing,
-  onRefresh,
-  searchValue,
-  involvement,
-  state,
-  host,
-  hostMenuOptions,
-  onInvolvement,
-  onState,
-  onHost,
-  searchInput,
-  sortMenu,
-  filtersMenu,
-  rightPanelControl,
-  titlebarControls,
-  rightPanelOpen,
-  listBody,
-  scrollRef,
-}: {
-  refreshing: boolean;
-  onRefresh: () => void;
-  searchValue: string;
-  involvement: PullRequestInvolvement;
-  state: PullRequestListState;
-  host: string | undefined;
-  hostMenuOptions: ReadonlyArray<PullRequestFilterOption<string>>;
-  onInvolvement: (involvement: PullRequestInvolvement) => void;
-  onState: (state: PullRequestListState) => void;
-  onHost: (host: string | undefined) => void;
-  searchInput: ReactNode;
-  sortMenu: ReactNode;
-  filtersMenu: ReactNode;
-  rightPanelControl: ReactNode;
-  titlebarControls: ReactNode;
-  rightPanelOpen: boolean;
-  listBody: ReactNode;
-  scrollRef: RefObject<HTMLDivElement | null>;
-}) {
-  const markerRef = useRef<HTMLDivElement | null>(null);
-  const [condensed, setCondensed] = useState(false);
-  useEffect(() => {
-    const marker = markerRef.current;
-    if (!marker) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => setCondensed(entry ? !entry.isIntersecting : false),
-      { root: scrollRef.current },
-    );
-    observer.observe(marker);
-    return () => observer.disconnect();
-  }, []);
-  // Typing into the topbar search narrows the list, and a short enough list un-scrolls the
-  // page — which dissolves the condensed topbar and unmounts the very input being typed in.
-  // The two inputs are one search to the reader, so the focus follows the value into the
-  // in-flow bar, caret at the end, and the sentence continues.
-  const topbarSearchFocusedRef = useRef(false);
-  const inFlowSearchRef = useRef<HTMLDivElement | null>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchFocusToken, setSearchFocusToken] = useState(0);
-  const searchExpanded = searchOpen || searchValue.length > 0;
-  // Mod+F belongs to this page's own search: the desktop shell binds no find-in-page, so the
-  // shortcut would otherwise do nothing. Condensed, it unfolds the topbar search; at the top,
-  // it focuses the in-flow bar and selects the query the way a find field would.
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      if (event.key.toLowerCase() !== "f" || !(event.metaKey || event.ctrlKey)) return;
-      if (event.altKey || event.shiftKey) return;
-      event.preventDefault();
-      if (condensed) {
-        setSearchOpen(true);
-        setSearchFocusToken((token) => token + 1);
-        return;
-      }
-      const input = inFlowSearchRef.current?.querySelector("input");
-      input?.focus();
-      input?.select();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [condensed]);
-  useEffect(() => {
-    if (condensed) return;
-    // The fold-out is gone from the chrome; forgetting it open keeps the next condensing
-    // from starting with an empty expanded search nobody asked for.
-    setSearchOpen(false);
-    if (!topbarSearchFocusedRef.current) return;
-    topbarSearchFocusedRef.current = false;
-    const input = inFlowSearchRef.current?.querySelector("input");
-    if (!input) return;
-    input.focus();
-    input.setSelectionRange(input.value.length, input.value.length);
-  }, [condensed]);
-
-  return (
-    // Painted flat like the chat column: the inset underneath carries the chrome grain, and a
-    // content surface that lets it show reads as a different background than every thread.
-    <div className="@container/pr-list flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-      {/* A closed right panel leaves this column full-width, so the shared header
-          reserves native window controls and hosts the controls strip itself: on
-          desktop the header is a drag-region, and only a no-drag descendant wins
-          clicks from it - a floating sibling loses to app-region hit-testing no
-          matter its z-index. While the panel is open, the strip mounts back at
-          the route level, whose box spans the panel too, so the toggle keeps one
-          fixed top-right anchor. */}
-      <WorkspacePageHeader
-        electron={isElectron}
-        reserveNativeControls={!rightPanelOpen}
-        className="relative bg-background"
-      >
-        {titlebarControls}
-        {condensed ? (
-          <WorkspaceBreadcrumb ariaLabel="Pull request scope" className="overflow-hidden">
-            {/* An expanded search owns the scarce horizontal space. The page title stays
-                available to readers while the live filters remain available in both states. */}
-            <WorkspaceBreadcrumbItem current className={cn(searchExpanded && "sr-only")}>
-              <h1 className="truncate">Pull Requests</h1>
-            </WorkspaceBreadcrumbItem>
-            {searchExpanded ? null : <WorkspaceBreadcrumbSeparator />}
-            <WorkspaceBreadcrumbItem className="shrink gap-1.5">
-              <CompactFilterMenu
-                label="Filter by state"
-                value={state}
-                options={STATE_TABS}
-                onChange={onState}
-                className="shrink-0"
-              />
-              <CompactFilterMenu
-                label="Filter by involvement"
-                value={involvement}
-                options={INVOLVEMENT_TABS}
-                onChange={onInvolvement}
-              />
-              {hostMenuOptions.length > 2 ? (
-                <CompactFilterMenu
-                  label="Filter by host"
-                  value={host ?? ""}
-                  options={hostMenuOptions}
-                  onChange={(next) => onHost(next === "" ? undefined : next)}
-                />
-              ) : null}
-            </WorkspaceBreadcrumbItem>
-          </WorkspaceBreadcrumb>
-        ) : (
-          <WorkspaceBreadcrumb ariaLabel="Pull requests breadcrumb">
-            <WorkspaceBreadcrumbItem current>
-              <h1 className="truncate">Pull Requests</h1>
-            </WorkspaceBreadcrumbItem>
-          </WorkspaceBreadcrumb>
-        )}
-        <div className="min-w-0 flex-1" />
-        {condensed ? (
-          <div className="flex shrink items-center gap-1.5">
-            <ExpandableSearch
-              searchInput={searchInput}
-              searchValue={searchValue}
-              open={searchOpen}
-              onOpenChange={setSearchOpen}
-              focusToken={searchFocusToken}
-              onFocusWithin={(focused) => {
-                topbarSearchFocusedRef.current = focused;
-              }}
-            />
-            <PullRequestRefreshControl compact refreshing={refreshing} onRefresh={onRefresh} />
-          </div>
-        ) : null}
-        {rightPanelControl}
-      </WorkspacePageHeader>
-
-      <div
-        ref={scrollRef}
-        className="topbar-scroll-fade scrollbar-gutter-both min-h-0 flex-1 overflow-y-auto"
-      >
-        {/* The top padding is the shared fade band's height, the same pairing the
-            settings page makes: at rest the controls sit fully below the mask, and only
-            content actually passing under the chrome fades. */}
-        <WorkspacePageContainer width="expanded" className="min-h-full gap-4">
-          <div className="flex flex-col gap-3">
-            <div ref={inFlowSearchRef} className="flex flex-wrap items-center gap-2">
-              <div className="min-w-0 basis-full @lg/pr-list:basis-0 @lg/pr-list:flex-1">
-                {searchInput}
-              </div>
-              {sortMenu}
-              {filtersMenu}
-              <CompactFilterMenu
-                label="Filter by provider"
-                outlined
-                iconOnly={host !== undefined}
-                triggerIcon={<Plug2Icon aria-hidden className="size-4" />}
-                triggerLabel="All"
-                value={host ?? ""}
-                options={hostMenuOptions}
-                onChange={(next) => onHost(next === "" ? undefined : next)}
-              />
-              {!condensed ? (
-                <PullRequestRefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-              ) : null}
-            </div>
-            {/* Scrolled past this marker, the controls are gone and the title takes over. */}
-            <div ref={markerRef} aria-hidden className="-mt-3 h-px w-full" />
-          </div>
-
-          {listBody}
-        </WorkspacePageContainer>
-      </div>
-    </div>
-  );
-}
-
-function PullRequestRefreshControl({
-  compact = false,
-  refreshing,
-  onRefresh,
-}: {
-  compact?: boolean;
-  refreshing: boolean;
-  onRefresh: () => void;
-}) {
-  return (
-    <Button
-      size={compact ? "icon-sm" : "icon"}
-      variant={compact ? "ghost" : "outline"}
-      aria-label="Refresh pull requests"
-      onClick={onRefresh}
-      disabled={refreshing}
-    >
-      <RefreshIcon size="md" refreshing={refreshing} />
-    </Button>
   );
 }
