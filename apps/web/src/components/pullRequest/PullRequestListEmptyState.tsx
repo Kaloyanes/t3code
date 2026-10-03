@@ -77,6 +77,7 @@ export function PullRequestListEmptyState({
   onClearQuery,
   onLoadMore,
   onRefresh,
+  noun = "pull requests",
 }: {
   /** The text being searched for, so the reader is told what was searched rather than guessing. */
   query: string;
@@ -96,7 +97,10 @@ export function PullRequestListEmptyState({
   onClearQuery: () => void;
   onLoadMore: () => void;
   onRefresh: () => void;
+  /** What the list holds, plural and lowercase; the issue page shares this state. */
+  noun?: "pull requests" | "issues";
 }) {
+  const nounTitle = noun === "issues" ? "Issues" : "Pull requests";
   // Ahead of the search and the filters, because neither can produce a row until a project does.
   if (!hasProjects) {
     return (
@@ -105,7 +109,7 @@ export function PullRequestListEmptyState({
         <EmptyHeader>
           <EmptyTitle>No projects in this workspace</EmptyTitle>
           <EmptyDescription>
-            Add a project, and the pull requests from its repository appear here.
+            Add a project, and the {noun} from its repository appear here.
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
@@ -139,7 +143,8 @@ export function PullRequestListEmptyState({
             Nothing matches “{query.length > 48 ? `${query.slice(0, 48)}…` : query}”
           </EmptyTitle>
           <EmptyDescription>
-            The hosts were searched for it. Try fewer words, or search by number, author or branch.
+            The hosts were searched for it. Try fewer words, or search by number, author or{" "}
+            {noun === "issues" ? "label" : "branch"}.
           </EmptyDescription>
         </EmptyHeader>
         <div className="flex flex-wrap justify-center gap-2">
@@ -147,7 +152,7 @@ export function PullRequestListEmptyState({
             <SearchIcon className="size-3.5" />
             Clear search
           </Button>
-          {/* The hosts answered this query once; a pull request opened since then would answer
+          {/* The hosts answered this query once; an item opened since then would answer
               differently, and nothing on screen says which of the two the reader is looking at. */}
           <Button size="sm" variant="outline" disabled={refreshing} onClick={onRefresh}>
             <RefreshIcon size="sm" refreshing={refreshing} />
@@ -162,17 +167,17 @@ export function PullRequestListEmptyState({
     <Empty>
       <BranchMark joined={false} />
       <EmptyHeader>
-        <EmptyTitle>{filtered ? "Nothing under these filters" : "No pull requests"}</EmptyTitle>
+        <EmptyTitle>{filtered ? "Nothing under these filters" : `No ${noun}`}</EmptyTitle>
         <EmptyDescription>
           {filtered
             ? "Widen the state, involvement or project filter to see more."
-            : "Pull requests from every project in this workspace appear here."}
+            : `${nounTitle} from every project in this workspace appear here.`}
         </EmptyDescription>
       </EmptyHeader>
       <div className="flex flex-wrap justify-center gap-2">
         {canLoadMore ? (
           <Button size="sm" variant="outline" disabled={loadingMore} onClick={onLoadMore}>
-            {loadingMore ? "Loading..." : "Load more pull requests"}
+            {loadingMore ? "Loading..." : `Load more ${noun}`}
           </Button>
         ) : null}
         <Button size="sm" variant="outline" disabled={refreshing} onClick={onRefresh}>

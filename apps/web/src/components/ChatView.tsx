@@ -10534,6 +10534,7 @@ export default function ChatView(props: ChatViewProps) {
     ) : renderedRightPanelSurface?.kind === "issue" ? (
       <IssueDetailPanel
         key={`${renderedRightPanelSurface.host ?? ""}:${renderedRightPanelSurface.repository}#${renderedRightPanelSurface.number}`}
+        threadRef={activeThreadRef}
         environmentId={
           (renderedRightPanelSurface.environmentId as EnvironmentId | undefined) ??
           activeThread.environmentId

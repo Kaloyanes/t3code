@@ -25,6 +25,19 @@ export type IssueProvider = typeof IssueProvider.Type;
 export const IssueState = Schema.Literals(["open", "closed"]);
 export type IssueState = typeof IssueState.Type;
 
+export const IssueStateReason = Schema.NullOr(
+  Schema.Literals(["completed", "not-planned", "duplicate"]),
+);
+export type IssueStateReason = typeof IssueStateReason.Type;
+
+export const IssueListSort = Schema.Literals([
+  "updated",
+  "created-desc",
+  "created-asc",
+  "comments",
+]);
+export type IssueListSort = typeof IssueListSort.Type;
+
 export const IssueListState = Schema.Literals(["all", "open", "closed"]);
 export type IssueListState = typeof IssueListState.Type;
 
@@ -123,6 +136,11 @@ export const IssueListEntry = Schema.Struct({
   url: TrimmedNonEmptyString,
   author: Schema.NullOr(IssueActor),
   state: IssueState,
+  // Optional so newer clients can still list issues from servers that predate these fields.
+  stateReason: Schema.optional(IssueStateReason),
+  assignees: Schema.optional(Schema.Array(IssueActor)),
+  milestone: Schema.optional(Schema.NullOr(IssueMilestone)),
+  linkedWork: Schema.optional(Schema.NullOr(Schema.suspend(() => IssueLinkedWorkSummary))),
   labels: Schema.Array(IssueLabel),
   commentsCount: NonNegativeInt,
   createdAt: IsoDateTime,
@@ -150,6 +168,7 @@ export type IssueListRepositoryError = typeof IssueListRepositoryError.Type;
 
 export const IssueListInput = Schema.Struct({
   state: IssueListState,
+  sort: Schema.optional(IssueListSort),
   involvement: Schema.optional(IssueInvolvement),
   filters: Schema.optional(IssueListFilters),
   repository: Schema.optional(IssueRepositorySelection),
@@ -184,6 +203,29 @@ export const IssueViewerPermissions = Schema.Struct({
 });
 export type IssueViewerPermissions = typeof IssueViewerPermissions.Type;
 
+export const IssueRelatedIssue = Schema.Struct({
+  number: PositiveInt,
+  title: IssueTitle,
+  url: TrimmedNonEmptyString,
+  state: IssueState,
+  repository: IssueRepositoryName,
+});
+export type IssueRelatedIssue = typeof IssueRelatedIssue.Type;
+
+export const IssueLinkedPullRequest = Schema.Struct({
+  ...IssueRelatedIssue.fields,
+  state: Schema.Literals(["open", "closed", "merged"]),
+  isDraft: Schema.optional(Schema.Boolean),
+});
+export type IssueLinkedPullRequest = typeof IssueLinkedPullRequest.Type;
+
+export const IssueSubIssuesSummary = Schema.Struct({
+  total: NonNegativeInt,
+  completed: NonNegativeInt,
+  percentCompleted: Schema.Number,
+});
+export type IssueSubIssuesSummary = typeof IssueSubIssuesSummary.Type;
+
 export const IssueDetail = Schema.Struct({
   provider: IssueProvider,
   host: TrimmedNonEmptyString,
@@ -197,7 +239,7 @@ export const IssueDetail = Schema.Struct({
   url: TrimmedNonEmptyString,
   author: Schema.NullOr(IssueActor),
   state: IssueState,
-  stateReason: Schema.NullOr(Schema.Literals(["completed", "not-planned", "duplicate"])),
+  stateReason: IssueStateReason,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   closedAt: Schema.NullOr(IsoDateTime),
@@ -205,6 +247,10 @@ export const IssueDetail = Schema.Struct({
   assignees: Schema.Array(IssueAssignee),
   milestone: Schema.NullOr(IssueMilestone),
   commentsCount: NonNegativeInt,
+  linkedPullRequests: Schema.optional(Schema.Array(IssueLinkedPullRequest)),
+  parent: Schema.optional(Schema.NullOr(IssueRelatedIssue)),
+  subIssues: Schema.optional(Schema.Array(IssueRelatedIssue)),
+  subIssuesSummary: Schema.optional(IssueSubIssuesSummary),
   reactions: Schema.optional(Schema.Array(Schema.suspend(() => IssueReaction))),
   viewer: Schema.optional(TrimmedNonEmptyString),
   viewerPermissions: Schema.optional(IssueViewerPermissions),
@@ -257,6 +303,47 @@ export const IssueCommentsResult = Schema.Struct({
   truncated: Schema.Boolean,
 });
 export type IssueCommentsResult = typeof IssueCommentsResult.Type;
+
+export const IssueTimelineSource = Schema.Struct({
+  ...IssueRelatedIssue.fields,
+  kind: Schema.Literals(["issue", "pull-request"]),
+  state: Schema.Literals(["open", "closed", "merged"]),
+});
+export type IssueTimelineSource = typeof IssueTimelineSource.Type;
+
+const IssueTimelineBase = {
+  id: TrimmedNonEmptyString,
+  actor: Schema.NullOr(IssueActor),
+  createdAt: IsoDateTime,
+};
+
+export const IssueTimelineEvent = Schema.Union([
+  Schema.TaggedStruct("labeled", { ...IssueTimelineBase, label: IssueLabel }),
+  Schema.TaggedStruct("unlabeled", { ...IssueTimelineBase, label: IssueLabel }),
+  Schema.TaggedStruct("assigned", { ...IssueTimelineBase, assignee: Schema.NullOr(IssueActor) }),
+  Schema.TaggedStruct("unassigned", { ...IssueTimelineBase, assignee: Schema.NullOr(IssueActor) }),
+  Schema.TaggedStruct("closed", { ...IssueTimelineBase, stateReason: IssueStateReason }),
+  Schema.TaggedStruct("reopened", IssueTimelineBase),
+  Schema.TaggedStruct("renamed", { ...IssueTimelineBase, from: Schema.String, to: Schema.String }),
+  Schema.TaggedStruct("referenced", { ...IssueTimelineBase, source: IssueTimelineSource }),
+  Schema.TaggedStruct("cross-referenced", { ...IssueTimelineBase, source: IssueTimelineSource }),
+  Schema.TaggedStruct("milestoned", { ...IssueTimelineBase, title: Schema.String }),
+  Schema.TaggedStruct("demilestoned", { ...IssueTimelineBase, title: Schema.String }),
+  Schema.TaggedStruct("connected", { ...IssueTimelineBase, pullRequest: IssueLinkedPullRequest }),
+  Schema.TaggedStruct("comment", { ...IssueTimelineBase, comment: IssueComment }),
+]);
+export type IssueTimelineEvent = typeof IssueTimelineEvent.Type;
+
+export const IssueTimelineInput = IssueCommentsInput;
+export type IssueTimelineInput = typeof IssueTimelineInput.Type;
+
+export const IssueTimelineResult = Schema.Struct({
+  events: Schema.Array(IssueTimelineEvent),
+  nextCursor: Schema.NullOr(IssueCursor),
+  totalCount: NonNegativeInt,
+  truncated: Schema.Boolean,
+});
+export type IssueTimelineResult = typeof IssueTimelineResult.Type;
 
 export const IssueCandidateKind = Schema.Literals(["labels", "assignees"]);
 export type IssueCandidateKind = typeof IssueCandidateKind.Type;
@@ -341,6 +428,13 @@ export const IssueUpdateInput = Schema.Struct({
   labels: Schema.optional(Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(25))),
   assignees: Schema.optional(Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(25))),
   milestone: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  /** Additive edits, applied without replacing what others set since the issue was read. */
+  addLabels: Schema.optional(Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(25))),
+  removeLabels: Schema.optional(Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(25))),
+  addAssignees: Schema.optional(Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(25))),
+  removeAssignees: Schema.optional(
+    Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(25)),
+  ),
 });
 export type IssueUpdateInput = typeof IssueUpdateInput.Type;
 
@@ -413,6 +507,14 @@ export type IssueReactionUpdateInput = typeof IssueReactionUpdateInput.Type;
 export const IssueLinkSource = Schema.Literals(["manual", "created", "agent"]);
 export type IssueLinkSource = typeof IssueLinkSource.Type;
 
+export const IssueLinkedWorkSummary = Schema.Struct({
+  threadId: ThreadId,
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  source: IssueLinkSource,
+});
+export type IssueLinkedWorkSummary = typeof IssueLinkedWorkSummary.Type;
+
 /** Work associated with an issue, usually a thread and its current checkout. */
 export const IssueLinkedWork = Schema.Struct({
   issue: IssueIdentity,
@@ -422,6 +524,8 @@ export const IssueLinkedWork = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedAt: IsoDateTime,
   source: IssueLinkSource,
+  /** Last state the server observed; absent until the issue is first read. */
+  state: Schema.optional(IssueState),
 });
 export type IssueLinkedWork = typeof IssueLinkedWork.Type;
 

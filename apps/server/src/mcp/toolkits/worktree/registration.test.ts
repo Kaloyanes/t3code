@@ -13,6 +13,7 @@ import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as GitWorkflowService from "../../../git/GitWorkflowService.ts";
+import * as IssueService from "../../../issue/IssueService.ts";
 import * as ProviderAdapterRegistry from "../../../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
@@ -36,6 +37,7 @@ const StubServicesLive = Layer.mergeAll(
   Layer.mock(ProjectService.ProjectService)({}),
   ServerSettings.layerTest({}),
   Layer.mock(GitWorkflowService.GitWorkflowService)({}),
+  Layer.mock(IssueService.IssueService)({}),
   Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({}),
   Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({}),
 );
@@ -51,6 +53,7 @@ const ToolsListPayload = Schema.fromJsonString(
             Schema.Struct({
               readOnlyHint: Schema.optional(Schema.Boolean),
               destructiveHint: Schema.optional(Schema.Boolean),
+              idempotentHint: Schema.optional(Schema.Boolean),
               openWorldHint: Schema.optional(Schema.Boolean),
             }),
           ),
@@ -123,6 +126,45 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       // than replacing them.
       expect(toolNames).toContain("preview_status");
       expect(toolNames).toContain("delegate_task");
+      expect(toolNames).toEqual(
+        expect.arrayContaining([
+          "list_issues",
+          "read_issue",
+          "comment_on_issue",
+          "close_issue",
+          "reopen_issue",
+          "update_issue",
+          "link_issue",
+        ]),
+      );
+      const issueRead = tools.find((tool) => tool.name === "read_issue");
+      expect(issueRead?.annotations).toMatchObject({
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: true,
+      });
+      const issueComment = tools.find((tool) => tool.name === "comment_on_issue");
+      expect(issueComment?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      });
+      for (const name of ["close_issue", "reopen_issue", "update_issue"]) {
+        expect(tools.find((tool) => tool.name === name)?.annotations).toMatchObject({
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true,
+          openWorldHint: true,
+        });
+      }
+      const issueLink = tools.find((tool) => tool.name === "link_issue");
+      expect(issueLink?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      });
 
       // The handoff tool mutates thread state, reaches the network (origin
       // fetch), and runs project setup scripts, so its MCP hints must not

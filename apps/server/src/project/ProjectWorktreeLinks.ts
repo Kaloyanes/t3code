@@ -97,6 +97,7 @@ const IssueLinkRow = Schema.Struct({
   linkedAt: IsoDateTime,
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
+  state: Schema.NullOr(Schema.String),
 });
 
 function toIssueLinkedWork(row: typeof IssueLinkRow.Type): IssueLinkedWork {
@@ -108,6 +109,7 @@ function toIssueLinkedWork(row: typeof IssueLinkRow.Type): IssueLinkedWork {
     worktreePath: row.worktreePath === "" ? null : row.worktreePath,
     linkedAt: row.linkedAt,
     source: row.source === "created" || row.source === "agent" ? row.source : "manual",
+    ...(row.state === "open" || row.state === "closed" ? { state: row.state } : {}),
   };
 }
 
@@ -136,7 +138,8 @@ export const make = Effect.gen(function* () {
         source,
         linked_at AS "linkedAt",
         branch,
-        worktree_path AS "worktreePath"
+        worktree_path AS "worktreePath",
+        state
       FROM projection_issue_links
       WHERE detached_at IS NULL
       ${projectIds === undefined ? sql`` : sql`AND ${sql.in("project_id", projectIds)}`}

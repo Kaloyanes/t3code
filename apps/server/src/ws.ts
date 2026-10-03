@@ -3146,6 +3146,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.issuesComments, issues.comments(input), {
             "rpc.aggregate": "issues",
           }),
+        [WS_METHODS.issuesTimeline]: (input) =>
+          observeRpcEffect(WS_METHODS.issuesTimeline, issues.timeline(input), {
+            "rpc.aggregate": "issues",
+          }),
         [WS_METHODS.issuesCandidates]: (input) =>
           observeRpcEffect(WS_METHODS.issuesCandidates, issues.candidates(input), {
             "rpc.aggregate": "issues",

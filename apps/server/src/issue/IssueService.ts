@@ -31,6 +31,14 @@ import {
   type IssueLinkedWork,
   type IssueListEntry,
   type IssueListInput,
+  type IssueListSort,
+  type IssueLinkedPullRequest,
+  type IssueLinkedWorkSummary,
+  type IssueRelatedIssue,
+  type IssueTimelineEvent,
+  type IssueTimelineInput,
+  type IssueTimelineResult,
+  type IssueTimelineSource,
   type IssueListResult,
   type IssueMilestone,
   type IssueReaction,
@@ -101,40 +109,80 @@ import {
   parseGitHubAuthStatus,
 } from "../sourceControl/gitHubAuthStatus.ts";
 
-const GRAPHQL_ISSUE_FIELDS = `
-  number title body url state stateReason createdAt updatedAt closedAt
+const GRAPHQL_ROW_FIELDS = `
+  number title url state stateReason createdAt updatedAt closedAt
   author { login avatarUrl }
-  labels(first: 100) { nodes { name color description } }
   assignees(first: 100) { nodes { login name avatarUrl } }
-  milestone { number title state description dueOn }
   comments { totalCount }
+`;
+// List rows never show label or milestone descriptions, so only the detail fetches them.
+const GRAPHQL_LIST_FIELDS = `${GRAPHQL_ROW_FIELDS}
+  labels(first: 100) { nodes { name color } }
+  milestone { number title state dueOn }
+`;
+const GRAPHQL_ISSUE_FIELDS = `${GRAPHQL_ROW_FIELDS}
+  labels(first: 100) { nodes { name color description } }
+  milestone { number title state description dueOn }
+  body
   reactions(first: 100) { nodes { content user { login } } }
 `;
 const GRAPHQL_ISSUE_FRAGMENT = `
 fragment IssueFields on Issue { ${GRAPHQL_ISSUE_FIELDS} }
 `;
-const LIST_QUERY = `${GRAPHQL_ISSUE_FRAGMENT}
-query($owner: String!, $name: String!, $first: Int!, $after: String, $states: [IssueState!]) {
+const GRAPHQL_LIST_FRAGMENT = `
+fragment IssueListFields on Issue { ${GRAPHQL_LIST_FIELDS} }
+`;
+const GRAPHQL_RELATED_FIELDS = `number title url state repository { nameWithOwner }`;
+const GRAPHQL_PR_FIELDS = `${GRAPHQL_RELATED_FIELDS} isDraft`;
+const GRAPHQL_SOURCE_FIELDS = `
+  __typename
+  ... on Issue { ${GRAPHQL_RELATED_FIELDS} }
+  ... on PullRequest { ${GRAPHQL_PR_FIELDS} }
+`;
+const LIST_QUERY = `${GRAPHQL_LIST_FRAGMENT}
+query($owner: String!, $name: String!, $first: Int!, $after: String, $states: [IssueState!], $orderBy: IssueOrder!) {
   repository(owner: $owner, name: $name) {
-    issues(first: $first, after: $after, states: $states, orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes { ...IssueFields }
+    issues(first: $first, after: $after, states: $states, orderBy: $orderBy) {
+      nodes { ...IssueListFields }
       pageInfo { hasNextPage endCursor }
     }
   }
 }
 `;
-const SEARCH_QUERY = `${GRAPHQL_ISSUE_FRAGMENT}
+const SEARCH_QUERY = `${GRAPHQL_LIST_FRAGMENT}
 query($query: String!, $first: Int!, $after: String) {
   search(query: $query, type: ISSUE, first: $first, after: $after) {
-    nodes { ... on Issue { ...IssueFields } }
+    nodes { ... on Issue { ...IssueListFields } }
     pageInfo { hasNextPage endCursor }
   }
 }
 `;
-const DETAIL_QUERY = `${GRAPHQL_ISSUE_FRAGMENT}
+const detailQuery = (closingPullRequests: boolean) => `${GRAPHQL_ISSUE_FRAGMENT}
 query($owner: String!, $name: String!, $number: Int!) {
-  repository(owner: $owner, name: $name) { issue(number: $number) { ...IssueFields } }
+  repository(owner: $owner, name: $name) { issue(number: $number) {
+    ...IssueFields
+    ${closingPullRequests ? `closedByPullRequestsReferences(first: 20, includeClosedPrs: true) { nodes { ${GRAPHQL_PR_FIELDS} } }` : ""}
+    timelineItems(itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT], first: 50) {
+      nodes {
+        ... on CrossReferencedEvent { source { ${GRAPHQL_SOURCE_FIELDS} } }
+        ... on ConnectedEvent { source { ${GRAPHQL_SOURCE_FIELDS} } subject { ${GRAPHQL_SOURCE_FIELDS} } }
+      }
+    }
+  } }
   viewer { login }
+}
+`;
+const DETAIL_QUERY = detailQuery(true);
+// Older GitHub Enterprise Server releases lack closedByPullRequestsReferences or its
+// includeClosedPrs argument; the detail then reads only timeline-linked pull requests.
+const DETAIL_QUERY_WITHOUT_CLOSING_PRS = detailQuery(false);
+const SUB_ISSUES_QUERY = `
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) { issue(number: $number) {
+    parent { ${GRAPHQL_RELATED_FIELDS} }
+    subIssues(first: 50) { nodes { ${GRAPHQL_RELATED_FIELDS} } }
+    subIssuesSummary { total completed percentCompleted }
+  } }
 }
 `;
 const COMMENTS_QUERY = `
@@ -153,6 +201,43 @@ query($owner: String!, $name: String!, $number: Int!, $first: Int!, $after: Stri
   }
 }
 `;
+
+const GRAPHQL_EVENT_FIELDS = `id createdAt actor { login avatarUrl }`;
+const TIMELINE_QUERY = `
+query($owner: String!, $name: String!, $number: Int!, $first: Int!, $after: String) {
+  repository(owner: $owner, name: $name) { issue(number: $number) {
+    timelineItems(first: $first, after: $after, itemTypes: [LABELED_EVENT, UNLABELED_EVENT,
+      ASSIGNED_EVENT, UNASSIGNED_EVENT, CLOSED_EVENT, REOPENED_EVENT, RENAMED_TITLE_EVENT,
+      REFERENCED_EVENT, CROSS_REFERENCED_EVENT, MILESTONED_EVENT, DEMILESTONED_EVENT,
+      CONNECTED_EVENT, ISSUE_COMMENT]) {
+      nodes {
+        __typename
+        ... on LabeledEvent { ${GRAPHQL_EVENT_FIELDS} label { name color } }
+        ... on UnlabeledEvent { ${GRAPHQL_EVENT_FIELDS} label { name color } }
+        ... on AssignedEvent { ${GRAPHQL_EVENT_FIELDS} assignee { ... on User { login name avatarUrl } ... on Bot { login avatarUrl } ... on Mannequin { login avatarUrl } } }
+        ... on UnassignedEvent { ${GRAPHQL_EVENT_FIELDS} assignee { ... on User { login name avatarUrl } ... on Bot { login avatarUrl } ... on Mannequin { login avatarUrl } } }
+        ... on ClosedEvent { ${GRAPHQL_EVENT_FIELDS} stateReason }
+        ... on ReopenedEvent { ${GRAPHQL_EVENT_FIELDS} }
+        ... on RenamedTitleEvent { ${GRAPHQL_EVENT_FIELDS} previousTitle currentTitle }
+        ... on ReferencedEvent { ${GRAPHQL_EVENT_FIELDS}
+          commit { associatedPullRequests(first: 20) { nodes { __typename ${GRAPHQL_PR_FIELDS} } } }
+        }
+        ... on CrossReferencedEvent { ${GRAPHQL_EVENT_FIELDS} source { ${GRAPHQL_SOURCE_FIELDS} } }
+        ... on MilestonedEvent { ${GRAPHQL_EVENT_FIELDS} milestoneTitle }
+        ... on DemilestonedEvent { ${GRAPHQL_EVENT_FIELDS} milestoneTitle }
+        ... on ConnectedEvent { ${GRAPHQL_EVENT_FIELDS} source { ${GRAPHQL_SOURCE_FIELDS} } subject { ${GRAPHQL_SOURCE_FIELDS} } }
+        ... on IssueComment {
+          id databaseId body url createdAt updatedAt author { login avatarUrl }
+          reactions(first: 100) { nodes { content user { login } } }
+        }
+      }
+      totalCount pageInfo { hasNextPage endCursor }
+    }
+  } }
+}
+`;
+
+const SEARCH_CURSOR_PREFIX = "search:";
 
 const REACTION_CONTENT: Readonly<Record<IssueReaction["content"], string>> = {
   "thumbs-up": "+1",
@@ -207,10 +292,10 @@ export interface IssueNormalizationContext {
 }
 
 export type NormalizedIssue = IssueListEntry & {
-  readonly body: string;
   readonly stateReason: IssueDetail["stateReason"];
-  readonly assignees: IssueDetail["assignees"];
+  readonly assignees: ReadonlyArray<IssueActor>;
   readonly milestone: IssueMilestone | null;
+  readonly body: string;
   readonly reactions: ReadonlyArray<IssueReaction>;
 };
 
@@ -363,6 +448,19 @@ const reactions = (raw: unknown, viewer?: string): ReadonlyArray<IssueReaction> 
   }));
 };
 
+const stateReasonFrom = (value: unknown): IssueDetail["stateReason"] => {
+  switch (stringValue(value).toUpperCase().replaceAll("-", "_")) {
+    case "COMPLETED":
+      return "completed";
+    case "NOT_PLANNED":
+      return "not-planned";
+    case "DUPLICATE":
+      return "duplicate";
+    default:
+      return null;
+  }
+};
+
 /** Normalize one GitHub GraphQL issue into the stable wire DTO. */
 export function normalizeIssue(
   raw: unknown,
@@ -374,14 +472,7 @@ export function normalizeIssue(
   const titleValue = stringValue(value.title).trim();
   const title = (titleValue.length > 0 ? titleValue : `Issue #${number}`).slice(0, 256);
   const state = value.state === "CLOSED" || value.state === "closed" ? "closed" : "open";
-  const stateReason =
-    value.stateReason === "COMPLETED" || value.stateReason === "completed"
-      ? "completed"
-      : value.stateReason === "NOT_PLANNED" || value.stateReason === "not_planned"
-        ? "not-planned"
-        : value.stateReason === "DUPLICATE" || value.stateReason === "duplicate"
-          ? "duplicate"
-          : null;
+  const stateReason = stateReasonFrom(value.stateReason);
   const urlValue = stringValue(value.url).trim();
   return {
     provider: "github",
@@ -463,6 +554,191 @@ const commentFrom = (raw: unknown): IssueComment | null => {
   };
 };
 
+const relatedIssueFrom = (raw: unknown): IssueRelatedIssue | null => {
+  const value = record(raw);
+  const number = positiveInteger(value.number);
+  const title = stringValue(value.title).trim();
+  const url = stringValue(value.url).trim();
+  const repository = stringValue(record(value.repository).nameWithOwner).trim();
+  if (number === null || !title || !url || !repository) return null;
+  return {
+    number,
+    title: title.slice(0, 256),
+    url,
+    repository,
+    state: value.state === "CLOSED" || value.state === "closed" ? "closed" : "open",
+  };
+};
+
+const pullRequestFrom = (raw: unknown): IssueLinkedPullRequest | null => {
+  const value = record(raw);
+  const related = relatedIssueFrom(raw);
+  if (related === null) return null;
+  return {
+    ...related,
+    state: value.state === "MERGED" || value.state === "merged" ? "merged" : related.state,
+    ...(typeof value.isDraft === "boolean" ? { isDraft: value.isDraft } : {}),
+  };
+};
+
+/** Combine closing and timeline PR references without repeating the same PR. */
+export function normalizeLinkedPullRequests(raw: unknown): ReadonlyArray<IssueLinkedPullRequest> {
+  const value = record(raw);
+  const candidates = [
+    ...arrayValue(record(value.closedByPullRequestsReferences).nodes),
+    ...arrayValue(record(value.timelineItems).nodes).flatMap((event) =>
+      [record(event).source, record(event).subject].filter(
+        (source) => record(source).__typename === "PullRequest",
+      ),
+    ),
+  ];
+  const unique = new Map<string, IssueLinkedPullRequest>();
+  for (const candidate of candidates) {
+    const pr = pullRequestFrom(candidate);
+    if (pr !== null) unique.set(pr.url, pr);
+  }
+  return [...unique.values()];
+}
+
+const timelineSourceFrom = (raw: unknown): IssueTimelineSource | null => {
+  const value = record(raw);
+  const related = pullRequestFrom(raw);
+  if (related === null || (value.__typename !== "Issue" && value.__typename !== "PullRequest"))
+    return null;
+  return { ...related, kind: value.__typename === "PullRequest" ? "pull-request" : "issue" };
+};
+
+/** Normalize a timeline node; commit references can point to several associated PRs. */
+export function normalizeIssueTimelineEvents(raw: unknown): ReadonlyArray<IssueTimelineEvent> {
+  const value = record(raw);
+  const id = stringValue(value.id).trim();
+  if (!id) return [];
+  const base = { id, actor: actor(value.actor), createdAt: iso(value.createdAt) };
+  switch (value.__typename) {
+    case "LabeledEvent":
+    case "UnlabeledEvent": {
+      const label = labels({ nodes: [value.label] })[0];
+      return label
+        ? [{ ...base, _tag: value.__typename === "LabeledEvent" ? "labeled" : "unlabeled", label }]
+        : [];
+    }
+    case "AssignedEvent":
+    case "UnassignedEvent":
+      return [
+        {
+          ...base,
+          _tag: value.__typename === "AssignedEvent" ? "assigned" : "unassigned",
+          assignee: actor(value.assignee),
+        },
+      ];
+    case "ClosedEvent":
+      return [{ ...base, _tag: "closed", stateReason: stateReasonFrom(value.stateReason) }];
+    case "ReopenedEvent":
+      return [{ ...base, _tag: "reopened" }];
+    case "RenamedTitleEvent":
+      return [
+        {
+          ...base,
+          _tag: "renamed",
+          from: stringValue(value.previousTitle),
+          to: stringValue(value.currentTitle),
+        },
+      ];
+    case "CrossReferencedEvent": {
+      const source = timelineSourceFrom(value.source);
+      return source ? [{ ...base, _tag: "cross-referenced", source }] : [];
+    }
+    case "ReferencedEvent": {
+      // GitHub's ReferencedEvent points to a commit, not another issue.
+      const sources = arrayValue(record(record(value.commit).associatedPullRequests).nodes);
+      return sources.flatMap((rawSource) => {
+        const source = timelineSourceFrom(rawSource);
+        return source
+          ? [{ ...base, id: `${id}:${source.url}`, _tag: "referenced" as const, source }]
+          : [];
+      });
+    }
+    case "MilestonedEvent":
+    case "DemilestonedEvent":
+      return [
+        {
+          ...base,
+          _tag: value.__typename === "MilestonedEvent" ? "milestoned" : "demilestoned",
+          title: stringValue(value.milestoneTitle),
+        },
+      ];
+    case "ConnectedEvent": {
+      const rawPr = [value.source, value.subject].find(
+        (source) => record(source).__typename === "PullRequest",
+      );
+      const pullRequest = pullRequestFrom(rawPr);
+      return pullRequest ? [{ ...base, _tag: "connected", pullRequest }] : [];
+    }
+    case "IssueComment": {
+      const comment = commentFrom(value);
+      return comment ? [{ ...base, _tag: "comment", actor: comment.author, comment }] : [];
+    }
+    default:
+      return [];
+  }
+}
+
+/** `me` and `@me` stand for the authenticated viewer, whose login only the host knows. */
+const isViewerFilter = (value: string): boolean => /^@?me$/i.test(value.trim());
+
+/** Translate structured filters into host search qualifiers before pagination. */
+export function issueFilterSearchTerms(filters: IssueListInput["filters"]): ReadonlyArray<string> {
+  if (!filters) return [];
+  const quote = (value: string) => `"${value.replace(/["\\]/g, "").replace(/\s+/g, " ").trim()}"`;
+  // A quoted "@me" would search for a literal login, so the viewer qualifier stays bare.
+  const person = (value: string) => (isViewerFilter(value) ? "@me" : quote(value));
+  return [
+    ...(filters.labels ?? []).map((group) => `label:${group.map(quote).join(",")}`),
+    ...(filters.excludedLabels ?? []).map((label) => `-label:${quote(label)}`),
+    ...(filters.author === undefined ? [] : [`author:${person(filters.author)}`]),
+    ...(filters.assignee === undefined ? [] : [`assignee:${person(filters.assignee)}`]),
+    ...(filters.milestone === undefined ? [] : [`milestone:${quote(filters.milestone)}`]),
+  ];
+}
+
+export function issueSortOrder(sort: IssueListSort = "updated") {
+  return {
+    search: sort === "updated" ? "updated-desc" : sort === "comments" ? "comments-desc" : sort,
+    orderBy: {
+      field: sort === "updated" ? "UPDATED_AT" : sort === "comments" ? "COMMENTS" : "CREATED_AT",
+      direction: sort === "created-asc" ? "ASC" : "DESC",
+    },
+  };
+}
+
+export function compareIssueListEntries(
+  left: IssueListEntry,
+  right: IssueListEntry,
+  sort: IssueListSort = "updated",
+): number {
+  const order =
+    sort === "comments"
+      ? right.commentsCount - left.commentsCount
+      : sort === "created-asc"
+        ? left.createdAt.localeCompare(right.createdAt)
+        : sort === "created-desc"
+          ? right.createdAt.localeCompare(left.createdAt)
+          : right.updatedAt.localeCompare(left.updatedAt);
+  return (
+    order ||
+    `${left.repository}#${left.number}`.localeCompare(`${right.repository}#${right.number}`)
+  );
+}
+
+/** Keep list rows compact while retaining the fields encoded by IssueListEntry. */
+export function issueListEntry(
+  issue: NormalizedIssue,
+  linkedWork: IssueLinkedWorkSummary | null,
+): IssueListEntry {
+  const { body: _body, reactions: _reactions, ...entry } = issue;
+  return { ...entry, linkedWork };
+}
+
 const templateList = (value: unknown): ReadonlyArray<string> =>
   arrayValue(value).flatMap((entry) => {
     const item = record(entry);
@@ -532,12 +808,14 @@ export const matchesFilters = (entry: NormalizedIssue, input: IssueListInput): b
   }
   if (
     filters.author !== undefined &&
+    !isViewerFilter(filters.author) &&
     entry.author?.login.toLowerCase() !== filters.author.toLowerCase()
   ) {
     return false;
   }
   if (
     filters.assignee !== undefined &&
+    !isViewerFilter(filters.assignee) &&
     !entry.assignees.some(
       (assignee) => assignee.login.toLowerCase() === filters.assignee?.toLowerCase(),
     )
@@ -561,6 +839,9 @@ export class IssueService extends Context.Service<
     readonly comments: (
       input: IssueCommentsInput,
     ) => Effect.Effect<IssueCommentsResult, IssueError>;
+    readonly timeline: (
+      input: IssueTimelineInput,
+    ) => Effect.Effect<IssueTimelineResult, IssueError>;
     readonly candidates: (
       input: IssueCandidatesInput,
     ) => Effect.Effect<IssueCandidatesResult, IssueError>;
@@ -630,6 +911,7 @@ export const make = Effect.gen(function* () {
   const listCache = new Map<string, CacheEntry<IssueListResult>>();
   const detailCache = new Map<string, CacheEntry<IssueDetail>>();
   const commentsCache = new Map<string, CacheEntry<IssueCommentsResult>>();
+  const timelineCache = new Map<string, CacheEntry<IssueTimelineResult>>();
   const templatesCache = new Map<string, CacheEntry<IssueTemplatesResult>>();
   const maxCacheEntries = 256;
   const flows = new Map<string, AuthFlow>();
@@ -737,11 +1019,20 @@ export const make = Effect.gen(function* () {
     repo: Repo,
     query: string,
     variables: JsonRecord,
+    subIssues = false,
   ): Effect.Effect<JsonRecord, IssueError> =>
     gh
       .execute({
         cwd: repo.cwd,
-        args: ["api", "graphql", "--hostname", repo.host, "--input", "-"],
+        args: [
+          "api",
+          "graphql",
+          "--hostname",
+          repo.host,
+          "--input",
+          "-",
+          ...(subIssues ? ["-H", "GraphQL-Features: sub_issues"] : []),
+        ],
         stdin: JSON.stringify({ query, variables }),
       })
       .pipe(
@@ -850,6 +1141,7 @@ export const make = Effect.gen(function* () {
         detached_at AS "detachedAt"
       FROM projection_issue_links
       WHERE host = ${host} AND repository = ${repository} AND number = ${number}
+      ORDER BY detached_at IS NOT NULL, linked_at DESC, thread_id
       LIMIT 1
     `.pipe(
       Effect.map((rows) => rows[0] ?? null),
@@ -934,12 +1226,14 @@ export const make = Effect.gen(function* () {
     return "manual";
   };
 
+  const blankToNull = (value: string | null): string | null => (value === "" ? null : value);
+
   const linkedWorkFromRow = (repo: Repo, number: number, row: IssueLinkRow): IssueLinkedWork => ({
     issue: { provider: "github", host: repo.host, repository: repo.repository, number },
     threadId: ThreadId.make(row.threadId),
     projectId: ProjectId.make(row.projectId),
-    branch: row.branch,
-    worktreePath: row.worktreePath,
+    branch: blankToNull(row.branch),
+    worktreePath: blankToNull(row.worktreePath),
     linkedAt: iso(row.linkedAt),
     source: sourceValue(row.source),
   });
@@ -952,6 +1246,28 @@ export const make = Effect.gen(function* () {
       Effect.map((row) => (row === null ? null : linkedWorkFromRow(repo, number, row))),
     );
 
+  // Keeps the stored state of linked issues current; worktree chips read it from shells.
+  const recordLinkedState = (repo: Repo, number: number, state: IssueDetail["state"]) =>
+    sql<{ readonly projectId: string }>`
+      UPDATE projection_issue_links SET state = ${state}
+      WHERE host = ${repo.host} AND repository = ${repo.repository} AND number = ${number}
+        AND state IS NOT ${state}
+      RETURNING project_id AS "projectId"
+    `.pipe(
+      Effect.flatMap((rows) =>
+        Effect.forEach(
+          new Set(rows.map((row) => ProjectId.make(row.projectId))),
+          worktreeLinks.publish,
+          { discard: true },
+        ),
+      ),
+      Effect.catch((cause) => Effect.logWarning("failed to record linked issue state", { cause })),
+    );
+
+  const lacksClosingPullRequests = (error: IssueError): boolean =>
+    error._tag === "IssueOperationError" &&
+    /closedByPullRequestsReferences|includeClosedPrs/.test(error.detail);
+
   const detail = (input: IssueRef): Effect.Effect<IssueDetail, IssueError> =>
     cached(
       detailCache,
@@ -962,19 +1278,49 @@ export const make = Effect.gen(function* () {
         const parsed = splitRepository(repo.repository);
         if (parsed === null)
           return yield* operationError("detail", "Repository must be owner/name.");
-        const response = yield* graph(repo, DETAIL_QUERY, {
-          owner: parsed.owner,
-          name: parsed.name,
-          number: input.number,
-        });
+        const variables = { owner: parsed.owner, name: parsed.name, number: input.number };
+        const mainQuery = Effect.catchIf(
+          graph(repo, DETAIL_QUERY, variables),
+          lacksClosingPullRequests,
+          () => graph(repo, DETAIL_QUERY_WITHOUT_CLOSING_PRS, variables),
+        );
+        // Hosts without sub-issues fail this query; the detail then omits them.
+        const subIssuesQuery = graph(repo, SUB_ISSUES_QUERY, variables, true).pipe(
+          Effect.catchTag("IssueOperationError", () => Effect.succeed(null)),
+        );
+        const [response, subIssueResponse, linked] = yield* Effect.all(
+          [mainQuery, subIssuesQuery, linkedWork(repo, input.number)],
+          { concurrency: "unbounded" },
+        );
         const repository = record(record(response.data).repository);
         const rawIssue = repository.issue;
         const issue = normalizeIssue(rawIssue, repo);
         if (issue === null) return yield* operationError("detail", "Issue was not found.");
+        const subIssueData =
+          subIssueResponse === null
+            ? null
+            : record(record(record(subIssueResponse.data).repository).issue);
         const viewer = stringValue(record(record(response.data).viewer).login).trim();
-        const linked = yield* linkedWork(repo, input.number);
+        if (linked !== null) yield* recordLinkedState(repo, input.number, issue.state);
         return {
           ...issue,
+          linkedPullRequests: normalizeLinkedPullRequests(rawIssue),
+          ...(subIssueData === null
+            ? {}
+            : {
+                parent: relatedIssueFrom(subIssueData.parent),
+                subIssues: arrayValue(record(subIssueData.subIssues).nodes).flatMap((raw) => {
+                  const related = relatedIssueFrom(raw);
+                  return related === null ? [] : [related];
+                }),
+                subIssuesSummary: {
+                  total: nonNegativeInteger(record(subIssueData.subIssuesSummary).total),
+                  completed: nonNegativeInteger(record(subIssueData.subIssuesSummary).completed),
+                  percentCompleted: nonNegativeInteger(
+                    record(subIssueData.subIssuesSummary).percentCompleted,
+                  ),
+                },
+              }),
           projectTitle: repo.projectTitle,
           workspaceRoot: repo.cwd,
           reactions: reactions(record(rawIssue).reactions, viewer.length > 0 ? viewer : undefined),
@@ -1008,11 +1354,18 @@ export const make = Effect.gen(function* () {
           const previous = grouped.get(repo.host) ?? [];
           grouped.set(repo.host, [...previous, repo]);
         }
+        // Search and repository cursors are not interchangeable. A continuation may name
+        // fewer repositories than the first page, so a search cursor keeps it searching.
+        const continuesSearch = Object.values(input.cursors ?? {}).some((cursor) =>
+          cursor.startsWith(SEARCH_CURSOR_PREFIX),
+        );
         const providers: IssueListResult["providers"] = [...grouped.entries()].map(
           ([host, hostRepos]) => ({
             provider: "github",
             host,
             searchesOnHost:
+              continuesSearch ||
+              input.filters !== undefined ||
               input.query !== undefined ||
               (input.involvement !== undefined && input.involvement !== "all") ||
               hostRepos.length > 1,
@@ -1022,6 +1375,8 @@ export const make = Effect.gen(function* () {
           }),
         );
         const shouldSearch =
+          continuesSearch ||
+          input.filters !== undefined ||
           input.query !== undefined ||
           (input.involvement !== undefined && input.involvement !== "all") ||
           repos.some((repo) =>
@@ -1039,7 +1394,13 @@ export const make = Effect.gen(function* () {
             continue;
           }
           const cursorKey = `${repo.projectId}:${repo.host}:${repo.repository}`;
-          const after = input.cursors?.[cursorKey] ?? null;
+          const cursor = input.cursors?.[cursorKey];
+          const after =
+            cursor === undefined
+              ? null
+              : cursor.startsWith(SEARCH_CURSOR_PREFIX)
+                ? cursor.slice(SEARCH_CURSOR_PREFIX.length)
+                : cursor;
           const searchTerms = [
             `repo:${repo.repository}`,
             "is:issue",
@@ -1048,6 +1409,8 @@ export const make = Effect.gen(function* () {
             ...(input.involvement === "assigned" ? ["assignee:@me"] : []),
             ...(input.involvement === "mentioned" ? ["mentions:@me"] : []),
             ...(input.query === undefined ? [] : [input.query]),
+            ...issueFilterSearchTerms(input.filters),
+            `sort:${issueSortOrder(input.sort).search}`,
           ];
           const pageEffect = shouldSearch
             ? graph(repo, SEARCH_QUERY, {
@@ -1061,8 +1424,37 @@ export const make = Effect.gen(function* () {
                 first: Math.min(100, limit),
                 after,
                 states,
+                orderBy: issueSortOrder(input.sort).orderBy,
               });
           yield* pageEffect.pipe(
+            Effect.flatMap((response) => {
+              const data = record(response.data);
+              const container = shouldSearch
+                ? record(data.search)
+                : record(record(data.repository).issues);
+              const numbers = arrayValue(container.nodes).flatMap((raw) => {
+                const number = positiveInteger(record(raw).number);
+                return number === null ? [] : [number];
+              });
+              // Same pick as findLinked for attached links: the most recent one per issue.
+              return sql<IssueLinkRow & { readonly number: number }>`
+              SELECT number, thread_id AS "threadId", project_id AS "projectId", branch,
+                worktree_path AS "worktreePath", linked_at AS "linkedAt", source, detached_at AS "detachedAt"
+              FROM projection_issue_links
+              WHERE host = ${repo.host} AND repository = ${repo.repository}
+                AND detached_at IS NULL AND ${sql.in("number", numbers)}
+              ORDER BY linked_at DESC, thread_id
+            `.pipe(
+                Effect.mapError((cause) =>
+                  operationError("link.read", "Unable to read issue links.", cause),
+                ),
+                Effect.map((rows) => {
+                  const links = new Map<number, IssueLinkRow>();
+                  for (const row of rows) if (!links.has(row.number)) links.set(row.number, row);
+                  return { response, links };
+                }),
+              );
+            }),
             Effect.matchEffect({
               onFailure: (error) =>
                 Effect.sync(() => {
@@ -1072,7 +1464,7 @@ export const make = Effect.gen(function* () {
                     message: error.message,
                   });
                 }),
-              onSuccess: (response) =>
+              onSuccess: ({ response, links }) =>
                 Effect.sync(() => {
                   const data = record(response.data);
                   const container = shouldSearch
@@ -1080,30 +1472,43 @@ export const make = Effect.gen(function* () {
                     : record(record(data.repository).issues);
                   for (const rawIssue of arrayValue(container.nodes)) {
                     const issue = normalizeIssue(rawIssue, repo);
-                    if (issue !== null && matchesFilters(issue, input)) entries.push(issue);
+                    if (issue !== null && matchesFilters(issue, input)) {
+                      const row = links.get(issue.number);
+                      entries.push(
+                        issueListEntry(
+                          issue,
+                          row === undefined
+                            ? null
+                            : {
+                                threadId: ThreadId.make(row.threadId),
+                                branch: blankToNull(row.branch),
+                                worktreePath: blankToNull(row.worktreePath),
+                                source: sourceValue(row.source),
+                              },
+                        ),
+                      );
+                    }
                   }
                   const pageInfo = record(container.pageInfo);
                   const hasNext = pageInfo.hasNextPage === true;
                   const endCursor = stringValue(pageInfo.endCursor).trim();
-                  if (hasNext && endCursor.length > 0) nextCursors[cursorKey] = endCursor;
+                  if (hasNext && endCursor.length > 0) {
+                    nextCursors[cursorKey] = shouldSearch
+                      ? `${SEARCH_CURSOR_PREFIX}${endCursor}`
+                      : endCursor;
+                  }
                 }),
             }),
           );
         }
-        entries.sort((left, right) => {
-          const updated = right.updatedAt.localeCompare(left.updatedAt);
-          return updated !== 0
-            ? updated
-            : `${left.repository}#${left.number}`.localeCompare(
-                `${right.repository}#${right.number}`,
-              );
-        });
-        const truncated = entries.length > limit || Object.keys(nextCursors).length > 0;
+        entries.sort((left, right) => compareIssueListEntries(left, right, input.sort));
+        // Every fetched row is returned: each repository asks for at most `limit` rows, and
+        // cutting the merged list would lose rows whose repository cursor already advanced.
         return {
           providers,
-          entries: entries.slice(0, limit),
+          entries,
           errors,
-          truncated,
+          truncated: Object.keys(nextCursors).length > 0,
           nextCursors,
         };
       }),
@@ -1143,22 +1548,56 @@ export const make = Effect.gen(function* () {
       }),
     );
 
+  const timeline = (input: IssueTimelineInput): Effect.Effect<IssueTimelineResult, IssueError> =>
+    cached(
+      timelineCache,
+      `timeline:${JSON.stringify(input)}`,
+      15_000,
+      Effect.gen(function* () {
+        const repo = yield* repoFor(input);
+        const parsed = splitRepository(repo.repository);
+        if (parsed === null)
+          return yield* operationError("timeline", "Repository must be owner/name.");
+        const response = yield* graph(repo, TIMELINE_QUERY, {
+          owner: parsed.owner,
+          name: parsed.name,
+          number: input.number,
+          first: Math.min(100, input.limit ?? 50),
+          after: input.cursor ?? null,
+        });
+        const issue = record(record(record(response.data).repository).issue);
+        const page = record(issue.timelineItems);
+        const pageInfo = record(page.pageInfo);
+        const endCursor = stringValue(pageInfo.endCursor).trim();
+        const hasNext = pageInfo.hasNextPage === true && endCursor.length > 0;
+        return {
+          events: arrayValue(page.nodes).flatMap(normalizeIssueTimelineEvents),
+          totalCount: nonNegativeInteger(page.totalCount),
+          nextCursor: hasNext ? endCursor : null,
+          truncated: hasNext,
+        };
+      }),
+    );
+
+  /** Runs the writes, then re-reads the issue; caches drop even when a later write fails. */
   const mutationIssue = (
-    repo: Repo,
-    endpoint: string,
-    method: "POST" | "PATCH",
-    body: JsonRecord,
+    writes: ReadonlyArray<Effect.Effect<unknown, IssueError>>,
     input: IssueRef,
   ): Effect.Effect<IssueDetail, IssueError> =>
-    rest(repo, method, endpoint, body).pipe(
-      Effect.tap(() =>
+    Effect.all(writes, { discard: true }).pipe(
+      Effect.ensuring(
         Effect.sync(() => {
           listCache.clear();
           detailCache.clear();
+          timelineCache.clear();
         }),
       ),
       Effect.flatMap(() => detail(input)),
     );
+
+  const isGitHubNotFound = Schema.is(GitHubCli.GitHubPullRequestNotFoundError);
+  const isNotFound = (error: IssueError): boolean =>
+    error._tag === "IssueOperationError" && isGitHubNotFound(error.cause);
 
   const create = (input: IssueCreateInput): Effect.Effect<IssueCreateResult, IssueError> =>
     Effect.gen(function* () {
@@ -1208,15 +1647,27 @@ export const make = Effect.gen(function* () {
             "Milestone must be a numeric GitHub milestone id.",
           );
       }
-      return {
-        issue: yield* mutationIssue(
-          repo,
-          `repos/${repo.repository}/issues/${input.number}`,
-          "PATCH",
-          body,
-          input,
+      const issuePath = `repos/${repo.repository}/issues/${input.number}`;
+      // Additive edits leave labels and assignees others set since the issue was read.
+      const writes = [
+        ...(Object.keys(body).length > 0 ? [rest(repo, "PATCH", issuePath, body)] : []),
+        ...(input.addLabels?.length
+          ? [rest(repo, "POST", `${issuePath}/labels`, { labels: input.addLabels })]
+          : []),
+        ...(input.removeLabels ?? []).map((name) =>
+          rest(repo, "DELETE", `${issuePath}/labels/${encodeURIComponent(name)}`).pipe(
+            // A label that is already gone is the outcome the caller asked for.
+            Effect.catchIf(isNotFound, () => Effect.void),
+          ),
         ),
-      };
+        ...(input.addAssignees?.length
+          ? [rest(repo, "POST", `${issuePath}/assignees`, { assignees: input.addAssignees })]
+          : []),
+        ...(input.removeAssignees?.length
+          ? [rest(repo, "DELETE", `${issuePath}/assignees`, { assignees: input.removeAssignees })]
+          : []),
+      ];
+      return { issue: yield* mutationIssue(writes, input) };
     });
 
   const close = (input: IssueCloseInput): Effect.Effect<IssueCloseResult, IssueError> =>
@@ -1228,10 +1679,7 @@ export const make = Effect.gen(function* () {
       }
       return {
         issue: yield* mutationIssue(
-          repo,
-          `repos/${repo.repository}/issues/${input.number}`,
-          "PATCH",
-          body,
+          [rest(repo, "PATCH", `repos/${repo.repository}/issues/${input.number}`, body)],
           input,
         ),
       };
@@ -1242,10 +1690,11 @@ export const make = Effect.gen(function* () {
       const repo = yield* repoFor(input);
       return {
         issue: yield* mutationIssue(
-          repo,
-          `repos/${repo.repository}/issues/${input.number}`,
-          "PATCH",
-          { state: "open" },
+          [
+            rest(repo, "PATCH", `repos/${repo.repository}/issues/${input.number}`, {
+              state: "open",
+            }),
+          ],
           input,
         ),
       };
@@ -1264,6 +1713,7 @@ export const make = Effect.gen(function* () {
       if (comment === null)
         return yield* operationError("comment.create", "GitHub did not return a comment.");
       commentsCache.clear();
+      timelineCache.clear();
       detailCache.clear();
       return { comment };
     });
@@ -1281,6 +1731,7 @@ export const make = Effect.gen(function* () {
       if (comment === null)
         return yield* operationError("comment.update", "GitHub did not return a comment.");
       commentsCache.clear();
+      timelineCache.clear();
       return { comment };
     });
 
@@ -1291,6 +1742,7 @@ export const make = Effect.gen(function* () {
           Effect.tap(() =>
             Effect.sync(() => {
               commentsCache.clear();
+              timelineCache.clear();
               detailCache.clear();
             }),
           ),
@@ -1328,6 +1780,7 @@ export const make = Effect.gen(function* () {
       }
       detailCache.clear();
       commentsCache.clear();
+      timelineCache.clear();
     });
 
   const candidates = (
@@ -1495,6 +1948,7 @@ export const make = Effect.gen(function* () {
           operationError("link.write", "Unable to save issue link.", cause),
         ),
       );
+      listCache.clear();
       yield* publishWorktreeIssues(input.projectId);
       return linkedWork;
     });
@@ -2309,6 +2763,7 @@ export const make = Effect.gen(function* () {
     list,
     detail,
     comments,
+    timeline,
     candidates,
     templates,
     create,
@@ -2324,6 +2779,7 @@ export const make = Effect.gen(function* () {
         listCache.clear();
         detailCache.clear();
         commentsCache.clear();
+        timelineCache.clear();
         templatesCache.clear();
       }),
     link,

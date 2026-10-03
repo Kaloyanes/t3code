@@ -156,6 +156,31 @@ server, but the host's own site will not show them, and the count reads **viewed
 The **Code** tab is a web and desktop surface. The mobile app reports a pull request's status but
 does not show its diff, so marks are made and read on web and desktop.
 
+## Issues
+
+Open **Issues** from the sidebar or the command palette to browse GitHub issues across your
+projects, or pick one project to narrow the list. Filters choose open or closed issues and those
+assigned to you, authored by you, or mentioning you. Issues are available in the web and desktop
+clients.
+
+Search accepts GitHub-style qualifiers alongside plain text:
+
+- `label:bug` or `label:bug,regression` for either label, and `-label:wontfix` to exclude one
+- `author:` and `assignee:` with a username, or `me` for the signed-in GitHub account
+- `milestone:"v1 beta"`
+- `is:closed` and `sort:created-asc` move onto the page's state and sort filters
+
+**Work on issue** starts a thread in a new worktree for the issue, or opens the thread already
+working on it. With **Complete linked issue on merge** turned on in Settings → Source Control, the
+issue is marked completed when that work's pull request merges.
+
+Select several issues to close, reopen, label, or assign them together. Each change only adds the
+label or assignee, so edits made on GitHub meanwhile are kept. If the list is showing saved results
+because a refresh failed, refresh it before acting on a selection.
+
+Agents in T3 Code can read, comment on, and update issues in your GitHub projects. See
+[Keybindings](keybindings.md#pull-requests-and-issues-lists) for list shortcuts.
+
 ## Troubleshooting
 
 - **Not authenticated:** run the provider's login command on the server, then rescan. For Bitbucket,

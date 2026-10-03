@@ -89,11 +89,11 @@ function TimelineBody({
   );
 }
 
-function ActorName({ actor }: { actor: PullRequestActor | null }) {
+export function ActorName({ actor }: { actor: PullRequestActor | null }) {
   return <span className="font-semibold text-foreground">{actor?.login ?? "ghost"}</span>;
 }
 
-function TimelineMarker({
+export function TimelineMarker({
   children,
   className,
 }: {
@@ -112,7 +112,13 @@ function TimelineMarker({
   );
 }
 
-function IconMarker({ icon, className }: { icon: ReactNode; className?: string | undefined }) {
+export function IconMarker({
+  icon,
+  className,
+}: {
+  icon: ReactNode;
+  className?: string | undefined;
+}) {
   return (
     <TimelineMarker className={className}>
       <span className="flex size-7 items-center justify-center bg-background text-muted-foreground">
@@ -122,7 +128,7 @@ function IconMarker({ icon, className }: { icon: ReactNode; className?: string |
   );
 }
 
-function ActorTimelineMarker({
+export function ActorTimelineMarker({
   actors,
   className,
   fallback,

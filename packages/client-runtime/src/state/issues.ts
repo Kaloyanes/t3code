@@ -43,6 +43,12 @@ export function createIssueEnvironmentAtoms<R, E>(
     staleTimeMs: 30_000,
     idleTtlMs: 5 * 60_000,
   });
+  const timeline = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:issues:timeline",
+    tag: WS_METHODS.issuesTimeline,
+    staleTimeMs: 15_000,
+    idleTtlMs: 5 * 60_000,
+  });
   const candidates = createEnvironmentRpcQueryAtomFamily(runtime, {
     label: "environment-data:issues:candidates",
     tag: WS_METHODS.issuesCandidates,
@@ -66,6 +72,7 @@ export function createIssueEnvironmentAtoms<R, E>(
     list,
     detail,
     comments,
+    timeline,
     candidates,
     templates,
     authStatus,

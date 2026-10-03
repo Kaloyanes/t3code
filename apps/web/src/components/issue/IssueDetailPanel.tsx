@@ -1,234 +1,104 @@
-import { WorktreeIssueDecisions } from "./WorktreeIssueDecisions";
-import type { IssueWorktreeDeleteDecision } from "@t3tools/contracts";
 import type {
   EnvironmentId,
-  IssueComment,
-  IssueLinkedWork,
+  IssueCloseReason,
   IssueRef,
-  IssueReactionContent,
-  IssueWorktreeDeletePreflightResult,
-  IssueWorktreeDeleteResult,
-  IssueWorktreePrepareResult,
+  IssueRelatedIssue,
+  ScopedThreadRef,
 } from "@t3tools/contracts";
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { useAtomValue } from "@effect/atom-react";
-import { resolveDefaultProviderModelSelection } from "~/providerInstances";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
-import * as Cause from "effect/Cause";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { useNavigate } from "@tanstack/react-router";
 import {
-  CheckIcon,
-  ChevronDownIcon,
-  CircleAlertIcon,
-  CircleDotIcon,
+  ArrowLeftIcon,
+  ArrowUpRightIcon,
+  CopyIcon,
+  EllipsisIcon,
   ExternalLinkIcon,
   GitBranchIcon,
   LinkIcon,
-  MessageCircleIcon,
+  MessageSquareIcon,
   MoreHorizontalIcon,
   PencilIcon,
-  RefreshCwIcon,
-  RotateCcwIcon,
-  SearchIcon,
-  SendIcon,
-  SquarePenIcon,
-  Trash2Icon,
-  XIcon,
+  TagIcon,
+  UsersIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-
-import ChatMarkdown from "../ChatMarkdown";
 import {
-  issueEnvironment,
-  useIssueCandidates,
-  useIssueComments,
-  useIssueDetail,
-} from "~/state/issues";
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
+
+import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { cn } from "~/lib/utils";
+import { readLocalApi } from "~/localApi";
+import { useRightPanelStore } from "~/rightPanelStore";
+import { useProject } from "~/state/entities";
+import { issueEnvironment, useIssueComments, useIssueDetail } from "~/state/issues";
 import { refreshEnvironmentShell } from "~/state/shell";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { useProject, useThreadShells } from "~/state/entities";
-import { usePaginatedBranches } from "~/state/queries";
-import { resolveExistingWorktreeOptions } from "../BranchToolbar.logic";
-import { Button } from "../ui/button";
-import { IssueLabelPill } from "./IssueLabelPill";
-import { Badge } from "../ui/badge";
-import { Checkbox } from "../ui/checkbox";
-import {
-  Dialog,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogPanel,
-  DialogPopup,
-  DialogTitle,
-} from "../ui/dialog";
-import { Input } from "../ui/input";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
-import { Spinner } from "../ui/spinner";
-import { Textarea } from "../ui/textarea";
-import { cn, newThreadId } from "~/lib/utils";
-import { threadEnvironment } from "~/state/threads";
-import { useEnvironmentSettings } from "~/hooks/useSettings";
-import { serverEnvironment } from "~/state/server";
-import { readLocalApi } from "~/localApi";
-import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
-import { issueWorktreeIsLinked, issueWorktreePrimaryAction } from "./issue.logic";
+import { buildThreadRouteParams } from "~/threadRoutes";
+import { formatRelativeTimeLabel } from "~/timestampFormat";
 
-const REACTION_CONTENT: readonly IssueReactionContent[] = [
-  "thumbs-up",
-  "heart",
-  "hooray",
-  "rocket",
-  "eyes",
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import { RefreshIcon } from "../ui/refresh-icon";
+import { toastManager } from "../ui/toast";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
+import { useCondensingChrome } from "../workItem/useCondensingChrome";
+import { PullRequestActivityUnavailableState } from "../pullRequest/PullRequestActivityUnavailableState";
+import { PullRequestEditButton } from "../pullRequest/PullRequestEditButton";
+import { GhostBar } from "../pullRequest/PullRequestGhosts";
+import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
+import { showPullRequestLinkContextMenu } from "../pullRequest/pullRequestLinkContextMenu";
+import { PullRequestMarkdownContext } from "../pullRequest/PullRequestMarkdown";
+import { PullRequestActorLabel, PullRequestMetaLine } from "../pullRequest/pullRequestPresentation";
+import { formatActionError } from "./issueActions";
+import { issueRepositoryUrl } from "./issue.logic";
+import { issueSubIssueProgress } from "./issueDetail.logic";
+import { ISSUE_CLOSE_REASON_LABELS, IssueComposer } from "./IssueComposer";
+import { ISSUE_STATE_PRESENTATION } from "./issuePresentation";
+import { resolveIssueState } from "./IssueStateGlyph";
+import { IssueSummaryTab, issueActorProfileUrl } from "./IssueSummaryTab";
+import { IssueTimelineTab } from "./IssueTimelineTab";
+import { IssueWorktreeDialog } from "./IssueWorktreeDialog";
+
+export { IssueWorktreeDialog, type IssueWorktreeDialogProps } from "./IssueWorktreeDialog";
+
+type DetailTab = "summary" | "timeline";
+
+const TABS: ReadonlyArray<{ value: DetailTab; label: string }> = [
+  { value: "summary", label: "Summary" },
+  { value: "timeline", label: "Timeline" },
 ];
 
-function displayReaction(content: IssueReactionContent): string {
-  return content === "thumbs-up"
-    ? "Like"
-    : content.charAt(0).toUpperCase() + content.slice(1).replace("-", " ");
-}
+const OPEN_ON_GITHUB = "Open on GitHub";
 
-type CloseReason = "completed" | "not-planned" | "duplicate";
-
-const CLOSE_REASON_LABELS: Record<CloseReason, string> = {
-  completed: "Completed",
-  "not-planned": "Not planned",
-  duplicate: "Duplicate",
+/** The number is a link everywhere it is written, so its right-click copies it. */
+const openNumberContextMenu = (event: ReactMouseEvent, url: string): void => {
+  event.preventDefault();
+  event.stopPropagation();
+  void showPullRequestLinkContextMenu({
+    url,
+    openLabel: OPEN_ON_GITHUB,
+    position: { x: event.clientX, y: event.clientY },
+  });
 };
-
-const CLOSE_REASONS: readonly CloseReason[] = ["completed", "not-planned", "duplicate"];
-
-function failureDetail(cause: unknown): string {
-  let error = cause;
-  if (cause !== undefined) {
-    try {
-      error = Cause.squash(cause as Cause.Cause<unknown>);
-    } catch {
-      error = cause;
-    }
-  }
-  if (typeof error === "string") return error.trim();
-  if (error && typeof error === "object") {
-    if ("detail" in error && typeof error.detail === "string") return error.detail.trim();
-    if ("message" in error && typeof error.message === "string") return error.message.trim();
-  }
-  return error instanceof Error ? error.message.trim() : "";
-}
-
-function formatActionError(fallback: string, detail: unknown): string {
-  const message = failureDetail(detail)
-    .replace(/^Issue operation [^:]+ failed:\s*/i, "")
-    .trim();
-  if (message.length === 0) return `${fallback}. Try again.`;
-  const sentence = /[.!?]$/.test(message) ? message : `${message}.`;
-  return `${fallback}: ${sentence}${/try again/i.test(message) ? "" : " Try again."}`;
-}
-
-function errorMessage(
-  result: { readonly _tag: string; readonly cause?: unknown },
-  fallback: string,
-): string {
-  if (result._tag !== "Failure") return "";
-  return formatActionError(fallback, result.cause);
-}
-
-function isInterruptedAction(result: { readonly _tag: string; readonly cause?: unknown }): boolean {
-  return (
-    result._tag === "Failure" &&
-    result.cause !== undefined &&
-    Cause.hasInterruptsOnly(result.cause as Cause.Cause<unknown>)
-  );
-}
-
-type ScopedActionOperation = () => Promise<{
-  readonly _tag: string;
-  readonly value?: unknown;
-  readonly cause?: unknown;
-}>;
-
-function useScopedActions() {
-  const [pendingScopes, setPendingScopes] = useState<ReadonlySet<string>>(() => new Set<string>());
-  const [errors, setErrors] = useState<ReadonlyMap<string, string>>(
-    () => new Map<string, string>(),
-  );
-  const pendingRef = useRef<Set<string>>(new Set());
-
-  const hasPending = (scope: string): boolean => pendingScopes.has(scope);
-  const errorFor = (scope: string): string | null => errors.get(scope) ?? null;
-  const run = useCallback(
-    async (
-      scope: string,
-      fallback: string,
-      operation: ScopedActionOperation,
-      onSuccess?: (value: unknown) => void,
-    ): Promise<boolean> => {
-      if (pendingRef.current.has(scope)) return false;
-      pendingRef.current.add(scope);
-      setPendingScopes((current) => {
-        const next = new Set(current);
-        next.add(scope);
-        return next;
-      });
-      setErrors((current) => {
-        if (!current.has(scope)) return current;
-        const next = new Map(current);
-        next.delete(scope);
-        return next;
-      });
-      try {
-        const result = await operation();
-        if (result._tag === "Success") {
-          onSuccess?.(result.value);
-          return true;
-        }
-        if (!isInterruptedAction(result)) {
-          setErrors((current) => new Map(current).set(scope, errorMessage(result, fallback)));
-        }
-        return false;
-      } catch (cause) {
-        setErrors((current) => new Map(current).set(scope, formatActionError(fallback, cause)));
-        return false;
-      } finally {
-        pendingRef.current.delete(scope);
-        setPendingScopes((current) => {
-          const next = new Set(current);
-          next.delete(scope);
-          return next;
-        });
-      }
-    },
-    [],
-  );
-
-  return { pendingScopes, hasPending, errorFor, run };
-}
-
-function ActionFeedback({
-  pending,
-  pendingLabel,
-  error,
-}: {
-  readonly pending: boolean;
-  readonly pendingLabel: string;
-  readonly error: string | null;
-}) {
-  if (!pending && !error) return null;
-  return pending ? (
-    <p className="text-xs text-muted-foreground" role="status" aria-live="polite">
-      {pendingLabel}
-    </p>
-  ) : (
-    <p className="text-xs text-destructive" role="alert">
-      {error}
-    </p>
-  );
-}
 
 export interface IssueDetailPanelProps {
   readonly environmentId: EnvironmentId;
   readonly reference: IssueRef;
   readonly onActed?: () => void;
   readonly onBack?: () => void;
+  /** The thread this panel sits beside, if any: linked pull requests and issues open beside it. */
+  readonly threadRef?: ScopedThreadRef | null;
+  /**
+   * Opens a related issue from the same repository in whatever holds this panel. Beside a thread
+   * they open in its right panel; with neither, they open on GitHub.
+   */
+  readonly onOpenIssue?: (issue: IssueRef & { readonly url: string }) => void;
 }
 
 export function IssueDetailPanel({
@@ -236,588 +106,628 @@ export function IssueDetailPanel({
   reference,
   onActed,
   onBack,
+  threadRef = null,
+  onOpenIssue,
 }: IssueDetailPanelProps) {
+  const issueKey = `${environmentId}:${reference.projectId}:${reference.host ?? ""}:${reference.repository}#${reference.number}`;
   const detailQuery = useIssueDetail({ environmentId, input: reference });
   const commentsQuery = useIssueComments({ environmentId, input: reference });
+  const project = useProject(scopeProjectRef(environmentId, reference.projectId));
   const update = useAtomCommand(issueEnvironment.update, { reportFailure: false });
   const close = useAtomCommand(issueEnvironment.close, { reportFailure: false });
   const reopen = useAtomCommand(issueEnvironment.reopen, { reportFailure: false });
-  const commentCreate = useAtomCommand(issueEnvironment.commentCreate, { reportFailure: false });
-  const reactionUpdate = useAtomCommand(issueEnvironment.reactionUpdate, { reportFailure: false });
-  const actions = useScopedActions();
-  const updatePending = actions.hasPending("update");
-  const [editing, setEditing] = useState(false);
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [labels, setLabels] = useState("");
-  const [assignees, setAssignees] = useState("");
-  const [comment, setComment] = useState("");
-  const [worktreeOpen, setWorktreeOpen] = useState(false);
-  const issue = detailQuery.data;
-  const labelCandidatesQuery = useIssueCandidates(
-    editing
-      ? {
-          environmentId,
-          input: { ...reference, kind: "labels", limit: 100 },
-        }
-      : null,
-  );
-  const labelColors = new Map(
-    labelCandidatesQuery.data?._tag === "labels"
-      ? labelCandidatesQuery.data.candidates.map((candidate) => [candidate.name, candidate.color])
-      : (issue?.labels.map((label) => [label.name, label.color]) ?? []),
-  );
-
+  const navigate = useNavigate();
+  const [tab, setTab] = useState<DetailTab>("summary");
+  // Like the pull request panel, a visited tab stays mounted behind the active one so its scroll
+  // position and rendered markdown survive switching back.
+  const [tabMountState, setTabMountState] = useState(() => ({
+    key: issueKey,
+    tabs: new Set<DetailTab>(["summary"]),
+  }));
+  const mountedTabs =
+    tabMountState.key === issueKey ? tabMountState.tabs : new Set<DetailTab>([tab]);
   useEffect(() => {
-    if (!issue || editing) return;
-    setTitle(issue.title);
-    setBody(issue.body);
-    setLabels(issue.labels.map((label) => label.name).join(", "));
-    setAssignees(issue.assignees.map((assignee) => assignee.login).join(", "));
-  }, [editing, issue]);
-
-  const refreshIssue = () => {
-    detailQuery.refresh();
-    refreshEnvironmentShell(environmentId);
-    onActed?.();
-  };
-
-  const runMutation = (
-    scope: string,
-    fallback: string,
-    operation: ScopedActionOperation,
-    onSuccess?: () => void,
-  ) =>
-    actions.run(scope, fallback, operation, () => {
-      refreshIssue();
-      onSuccess?.();
+    setTabMountState((previous) => {
+      if (previous.key !== issueKey) return { key: issueKey, tabs: new Set([tab]) };
+      if (previous.tabs.has(tab)) return previous;
+      return { key: issueKey, tabs: new Set(previous.tabs).add(tab) };
     });
-
-  const save = async () => {
-    const saved = await runMutation("update", "Unable to save issue", () =>
-      update({
-        environmentId,
-        input: {
-          ...reference,
-          title: title.trim(),
-          body,
-          labels: labels
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean),
-          assignees: assignees
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean),
-        },
+  }, [issueKey, tab]);
+  const { condensed, foldRef, condensedRowRef, onScrollCapture } = useCondensingChrome(tab);
+  const [worktreeOpen, setWorktreeOpen] = useState(false);
+  // Drafts are scoped to the issue they were typed against: this panel can be handed another one.
+  const [titleScope, setTitleScope] = useState<{
+    readonly key: string;
+    readonly text: string;
+  } | null>(null);
+  const titleDraft = titleScope?.key === issueKey ? titleScope.text : null;
+  const [titleSaving, setTitleSaving] = useState(false);
+  const [bodyEditingKey, setBodyEditingKey] = useState<string | null>(null);
+  const [statePending, setStatePending] = useState(false);
+  const [timelineToken, setTimelineToken] = useState(0);
+  const { copyToClipboard } = useCopyToClipboard<string>({
+    target: "issue reference",
+    onCopy: (label) => toastManager.add({ type: "success", title: `${label} copied` }),
+    onError: (error, label) =>
+      toastManager.add({
+        type: "error",
+        title: `Failed to copy ${label}`,
+        description: error.message,
       }),
-    );
-    if (saved) setEditing(false);
+  });
+  const issue = detailQuery.data;
+  const repositoryUrl = issueRepositoryUrl({
+    ...(reference.host === undefined ? {} : { host: reference.host }),
+    repository: reference.repository,
+  });
+  const markdownContext = useMemo(() => ({ repositoryUrl, threadRef }), [repositoryUrl, threadRef]);
+
+  const { refresh: refreshDetail } = detailQuery;
+  const refreshIssue = useCallback(() => {
+    refreshDetail();
+    refreshEnvironmentShell(environmentId);
+    setTimelineToken((token) => token + 1);
+    onActed?.();
+  }, [environmentId, onActed, refreshDetail]);
+
+  const setIssueState = async (change: IssueCloseReason | "reopen"): Promise<boolean> => {
+    if (statePending) return false;
+    setStatePending(true);
+    const result =
+      change === "reopen"
+        ? await reopen({ environmentId, input: reference })
+        : await close({ environmentId, input: { ...reference, reason: change } });
+    setStatePending(false);
+    if (result._tag === "Failure") {
+      toastManager.add({
+        type: "error",
+        title: change === "reopen" ? "Could not reopen this issue" : "Could not close this issue",
+        description: formatActionError("The host refused it", result.cause),
+      });
+      return false;
+    }
+    refreshIssue();
+    return true;
   };
 
-  const createComment = () => {
-    void actions.run(
-      "comment-create",
-      "Unable to add comment",
-      () =>
-        commentCreate({
-          environmentId,
-          input: { ...reference, body: comment },
-        }),
-      () => {
-        setComment("");
-        commentsQuery.refresh();
-        refreshIssue();
-      },
-    );
+  const saveTitle = async (next: string) => {
+    const title = next.trim();
+    if (issue === null || titleSaving) return;
+    if (title.length === 0 || title === issue.title) {
+      setTitleScope(null);
+      return;
+    }
+    setTitleSaving(true);
+    const result = await update({ environmentId, input: { ...reference, title } });
+    setTitleSaving(false);
+    if (result._tag === "Failure") {
+      // The draft stays open with the words still in it.
+      toastManager.add({
+        type: "error",
+        title: "The title could not be saved",
+        description: formatActionError("The host refused the new title", result.cause),
+      });
+      return;
+    }
+    setTitleScope(null);
+    refreshIssue();
   };
 
-  const openExternal = () => {
-    if (!issue) return;
-    void (readLocalApi()?.shell.openExternal(issue.url) ?? Promise.resolve());
+  const openRelatedIssue = (related: IssueRelatedIssue) => {
+    const sameRepository = related.repository.toLowerCase() === reference.repository.toLowerCase();
+    const target = {
+      projectId: reference.projectId,
+      ...(reference.host === undefined ? {} : { host: reference.host }),
+      repository: related.repository,
+      number: related.number,
+      url: related.url,
+    };
+    if (sameRepository && threadRef !== null) {
+      useRightPanelStore.getState().openIssue(threadRef, { environmentId, ...target });
+      return;
+    }
+    if (sameRepository && onOpenIssue) {
+      onOpenIssue(target);
+      return;
+    }
+    void readLocalApi()?.shell.openExternal(related.url);
   };
 
-  if (detailQuery.isPending && issue === null) {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center">
-        <Spinner aria-label="Loading issue" />
-      </div>
-    );
-  }
+  const openLinkedWork = () => {
+    if (!issue?.linkedWork) return;
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(environmentId, issue.linkedWork.threadId)),
+    });
+  };
+
+  const backButton = (focusable: boolean) =>
+    onBack ? (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              size="icon-micro"
+              variant="ghost-muted"
+              tabIndex={focusable ? 0 : -1}
+              onClick={onBack}
+              className="-ml-1.5"
+              aria-label="Back to issues"
+            >
+              <ArrowLeftIcon aria-hidden className="size-3.5" />
+            </Button>
+          }
+        />
+        <TooltipPopup side="top">Back to issues</TooltipPopup>
+      </Tooltip>
+    ) : null;
+
   if (issue === null) {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-        <CircleAlertIcon className="size-5 text-destructive" />
-        <p className="text-sm text-muted-foreground" role="alert">
-          {detailQuery.error
-            ? formatActionError("Unable to load issue", detailQuery.error)
-            : "Unable to load issue. Try again."}
-        </p>
-        <Button size="sm" variant="outline" onClick={detailQuery.refresh}>
-          <RefreshCwIcon /> Try again
-        </Button>
+    return detailQuery.error ? (
+      <div className="relative flex h-full min-h-0 w-full flex-1 flex-col bg-background">
+        {onBack ? (
+          <div className="flex h-7 shrink-0 items-center pl-4">{backButton(true)}</div>
+        ) : null}
+        <PullRequestActivityUnavailableState
+          title="Could not load this issue"
+          error={formatActionError("Unable to load issue", detailQuery.error)}
+          onRetry={detailQuery.refresh}
+        />
       </div>
+    ) : (
+      <IssueDetailGhost
+        number={reference.number}
+        repository={reference.repository}
+        onBack={onBack}
+      />
     );
   }
 
-  const commentsResult = commentsQuery.data;
-  const comments = commentsResult?.comments ?? [];
   const permissions = issue.viewerPermissions;
-  const issueStatePending = actions.hasPending("issue-state");
-  const commentCreatePending = actions.hasPending("comment-create");
-  const reactionContents =
-    issue.reactions && issue.reactions.length > 0
-      ? issue.reactions.map((reaction) => reaction.content)
-      : REACTION_CONTENT;
-  const reactionPending = reactionContents.some((content) =>
-    actions.hasPending(`reaction:${content}`),
+  const canUpdate = permissions?.update !== false;
+  const statePresentation = resolveIssueState(issue);
+  const authorProfileUrl = issueActorProfileUrl(issue, issue.author);
+  const cwd = issue.workspaceRoot ?? project?.workspaceRoot ?? "";
+  const linkedPullRequestCount = issue.linkedPullRequests?.length ?? 0;
+  const progress = issueSubIssueProgress(issue.subIssuesSummary, issue.subIssues);
+  const refreshing = detailQuery.isPending;
+
+  const numberButton = (focusable: boolean) => (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            tabIndex={focusable ? 0 : -1}
+            onClick={() => void readLocalApi()?.shell.openExternal(issue.url)}
+            onContextMenu={(event) => openNumberContextMenu(event, issue.url)}
+            className={cn(
+              "inline-flex shrink-0 cursor-pointer items-center gap-0.5 font-medium underline-offset-2 hover:underline",
+              statePresentation.toneClassName,
+            )}
+            aria-label={`Open issue #${issue.number} on GitHub`}
+          >
+            #{issue.number}
+            <ExternalLinkIcon aria-hidden className="size-2.5" />
+          </button>
+        }
+      />
+      <TooltipPopup side="top">{OPEN_ON_GITHUB}</TooltipPopup>
+    </Tooltip>
   );
-  const reactionError =
-    reactionContents
-      .map((content) => actions.errorFor(`reaction:${content}`))
-      .find((message): message is string => message !== null) ?? null;
-  const commentsInitialLoading = commentsResult === null && commentsQuery.error === null;
-  const commentsRefreshing = commentsResult !== null && commentsQuery.isPending;
-  const commentsError = commentsQuery.error
-    ? formatActionError("Unable to load comments", commentsQuery.error)
-    : null;
-  const issueStateError = actions.errorFor("issue-state");
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <header className="@container/issue-header grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 border-b px-5 py-4">
-        <div className="min-w-0">
-          <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            {onBack ? (
-              <Button size="icon-xs" variant="ghost" aria-label="Back to issues" onClick={onBack}>
-                <XIcon />
-              </Button>
-            ) : null}
-            <span
-              className={cn(
-                "inline-flex items-center gap-1 font-medium",
-                issue.state === "open"
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : "text-muted-foreground",
-              )}
-            >
-              <CircleDotIcon className="size-3.5" /> {issue.state === "open" ? "Open" : "Closed"}
-            </span>
-            <span>#{issue.number}</span>
-            <span>{issue.repository}</span>
-            {issue.linkedWork ? (
-              <Badge size="sm" variant="secondary">
-                <LinkIcon /> Linked
-              </Badge>
-            ) : null}
-          </div>
-          {editing ? (
-            <Input
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              aria-label="Issue title"
-              disabled={updatePending}
-            />
-          ) : (
-            <h2 className="text-base font-semibold leading-snug wrap-break-word">{issue.title}</h2>
-          )}
-          <p className="mt-1 text-xs text-muted-foreground">
-            Updated {new Date(issue.updatedAt).toLocaleString()}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button
-            size="xs"
-            disabled={worktreeOpen}
-            onClick={() => setWorktreeOpen(true)}
-            aria-label="Work on issue"
-          >
-            <GitBranchIcon />
-            <span className="@max-[30rem]/issue-header:hidden">Work on issue</span>
-          </Button>
-          <Menu>
-            <MenuTrigger
-              render={
-                <Button size="icon-xs" variant="ghost-muted" aria-label="More issue actions" />
-              }
-            >
-              <MoreHorizontalIcon />
-            </MenuTrigger>
-            <MenuPopup align="end" side="bottom" className="min-w-52">
-              <MenuItem onClick={openExternal}>
-                <ExternalLinkIcon />
-                Open issue on GitHub
-              </MenuItem>
-              {permissions?.update !== false ? (
-                <MenuItem onClick={() => setEditing((value) => !value)} disabled={updatePending}>
-                  <PencilIcon />
-                  {editing ? "Cancel editing" : "Edit issue"}
-                </MenuItem>
-              ) : null}
-              {issue.state !== "open" ? (
-                <MenuItem
-                  disabled={permissions?.reopen === false || issueStatePending}
-                  onClick={() =>
-                    void runMutation("issue-state", "Unable to reopen issue", () =>
-                      reopen({ environmentId, input: reference }),
-                    )
-                  }
-                >
-                  <RotateCcwIcon />
-                  Reopen issue
-                </MenuItem>
-              ) : null}
-            </MenuPopup>
-          </Menu>
-        </div>
-        <div className="col-span-2">
-          {issue.linkedWork ? (
-            <p className="text-xs text-muted-foreground">
-              Linked work:{" "}
-              {issue.linkedWork.branch ?? issue.linkedWork.worktreePath ?? "Linked work"}
-            </p>
-          ) : null}
-          <ActionFeedback
-            pending={issueStatePending}
-            pendingLabel={issue.state === "open" ? "Closing issue…" : "Reopening issue…"}
-            error={issueStateError}
-          />
-        </div>
-      </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="w-full space-y-6 px-5 pt-5 pb-16">
-          {editing ? (
-            <section className="space-y-3 rounded-xl border bg-muted/20 p-4">
-              <label className="block text-xs font-medium">
-                Body
-                <Textarea
-                  className="mt-1"
-                  value={body}
-                  onChange={(event) => setBody(event.target.value)}
-                  rows={10}
-                  disabled={updatePending}
-                />
-              </label>
-              <label className="block text-xs font-medium">
-                Labels
-                <Textarea
-                  className="mt-1 min-h-8"
-                  value={labels}
-                  onChange={(event) => setLabels(event.target.value)}
-                  rows={1}
-                  placeholder="bug, enhancement"
-                  disabled={updatePending}
-                />
-                <span className="mt-2 flex flex-wrap gap-1">
-                  {labels
-                    .split(",")
-                    .map((name) => name.trim())
-                    .filter(Boolean)
-                    .map((name) => (
-                      <IssueLabelPill key={name} name={name} color={labelColors.get(name)} />
-                    ))}
-                </span>
-              </label>
-              <label className="block text-xs font-medium">
-                Assignees
-                <Textarea
-                  className="mt-1 min-h-8"
-                  value={assignees}
-                  onChange={(event) => setAssignees(event.target.value)}
-                  rows={1}
-                  placeholder="github-login"
-                  disabled={updatePending}
-                />
-              </label>
-              <div className="flex justify-end gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setEditing(false)}
-                  disabled={updatePending}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => void save()}
-                  disabled={title.trim().length === 0 || updatePending}
-                  aria-busy={updatePending}
-                >
-                  {updatePending ? (
-                    <>
-                      <Spinner className="size-3.5" aria-label="Saving issue" /> Saving…
-                    </>
-                  ) : (
-                    "Save changes"
-                  )}
-                </Button>
-              </div>
-              <ActionFeedback
-                pending={updatePending}
-                pendingLabel="Saving issue…"
-                error={actions.errorFor("update")}
-              />
-            </section>
-          ) : (
-            <section className="rounded-xl border bg-card/30 p-5">
-              <ChatMarkdown
-                text={issue.body || "_No description provided._"}
-                cwd={issue.workspaceRoot}
-                environmentId={environmentId}
-              />
-            </section>
-          )}
-
-          <section className="flex flex-wrap items-center gap-2">
-            {issue.labels.map((label) => (
-              <IssueLabelPill key={label.name} name={label.name} color={label.color} />
-            ))}
-            {issue.assignees.length > 0 ? (
-              <span className="text-xs text-muted-foreground">
-                Assigned to {issue.assignees.map((assignee) => assignee.login).join(", ")}
-              </span>
-            ) : null}
-          </section>
-
-          {issue.reactions && issue.reactions.length > 0 ? (
-            <section className="flex flex-wrap gap-2">
-              {issue.reactions.map((reaction) => {
-                const scope = `reaction:${reaction.content}`;
-                const pending = actions.hasPending(scope);
-                return (
-                  <Button
-                    key={reaction.content}
-                    size="xs"
-                    variant={reaction.viewerHasReacted ? "secondary" : "outline"}
-                    disabled={permissions?.react === false || pending}
-                    onClick={() =>
-                      void runMutation(scope, "Unable to update reaction", () =>
-                        reactionUpdate({
-                          environmentId,
-                          input: {
-                            ...reference,
-                            content: reaction.content,
-                            reacted: !reaction.viewerHasReacted,
-                          },
-                        }),
-                      )
-                    }
-                    aria-busy={pending}
-                  >
-                    {pending ? (
-                      <Spinner className="size-3.5" aria-label="Updating reaction" />
-                    ) : null}
-                    {displayReaction(reaction.content)} {reaction.count}
-                  </Button>
-                );
-              })}
-              <ActionFeedback
-                pending={reactionPending}
-                pendingLabel="Updating reaction…"
-                error={reactionError}
-              />
-            </section>
-          ) : (
-            <section className="flex flex-wrap gap-2">
-              {REACTION_CONTENT.map((content) => {
-                const scope = `reaction:${content}`;
-                const pending = actions.hasPending(scope);
-                return (
-                  <Button
-                    key={content}
-                    size="xs"
-                    variant="outline"
-                    disabled={permissions?.react === false || pending}
-                    onClick={() =>
-                      void runMutation(scope, "Unable to update reaction", () =>
-                        reactionUpdate({
-                          environmentId,
-                          input: { ...reference, content, reacted: true },
-                        }),
-                      )
-                    }
-                    aria-busy={pending}
-                  >
-                    {pending ? (
-                      <Spinner className="size-3.5" aria-label="Updating reaction" />
-                    ) : null}
-                    {displayReaction(content)}
-                  </Button>
-                );
-              })}
-              <ActionFeedback
-                pending={reactionPending}
-                pendingLabel="Updating reaction…"
-                error={reactionError}
-              />
-            </section>
-          )}
-
-          <section className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="flex items-center gap-2 text-sm font-semibold">
-                <MessageCircleIcon className="size-4" /> Comments{" "}
-                <span className="font-normal text-muted-foreground">{issue.commentsCount}</span>
-              </h3>
-              <div className="flex items-center gap-2">
-                {commentsRefreshing ? (
-                  <span className="text-xs text-muted-foreground" role="status" aria-live="polite">
-                    Refreshing comments…
-                  </span>
-                ) : null}
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={commentsQuery.isPending ? "Refreshing comments" : "Refresh comments"}
-                  onClick={commentsQuery.refresh}
-                  disabled={commentsQuery.isPending}
-                  aria-busy={commentsQuery.isPending}
-                >
-                  {commentsQuery.isPending ? (
-                    <Spinner className="size-4" aria-label="Refreshing comments" />
-                  ) : (
-                    <RefreshCwIcon />
-                  )}
-                </Button>
-              </div>
-            </div>
-            {commentsResult === null ? (
-              commentsInitialLoading ? (
-                <div
-                  className="flex items-center gap-2 text-sm text-muted-foreground"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <Spinner className="size-4" aria-label="Loading comments" /> Loading comments…
-                </div>
-              ) : commentsError ? (
-                <div className="flex items-center gap-2 text-sm text-destructive" role="alert">
-                  <span>{commentsError}</span>
-                  <Button size="xs" variant="outline" onClick={commentsQuery.refresh}>
-                    Try again
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 text-sm text-destructive" role="alert">
-                  <span>Unable to load comments. Try again.</span>
-                  <Button size="xs" variant="outline" onClick={commentsQuery.refresh}>
-                    Try again
-                  </Button>
-                </div>
-              )
-            ) : (
-              <>
-                {commentsError ? (
-                  <div className="flex items-center gap-2 text-sm text-destructive" role="alert">
-                    <span>{commentsError}</span>
-                    <Button size="xs" variant="outline" onClick={commentsQuery.refresh}>
-                      Try again
-                    </Button>
-                  </div>
-                ) : null}
-                {comments.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No comments yet.</p>
-                ) : (
-                  comments.map((entry) => (
-                    <IssueCommentRow
-                      key={entry.id}
-                      comment={entry}
-                      reference={reference}
-                      environmentId={environmentId}
-                      canManage={issue.viewer !== undefined && entry.author?.login === issue.viewer}
-                      onActed={() => {
-                        commentsQuery.refresh();
-                        detailQuery.refresh();
-                      }}
-                    />
-                  ))
-                )}
-              </>
+    <div className="relative flex h-full min-h-0 w-full flex-1 flex-col bg-background">
+      <div className="@container/issue-header grid min-w-0 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 border-b border-border/60">
+        <div className="pl-4 grid h-7 min-w-0 items-center overflow-hidden">
+          <div
+            aria-hidden={condensed}
+            inert={condensed}
+            className={cn(
+              "col-start-1 row-start-1 flex min-w-0 items-center gap-1 text-sm text-muted-foreground transition-[opacity,transform] ease-out motion-reduce:transform-none motion-reduce:transition-none sm:text-xs",
+              condensed
+                ? "pointer-events-none -translate-y-1 opacity-0 duration-100"
+                : "translate-y-0 opacity-100 delay-50 duration-150",
             )}
-            <div className="space-y-2">
-              <Textarea
-                value={comment}
-                onChange={(event) => setComment(event.target.value)}
-                placeholder="Leave a comment"
-                rows={3}
-                disabled={commentCreatePending}
+          >
+            {backButton(!condensed)}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    onClick={() => void readLocalApi()?.shell.openExternal(repositoryUrl)}
+                    className="min-w-0 cursor-pointer truncate text-left font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  >
+                    {issue.repository}
+                  </button>
+                }
               />
-              <div className="flex items-center justify-end gap-2">
-                {issue.state === "open" ? (
-                  <div className="flex items-center">
+              <TooltipPopup side="top">{`Open ${issue.repository} repository`}</TooltipPopup>
+            </Tooltip>
+            {numberButton(!condensed)}
+          </div>
+          <div
+            aria-hidden={!condensed}
+            inert={!condensed}
+            className={cn(
+              "col-start-1 row-start-1 flex min-w-0 items-center gap-1 text-sm text-muted-foreground transition-[opacity,transform] ease-out motion-reduce:transform-none motion-reduce:transition-none sm:text-xs",
+              condensed
+                ? "translate-y-0 opacity-100 delay-50 duration-150"
+                : "pointer-events-none translate-y-1 opacity-0 duration-100",
+            )}
+          >
+            {backButton(condensed)}
+            {numberButton(condensed)}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className="min-w-0 truncate font-medium text-foreground">
+                    {issue.title}
+                  </span>
+                }
+              />
+              <TooltipPopup side="top">{issue.title}</TooltipPopup>
+            </Tooltip>
+          </div>
+        </div>
+        <div className="mr-4 flex h-7 shrink-0 items-center justify-end gap-1">
+          <TooltipProvider delay={150} closeDelay={150} timeout={400}>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className="inline-flex shrink-0">
                     <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={permissions?.close === false || issueStatePending}
-                      onClick={() =>
-                        void runMutation("issue-state", "Unable to close issue", () =>
-                          close({ environmentId, input: { ...reference, reason: "completed" } }),
-                        )
+                      size="xs"
+                      variant="default"
+                      disabled={worktreeOpen}
+                      onClick={() => setWorktreeOpen(true)}
+                      aria-label="Work on issue"
+                    >
+                      <GitBranchIcon aria-hidden className="size-3.5" />
+                      <span className="@max-[30rem]/issue-header:hidden">Work on issue</span>
+                    </Button>
+                  </span>
+                }
+              />
+              <TooltipPopup side="top">
+                {issue.linkedWork
+                  ? "Continue in a worktree for this issue"
+                  : "Create a worktree and thread for this issue"}
+              </TooltipPopup>
+            </Tooltip>
+            <Menu>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <MenuTrigger
+                      render={
+                        <Button
+                          aria-label={refreshing ? "Refreshing issue" : "More issue actions"}
+                          size="icon-xs"
+                          variant="ghost-muted"
+                        />
                       }
                     >
-                      <CheckIcon /> Close issue
-                    </Button>
-                    <Menu>
-                      <MenuTrigger
-                        render={
-                          <Button
-                            size="icon-sm"
-                            variant="outline"
-                            aria-label="Other close reasons"
-                            disabled={permissions?.close === false || issueStatePending}
-                          />
-                        }
-                      >
-                        <ChevronDownIcon />
-                      </MenuTrigger>
-                      <MenuPopup align="end" side="top">
-                        {CLOSE_REASONS.filter((reason) => reason !== "completed").map((reason) => (
-                          <MenuItem
-                            key={reason}
-                            onClick={() =>
-                              void runMutation("issue-state", "Unable to close issue", () =>
-                                close({ environmentId, input: { ...reference, reason } }),
-                              )
-                            }
-                          >
-                            <CheckIcon /> Close as {CLOSE_REASON_LABELS[reason].toLowerCase()}
-                          </MenuItem>
-                        ))}
-                      </MenuPopup>
-                    </Menu>
-                  </div>
-                ) : null}
-                <Button
-                  size="sm"
-                  disabled={
-                    comment.trim().length === 0 ||
-                    permissions?.comment === false ||
-                    commentCreatePending
+                      {refreshing ? (
+                        <RefreshIcon refreshing size="md" />
+                      ) : (
+                        <MoreHorizontalIcon className="size-4" />
+                      )}
+                    </MenuTrigger>
                   }
-                  onClick={createComment}
-                  aria-busy={commentCreatePending}
+                />
+                <TooltipPopup>
+                  {refreshing ? "Refreshing issue" : "More issue actions"}
+                </TooltipPopup>
+              </Tooltip>
+              <MenuPopup align="end" side="bottom">
+                <MenuItem
+                  disabled={refreshing}
+                  onClick={() => {
+                    refreshIssue();
+                    commentsQuery.refresh();
+                  }}
                 >
-                  {commentCreatePending ? (
-                    <>
-                      <Spinner className="size-3.5" aria-label="Adding comment" /> Commenting…
-                    </>
-                  ) : (
-                    <>
-                      <SendIcon /> Comment
-                    </>
+                  <RefreshIcon size="sm" refreshing={refreshing} />
+                  Refresh
+                </MenuItem>
+                {canUpdate ? (
+                  <MenuItem
+                    onClick={() => {
+                      setTab("summary");
+                      setTitleScope({ key: issueKey, text: issue.title });
+                      setBodyEditingKey(issueKey);
+                    }}
+                  >
+                    <PencilIcon className="size-3.5" />
+                    Edit issue
+                  </MenuItem>
+                ) : null}
+                <MenuSeparator />
+                <MenuItem onClick={() => void readLocalApi()?.shell.openExternal(issue.url)}>
+                  <ArrowUpRightIcon className="size-3.5" />
+                  {OPEN_ON_GITHUB}
+                </MenuItem>
+                <MenuItem onClick={() => copyToClipboard(issue.url, "Issue link")}>
+                  <LinkIcon className="size-3.5" />
+                  Copy link
+                </MenuItem>
+                <MenuItem onClick={() => copyToClipboard(`#${issue.number}`, "Issue number")}>
+                  <CopyIcon className="size-3.5" />
+                  Copy issue number
+                </MenuItem>
+                {issue.state === "open" && permissions?.close !== false ? (
+                  <>
+                    <MenuSeparator />
+                    {(["completed", "not-planned", "duplicate"] as const).map((reason) => {
+                      const presentation = ISSUE_STATE_PRESENTATION[reason];
+                      return (
+                        <MenuItem
+                          key={reason}
+                          disabled={statePending}
+                          onClick={() => void setIssueState(reason)}
+                        >
+                          <presentation.Icon className="size-3.5" />
+                          {ISSUE_CLOSE_REASON_LABELS[reason]}
+                        </MenuItem>
+                      );
+                    })}
+                  </>
+                ) : issue.state === "closed" && permissions?.reopen !== false ? (
+                  <>
+                    <MenuSeparator />
+                    <MenuItem disabled={statePending} onClick={() => void setIssueState("reopen")}>
+                      <ISSUE_STATE_PRESENTATION.open.Icon className="size-3.5" />
+                      Reopen issue
+                    </MenuItem>
+                  </>
+                ) : null}
+              </MenuPopup>
+            </Menu>
+          </TooltipProvider>
+        </div>
+
+        <div
+          className={cn(
+            "col-span-2 grid",
+            condensed
+              ? "grid-rows-[1fr]"
+              : "grid-rows-[0fr] transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
+          )}
+        >
+          <div
+            ref={condensedRowRef}
+            className={cn(
+              "min-h-0 overflow-hidden transition-[opacity,transform] duration-150 ease-out motion-reduce:transform-none motion-reduce:transition-none",
+              condensed
+                ? "translate-y-0 opacity-100 delay-50"
+                : "translate-y-1 opacity-0 duration-100",
+            )}
+            inert={!condensed}
+          >
+            <div className="col-span-2 min-w-0 px-4 pb-2 pt-1">
+              <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                <PullRequestActorLabel
+                  actor={issue.author}
+                  profileUrl={authorProfileUrl}
+                  variant="avatar"
+                  className="shrink-0"
+                />
+                <span className="shrink-0">{formatRelativeTimeLabel(issue.updatedAt)}</span>
+                <span
+                  className={cn(
+                    "ml-auto inline-flex shrink-0 items-center gap-1 text-2xs font-medium",
+                    statePresentation.toneClassName,
                   )}
-                </Button>
+                >
+                  <statePresentation.Icon aria-hidden className="size-3" />
+                  {statePresentation.label}
+                </span>
               </div>
-              <ActionFeedback
-                pending={commentCreatePending}
-                pendingLabel="Adding comment…"
-                error={actions.errorFor("comment-create")}
+            </div>
+          </div>
+        </div>
+
+        <div
+          className={cn(
+            "col-span-2 grid",
+            // Collapse before the scroll refund paints; only reopening eases back in.
+            condensed
+              ? "grid-rows-[0fr]"
+              : "grid-rows-[1fr] transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
+          )}
+        >
+          <div
+            ref={foldRef}
+            className={cn(
+              "min-h-0 overflow-hidden transition-[opacity,transform] duration-150 ease-out motion-reduce:transform-none motion-reduce:transition-none",
+              condensed
+                ? "-translate-y-1 opacity-0 duration-100"
+                : "translate-y-0 opacity-100 delay-50",
+            )}
+            inert={condensed}
+          >
+            <div className="col-span-2 mt-1 min-w-0 px-4 pb-4">
+              {titleDraft === null ? (
+                <div className="group flex min-h-7 min-w-0 items-center gap-1 sm:min-h-6">
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <h1 className="min-w-0 flex-1 truncate text-base font-semibold leading-snug">
+                          {issue.title}
+                        </h1>
+                      }
+                    />
+                    <TooltipPopup side="top">{issue.title}</TooltipPopup>
+                  </Tooltip>
+                  {canUpdate ? (
+                    <PullRequestEditButton
+                      aria-label="Edit title"
+                      onClick={() => setTitleScope({ key: issueKey, text: issue.title })}
+                    />
+                  ) : null}
+                </div>
+              ) : (
+                // A title is one line of text, not markdown, so it takes an input.
+                <div className="space-y-2">
+                  <Input
+                    autoFocus
+                    size="sm"
+                    disabled={titleSaving}
+                    value={titleDraft}
+                    aria-label="Issue title"
+                    onChange={(event) => setTitleScope({ key: issueKey, text: event.target.value })}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void saveTitle(titleDraft);
+                      } else if (event.key === "Escape") {
+                        event.preventDefault();
+                        setTitleScope(null);
+                      }
+                    }}
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      disabled={titleSaving}
+                      onClick={() => setTitleScope(null)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={titleSaving || titleDraft.trim().length === 0}
+                      onClick={() => void saveTitle(titleDraft)}
+                    >
+                      {titleSaving ? "Saving..." : "Save"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+              <div className="mt-2 flex min-h-5 min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                <PullRequestMetaLine className="min-w-0 whitespace-nowrap">
+                  <PullRequestActorLabel actor={issue.author} profileUrl={authorProfileUrl} />
+                  <span>opened {formatRelativeTimeLabel(issue.createdAt)}</span>
+                  <span>updated {formatRelativeTimeLabel(issue.updatedAt)}</span>
+                </PullRequestMetaLine>
+                <span
+                  className={cn(
+                    "ml-auto inline-flex shrink-0 items-center gap-1 font-medium",
+                    statePresentation.toneClassName,
+                  )}
+                >
+                  <statePresentation.Icon aria-hidden className="size-3.5" />
+                  {statePresentation.label}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <nav
+          className="col-span-2 flex min-w-0 flex-wrap items-center gap-2 border-t border-border/60 px-4 py-2"
+          aria-label="Issue tabs"
+        >
+          <ToggleGroup
+            className="shrink-0"
+            size="segmented"
+            variant="segmented"
+            value={[tab]}
+            onValueChange={(next) => {
+              const nextTab = TABS.find((item) => item.value === next[0])?.value;
+              if (nextTab) setTab(nextTab);
+            }}
+          >
+            {TABS.map((item) => (
+              <Toggle key={item.value} value={item.value}>
+                {item.label}
+              </Toggle>
+            ))}
+          </ToggleGroup>
+          <PullRequestMetaLine className="ml-auto whitespace-nowrap text-2xs text-muted-foreground">
+            <span
+              className="inline-flex items-center gap-1"
+              aria-label={`${issue.commentsCount.toLocaleString()} ${issue.commentsCount === 1 ? "comment" : "comments"}`}
+            >
+              <MessageSquareIcon aria-hidden className="size-3" />
+              {issue.commentsCount.toLocaleString()}
+            </span>
+            {linkedPullRequestCount > 0 ? (
+              <span
+                className="inline-flex items-center gap-1"
+                aria-label={`${linkedPullRequestCount} linked ${linkedPullRequestCount === 1 ? "pull request" : "pull requests"}`}
+              >
+                <PullRequestGlyph.pullRequest aria-hidden className="size-3" />
+                {linkedPullRequestCount}
+              </span>
+            ) : null}
+            {progress ? <span>{progress.label}</span> : null}
+          </PullRequestMetaLine>
+        </nav>
+      </div>
+
+      <div
+        className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+        onScrollCapture={onScrollCapture}
+      >
+        <PullRequestMarkdownContext value={markdownContext}>
+          {mountedTabs.has("summary") ? (
+            <div className={cn("absolute inset-0", tab !== "summary" && "invisible")}>
+              <IssueSummaryTab
+                key={issueKey}
+                environmentId={environmentId}
+                threadRef={threadRef}
+                reference={reference}
+                issue={issue}
+                cwd={cwd}
+                comments={commentsQuery}
+                editingBody={bodyEditingKey === issueKey}
+                onEditingBodyChange={(editing) => setBodyEditingKey(editing ? issueKey : null)}
+                onRefresh={refreshIssue}
+                onOpenRelatedIssue={openRelatedIssue}
+                onOpenLinkedWork={openLinkedWork}
               />
             </div>
-          </section>
-        </div>
+          ) : null}
+          {mountedTabs.has("timeline") ? (
+            <div className={cn("absolute inset-0", tab !== "timeline" && "invisible")}>
+              <IssueTimelineTab
+                key={issueKey}
+                environmentId={environmentId}
+                threadRef={threadRef}
+                reference={reference}
+                issue={issue}
+                cwd={cwd}
+                refreshToken={timelineToken}
+                onOpenRelatedIssue={openRelatedIssue}
+              />
+            </div>
+          ) : null}
+        </PullRequestMarkdownContext>
       </div>
+
+      {/* Floats over the content, in the pull request composer's place. */}
+      <div className="absolute right-4 bottom-3 z-20">
+        <IssueComposer
+          key={issueKey}
+          environmentId={environmentId}
+          threadRef={threadRef}
+          reference={reference}
+          issue={issue}
+          cwd={cwd}
+          statePending={statePending}
+          onSetState={setIssueState}
+          onCommented={() => {
+            commentsQuery.refresh();
+            refreshIssue();
+          }}
+        />
+      </div>
+
       <IssueWorktreeDialog
         open={worktreeOpen}
         onOpenChange={setWorktreeOpen}
@@ -832,832 +742,110 @@ export function IssueDetailPanel({
   );
 }
 
-function IssueCommentRow({
-  comment,
-  reference,
-  environmentId,
-  canManage,
-  onActed,
+/**
+ * The panel's own shape while the issue is read: the same header chrome, tabs and summary rows,
+ * so the loaded issue fills it in place rather than replacing one layout with another.
+ */
+function IssueDetailGhost({
+  number,
+  repository,
+  onBack,
 }: {
-  readonly comment: IssueComment;
-  readonly reference: IssueRef;
-  readonly environmentId: EnvironmentId;
-  readonly canManage: boolean;
-  readonly onActed: () => void;
+  number: number;
+  repository: string;
+  onBack?: (() => void) | undefined;
 }) {
-  const update = useAtomCommand(issueEnvironment.commentUpdate, { reportFailure: false });
-  const remove = useAtomCommand(issueEnvironment.commentDelete, { reportFailure: false });
-  const reactionUpdate = useAtomCommand(issueEnvironment.reactionUpdate, { reportFailure: false });
-  const actions = useScopedActions();
-  const [body, setBody] = useState(comment.body);
-  const [editing, setEditing] = useState(false);
-  const updatePending = actions.hasPending("update");
-  const deletePending = actions.hasPending("delete");
-  const reactionEntries = comment.reactions ?? [];
-  const reactionPending = reactionEntries.some((reaction) =>
-    actions.hasPending(`reaction:${reaction.content}`),
-  );
-  const reactionError =
-    reactionEntries
-      .map((reaction) => actions.errorFor(`reaction:${reaction.content}`))
-      .find((message): message is string => message !== null) ?? null;
-
-  const save = () => {
-    void actions.run(
-      "update",
-      "Unable to save comment",
-      () =>
-        update({
-          environmentId,
-          input: { ...reference, commentId: comment.id, body },
-        }),
-      () => {
-        setEditing(false);
-        onActed();
-      },
-    );
-  };
-
-  const deleteComment = async () => {
-    if (deletePending || updatePending) return;
-    const confirmed = await (readLocalApi()?.dialogs.confirm("Delete this issue comment?", {
-      variant: "destructive",
-    }) ?? Promise.resolve(false));
-    if (!confirmed) return;
-    void actions.run(
-      "delete",
-      "Unable to delete comment",
-      () => remove({ environmentId, input: { ...reference, commentId: comment.id } }),
-      onActed,
-    );
-  };
-
   return (
-    <article className="rounded-xl border bg-card/20 p-4">
-      <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
-        <span>{comment.author?.login ?? "A contributor"}</span>
-        <time dateTime={comment.createdAt}>{new Date(comment.createdAt).toLocaleString()}</time>
-      </div>
-      {editing ? (
-        <>
-          <Textarea
-            value={body}
-            onChange={(event) => setBody(event.target.value)}
-            disabled={updatePending}
-          />
-          <div className="mt-2 flex justify-end gap-2">
+    <div
+      role="status"
+      aria-label="Loading issue"
+      className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-background"
+    >
+      <div className="@container/issue-header grid min-w-0 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 border-b border-border/60">
+        <div className="pl-4 flex h-7 min-w-0 items-center gap-1 text-sm text-muted-foreground sm:text-xs">
+          {onBack ? (
             <Button
-              size="xs"
-              variant="ghost"
-              disabled={updatePending}
-              onClick={() => {
-                setBody(comment.body);
-                setEditing(false);
-              }}
+              size="icon-micro"
+              variant="ghost-muted"
+              className="-ml-1.5"
+              onClick={onBack}
+              aria-label="Back to issues"
             >
-              Cancel
+              <ArrowLeftIcon aria-hidden className="size-3.5" />
             </Button>
-            <Button
-              size="xs"
-              disabled={body.trim().length === 0 || updatePending}
-              onClick={save}
-              aria-busy={updatePending}
-            >
-              {updatePending ? (
-                <>
-                  <Spinner className="size-3.5" aria-label="Saving comment" /> Saving…
-                </>
-              ) : (
-                "Save"
-              )}
-            </Button>
-          </div>
-          <ActionFeedback
-            pending={updatePending}
-            pendingLabel="Saving comment…"
-            error={actions.errorFor("update")}
-          />
-        </>
-      ) : (
-        <ChatMarkdown text={comment.body} cwd={undefined} environmentId={environmentId} />
-      )}
-      {comment.reactions?.length ? (
-        <>
-          <div className="mt-3 flex flex-wrap gap-1">
-            {comment.reactions.map((reaction) => {
-              const scope = `reaction:${reaction.content}`;
-              const pending = actions.hasPending(scope);
-              return (
-                <Button
-                  key={reaction.content}
-                  size="xs"
-                  variant={reaction.viewerHasReacted ? "secondary" : "outline"}
-                  disabled={pending}
-                  onClick={() =>
-                    void actions.run(
-                      scope,
-                      "Unable to update comment reaction",
-                      () =>
-                        reactionUpdate({
-                          environmentId,
-                          input: {
-                            ...reference,
-                            subjectId: comment.id,
-                            content: reaction.content,
-                            reacted: !reaction.viewerHasReacted,
-                          },
-                        }),
-                      onActed,
-                    )
-                  }
-                  aria-busy={pending}
-                >
-                  {pending ? (
-                    <Spinner className="size-3.5" aria-label="Updating comment reaction" />
-                  ) : null}
-                  {displayReaction(reaction.content)} {reaction.count}
-                </Button>
-              );
-            })}
-          </div>
-          <ActionFeedback
-            pending={reactionPending}
-            pendingLabel="Updating comment reaction…"
-            error={reactionError}
-          />
-        </>
-      ) : null}
-      {canManage ? (
-        <div className="mt-2 flex flex-wrap items-center gap-1">
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Edit comment"
-            onClick={() => setEditing(true)}
-            disabled={updatePending || deletePending}
-          >
-            <PencilIcon />
-          </Button>
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Delete comment"
-            onClick={() => void deleteComment()}
-            disabled={deletePending || updatePending}
-            aria-busy={deletePending}
-          >
-            {deletePending ? (
-              <Spinner className="size-3.5" aria-label="Deleting comment" />
-            ) : (
-              <Trash2Icon />
-            )}
-          </Button>
-          <ActionFeedback
-            pending={deletePending}
-            pendingLabel="Deleting comment…"
-            error={actions.errorFor("delete")}
-          />
+          ) : null}
+          <span className="min-w-0 truncate font-medium">{repository}</span>
+          <span className="shrink-0">#{number}</span>
         </div>
-      ) : null}
-    </article>
-  );
-}
-
-export interface IssueWorktreeDialogProps {
-  readonly open: boolean;
-  readonly onOpenChange: (open: boolean) => void;
-  readonly environmentId: EnvironmentId;
-  readonly reference: IssueRef;
-  readonly linkedWork: IssueLinkedWork | null;
-  readonly issueTitle: string;
-  readonly canLink?: boolean;
-  readonly onActed?: () => void;
-}
-
-export function IssueWorktreeDialog(props: IssueWorktreeDialogProps) {
-  const { environmentId, reference } = props;
-  return (
-    <IssueWorktreeDialogContent
-      key={JSON.stringify([
-        environmentId,
-        reference.projectId,
-        reference.host,
-        reference.repository,
-        reference.number,
-      ])}
-      {...props}
-    />
-  );
-}
-
-function IssueWorktreeDialogContent({
-  open,
-  onOpenChange,
-  environmentId,
-  reference,
-  linkedWork,
-  issueTitle,
-  canLink = true,
-  onActed,
-}: IssueWorktreeDialogProps) {
-  const threads = useThreadShells();
-  const project = useProject(scopeProjectRef(environmentId, reference.projectId));
-  const branches = usePaginatedBranches({
-    environmentId: open ? environmentId : null,
-    cwd: open ? (project?.workspaceRoot ?? null) : null,
-  });
-  const { refs, loadNext, isPending, error, data } = branches;
-  useEffect(() => {
-    if (open && !isPending && !error && data?.nextCursor != null) loadNext();
-  }, [open, isPending, error, data?.nextCursor, loadNext]);
-  const settings = useEnvironmentSettings(environmentId);
-  const providers = useAtomValue(serverEnvironment.providersValueAtom(environmentId));
-  const defaults = resolveProjectSettings(settings, reference.projectId, project).settings;
-  const modelSelection = resolveDefaultProviderModelSelection(
-    providers ?? [],
-    defaults.defaultModelSelection,
-  );
-  const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
-  const prepare = useAtomCommand(issueEnvironment.worktreePrepare, { reportFailure: false });
-  const preflight = useAtomCommand(issueEnvironment.worktreeDeletePreflight, {
-    reportFailure: false,
-  });
-  const remove = useAtomCommand(issueEnvironment.worktreeDelete, { reportFailure: false });
-  const replace = useAtomCommand(issueEnvironment.worktreeReplace, { reportFailure: false });
-  const link = useAtomCommand(issueEnvironment.link, { reportFailure: false });
-  const newThread = useNewThreadHandler();
-  const actions = useScopedActions();
-  const [name, setName] = useState(issueTitle.trim().slice(0, 128) || "issue");
-  const [baseBranch, setBaseBranch] = useState("");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [preflightResult, setPreflightResult] = useState<IssueWorktreeDeletePreflightResult | null>(
-    null,
-  );
-  const [issueDecisions, setIssueDecisions] = useState<IssueWorktreeDeleteDecision[]>([]);
-  const [deleteResult, setDeleteResult] = useState<IssueWorktreeDeleteResult | null>(null);
-  const [forceAcknowledged, setForceAcknowledged] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [worktreeQuery, setWorktreeQuery] = useState("");
-  const [linkingThreadId, setLinkingThreadId] = useState<string | null>(null);
-  const worktrees = useMemo(
-    () =>
-      project
-        ? resolveExistingWorktreeOptions({
-            refs,
-            workspaceRoot: project.workspaceRoot,
-            repositoryRoot: project.repositoryIdentity?.rootPath ?? null,
-          }).map((option) => {
-            const thread = threads.find(
-              (item) =>
-                item.environmentId === environmentId &&
-                item.projectId === reference.projectId &&
-                item.worktreePath !== null &&
-                normalizeProjectPathForComparison(item.worktreePath) ===
-                  normalizeProjectPathForComparison(option.worktreePath),
-            );
-            return {
-              ...option,
-              id: option.worktreePath,
-              projectId: reference.projectId,
-              title: option.label,
-              threadId:
-                thread?.id ??
-                project.worktreeIssues?.find(
-                  (issue) =>
-                    issue.worktreePath !== null &&
-                    normalizeProjectPathForComparison(issue.worktreePath) ===
-                      normalizeProjectPathForComparison(option.worktreePath),
-                )?.threadId ??
-                null,
-            };
-          })
-        : [],
-    [environmentId, project, reference.projectId, refs, threads],
-  );
-  const selectedItems = worktrees.filter(
-    (worktree) => selected.has(worktree.id) && worktree.threadId !== null,
-  );
-  const visibleWorktrees = useMemo(() => {
-    const query = worktreeQuery.trim().toLowerCase();
-    if (query.length === 0) return worktrees;
-    return worktrees.filter((thread) =>
-      [thread.title, thread.branch ?? "", thread.worktreePath ?? ""]
-        .join(" ")
-        .toLowerCase()
-        .includes(query),
-    );
-  }, [worktreeQuery, worktrees]);
-  const selectedInputs = selectedItems.map((thread) => ({
-    threadId: thread.threadId!,
-    projectId: thread.projectId,
-    path: thread.worktreePath!,
-  }));
-  const createPending = actions.hasPending("create");
-  const replacePending = actions.hasPending("replace");
-  const preflightPending = actions.hasPending("preflight");
-  const deletePending = actions.hasPending("delete");
-  const linkPending = actions.hasPending("link");
-  const openWorktreePending = actions.hasPending("open-worktree");
-  const worktreePrimaryAction = issueWorktreePrimaryAction({
-    canLink,
-    hasLinkedWork: linkedWork !== null,
-  });
-
-  const createWorktreeThread = async (worktree: { branch: string; worktreePath: string }) => {
-    const threadId = newThreadId();
-    if (!modelSelection) throw new Error("Enable a provider to link an issue to a new thread");
-    const result = await createThread({
-      environmentId,
-      input: {
-        threadId,
-        projectId: reference.projectId,
-        title: `Issue #${reference.number}`,
-        modelSelection,
-        runtimeMode: defaults.defaultRuntimeMode,
-        interactionMode: "default",
-        ...worktree,
-      },
-    });
-    if (result._tag === "Failure") throw Cause.squash(result.cause);
-    return threadId;
-  };
-
-  const prepareWorktree = () => {
-    const trimmedName = name.trim();
-    if (trimmedName.length === 0 || createPending) return;
-    setNotice(null);
-    void actions.run(
-      "create",
-      "Unable to create worktree",
-      async () => {
-        if (canLink && !modelSelection)
-          throw new Error("Enable a provider to link an issue to a new thread");
-        const result = await prepare({
-          environmentId,
-          input: {
-            ...reference,
-            name: trimmedName,
-            ...(baseBranch.trim() ? { baseBranch: baseBranch.trim() } : {}),
-          },
-        });
-        if (result._tag === "Failure") return result;
-        branches.refresh();
-        if (!canLink) return result;
-        const { worktree } = result.value as IssueWorktreePrepareResult;
-        const threadId = await createWorktreeThread({
-          branch: worktree.branch,
-          worktreePath: worktree.worktreePath,
-        });
-        return link({ environmentId, input: { ...reference, threadId, source: "created" } });
-      },
-      () => {
-        setNotice(canLink ? "Worktree created and linked." : "Worktree created.");
-        onActed?.();
-      },
-    );
-  };
-
-  const checkDelete = () => {
-    if (selectedInputs.length === 0 || preflightPending) return;
-    setNotice(null);
-    void actions.run(
-      "preflight",
-      "Unable to check worktrees",
-      () =>
-        preflight({
-          environmentId,
-          input: { selections: selectedInputs },
-        }),
-      (value) => {
-        setPreflightResult(value as IssueWorktreeDeletePreflightResult);
-        setDeleteResult(null);
-        setIssueDecisions([]);
-        setForceAcknowledged(false);
-        setNotice("Worktree check complete.");
-      },
-    );
-  };
-
-  const deleteWorktrees = () => {
-    if (!preflightResult || selectedInputs.length === 0 || deletePending || preflightPending)
-      return;
-    setNotice(null);
-    void actions.run(
-      "delete",
-      "Unable to delete worktrees",
-      () =>
-        remove({
-          environmentId,
-          input: {
-            selections: preflightResult.items.map(({ threadId, projectId, path }) => ({
-              threadId,
-              projectId,
-              path,
-            })),
-            forceAcknowledged,
-            issueDecisions,
-          },
-        }),
-      (value) => {
-        setDeleteResult(value as IssueWorktreeDeleteResult);
-        branches.refresh();
-        setNotice("Worktree deletion finished.");
-        onActed?.();
-      },
-    );
-  };
-
-  const replaceWorktree = () => {
-    const trimmedName = name.trim();
-    if (trimmedName.length === 0 || replacePending) return;
-    setNotice(null);
-    void actions.run(
-      "replace",
-      "Unable to replace worktree",
-      () =>
-        replace({
-          environmentId,
-          input: {
-            ...reference,
-            name: trimmedName,
-            ...(baseBranch.trim() ? { baseBranch: baseBranch.trim() } : {}),
-            ...(linkedWork?.worktreePath ? { worktreePath: linkedWork.worktreePath } : {}),
-          },
-        }),
-      () => {
-        branches.refresh();
-        setNotice("Linked worktree replaced.");
-        onActed?.();
-      },
-    );
-  };
-
-  const openWorktree = (target: (typeof worktrees)[number]) => {
-    if (openWorktreePending) return;
-    setNotice(null);
-    void actions.run(
-      "open-worktree",
-      "Unable to open a new thread in this worktree",
-      async () => {
-        const opened = await newThread(scopeProjectRef(environmentId, target.projectId), {
-          branch: target.branch,
-          worktreePath: target.worktreePath,
-          envMode: "worktree",
-        });
-        if (opened === null) throw new Error("The new thread did not open");
-        return { _tag: "Success" };
-      },
-      () => {
-        onOpenChange(false);
-      },
-    );
-  };
-
-  const linkWorktree = (target: (typeof worktrees)[number]) => {
-    if (linkedWork !== null || !canLink || linkPending) return;
-    setNotice(null);
-    setLinkingThreadId(target.id);
-    void actions
-      .run(
-        "link",
-        "Unable to link issue to worktree",
-        async () => {
-          const threadId =
-            target.threadId ??
-            (await createWorktreeThread({
-              branch: target.branch,
-              worktreePath: target.worktreePath,
-            }));
-          return link({
-            environmentId,
-            input: {
-              ...reference,
-              threadId,
-              source: "manual",
-            },
-          });
-        },
-        () => {
-          setNotice("Issue linked to this worktree.");
-          onActed?.();
-        },
-      )
-      .finally(() => setLinkingThreadId(null));
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogPopup className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Work on issue #{reference.number}</DialogTitle>
-          <DialogDescription>
-            {canLink
-              ? "Create and link a worktree, or continue in an existing one."
-              : "Create a worktree, or continue in an existing one."}
-          </DialogDescription>
-        </DialogHeader>
-        <DialogPanel className="space-y-5">
-          <section className="space-y-3">
-            <label className="block text-sm font-medium">
-              Worktree name
-              <Input
-                className="mt-1"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                disabled={createPending || replacePending}
-              />
-            </label>
-            <label className="block text-sm font-medium">
-              Base branch <span className="font-normal text-muted-foreground">(optional)</span>
-              <Input
-                className="mt-1"
-                value={baseBranch}
-                onChange={(event) => setBaseBranch(event.target.value)}
-                placeholder="main"
-                disabled={createPending || replacePending}
-              />
-            </label>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                onClick={prepareWorktree}
-                disabled={name.trim().length === 0 || createPending}
-                aria-busy={createPending}
-              >
-                {createPending ? (
-                  <>
-                    <Spinner className="size-3.5" aria-label="Creating worktree" /> Creating…
-                  </>
-                ) : (
-                  <>
-                    <GitBranchIcon /> {canLink ? "Create and link" : "Create worktree"}
-                  </>
-                )}
-              </Button>
-              {linkedWork ? (
-                <Button
-                  variant="outline"
-                  onClick={replaceWorktree}
-                  disabled={name.trim().length === 0 || replacePending}
-                  aria-busy={replacePending}
-                >
-                  {replacePending ? (
-                    <>
-                      <Spinner className="size-3.5" aria-label="Replacing worktree" /> Replacing…
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCwIcon /> Replace linked worktree
-                    </>
-                  )}
-                </Button>
-              ) : null}
-            </div>
-            <ActionFeedback
-              pending={createPending}
-              pendingLabel="Creating worktree…"
-              error={actions.errorFor("create")}
-            />
-            <ActionFeedback
-              pending={replacePending}
-              pendingLabel="Replacing detached worktree…"
-              error={actions.errorFor("replace")}
-            />
-          </section>
-          <ActionFeedback pending={isPending} pendingLabel="Loading worktrees…" error={error} />
-          {worktrees.length > 0 ? (
-            <section className="space-y-2">
-              <div>
-                <h3 className="text-sm font-semibold">
-                  Existing worktrees{" "}
-                  <span className="text-muted-foreground">({worktrees.length})</span>
-                </h3>
-                <p className="text-xs text-muted-foreground">
-                  {worktreePrimaryAction === "link-issue"
-                    ? "Link this issue to an existing worktree, or select worktrees to check before deleting."
-                    : "Start a new thread in a worktree, or select worktrees to check before deleting."}
-                </p>
-              </div>
-              {worktrees.length > 8 ? (
-                <label className="relative block">
-                  <SearchIcon className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    className="ps-8"
-                    value={worktreeQuery}
-                    onChange={(event) => setWorktreeQuery(event.target.value)}
-                    placeholder="Search worktrees"
-                    aria-label="Search worktrees"
-                  />
-                </label>
-              ) : null}
-              <div className="max-h-64 space-y-1 overflow-y-auto pe-1">
-                {visibleWorktrees.map((thread) => {
-                  const linked = issueWorktreeIsLinked(thread, linkedWork);
-                  const checkboxId = `issue-worktree-${thread.id}`;
-                  return (
-                    <div
-                      key={thread.id}
-                      className="flex items-center gap-2 rounded-lg border p-2 text-sm"
-                    >
-                      <Checkbox
-                        id={checkboxId}
-                        checked={selected.has(thread.id)}
-                        onCheckedChange={(checked) => {
-                          setPreflightResult(null);
-                          setIssueDecisions([]);
-                          setSelected((current) => {
-                            const next = new Set(current);
-                            if (checked === true) next.add(thread.id);
-                            else next.delete(thread.id);
-                            return next;
-                          });
-                        }}
-                        aria-label={`Select ${thread.title}`}
-                        disabled={deletePending || preflightPending || thread.threadId === null}
-                      />
-                      <label htmlFor={checkboxId} className="min-w-0 flex-1 cursor-pointer">
-                        <span className="block truncate">{thread.title}</span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {thread.worktreePath}
-                        </span>
-                      </label>
-                      {linked ? (
-                        <Badge size="sm" variant="success">
-                          <CheckIcon /> Linked
-                        </Badge>
-                      ) : null}
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        aria-label={
-                          worktreePrimaryAction === "link-issue"
-                            ? `Link issue #${reference.number} to ${thread.branch ?? thread.title}`
-                            : `New thread in ${thread.branch ?? thread.title}`
-                        }
-                        onClick={() =>
-                          worktreePrimaryAction === "link-issue"
-                            ? linkWorktree(thread)
-                            : openWorktree(thread)
-                        }
-                        disabled={linkPending || openWorktreePending}
-                        aria-busy={linkingThreadId === thread.id}
-                      >
-                        {linkingThreadId === thread.id ? (
-                          <>
-                            <Spinner className="size-3.5" aria-label="Linking issue" /> Linking…
-                          </>
-                        ) : worktreePrimaryAction === "link-issue" ? (
-                          <>
-                            <LinkIcon /> Link issue
-                          </>
-                        ) : (
-                          <>
-                            <SquarePenIcon /> New thread
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  );
-                })}
-                {visibleWorktrees.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-muted-foreground">
-                    No worktrees match “{worktreeQuery.trim()}”.
-                  </p>
-                ) : null}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={selectedItems.length === 0 || preflightPending}
-                  onClick={checkDelete}
-                  aria-busy={preflightPending}
-                >
-                  {preflightPending ? (
-                    <>
-                      <Spinner className="size-3.5" aria-label="Checking worktrees" /> Checking…
-                    </>
-                  ) : (
-                    <>
-                      <Trash2Icon />
-                      {selectedItems.length === 0
-                        ? "Select worktrees to delete"
-                        : `Check ${selectedItems.length} before deleting`}
-                    </>
-                  )}
-                </Button>
-              </div>
-              <ActionFeedback
-                pending={preflightPending}
-                pendingLabel="Checking worktrees before deletion…"
-                error={actions.errorFor("preflight")}
-              />
-              <ActionFeedback
-                pending={linkPending}
-                pendingLabel="Linking issue to worktree…"
-                error={actions.errorFor("link")}
-              />
-              <ActionFeedback
-                pending={openWorktreePending}
-                pendingLabel="Opening a new thread in the selected worktree…"
-                error={actions.errorFor("open-worktree")}
-              />
-            </section>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No existing named worktrees for this repository.
-            </p>
-          )}
-          {preflightResult ? (
-            <section className="space-y-2 rounded-lg border border-warning/30 bg-warning-surface/20 p-3 text-sm">
-              <p>
-                {preflightResult.items.length} worktree
-                {preflightResult.items.length === 1 ? "" : "s"} checked. Review changed files and
-                unpushed commits before continuing.
-              </p>
-              {preflightResult.items.map((item) => (
-                <div key={`${item.threadId}:${item.path}`} className="text-xs">
-                  <strong>{item.branch}</strong> · {item.changedFiles.length} changed files ·{" "}
-                  {item.unpushedCommitCount} unpushed commits
-                  {item.reason ? ` · ${item.reason}` : ""}
-                </div>
-              ))}
-              <WorktreeIssueDecisions
-                issues={preflightResult.items.flatMap((item) => item.issues ?? [])}
-                decisions={issueDecisions}
-                onChange={setIssueDecisions}
-                disabled={deletePending}
-              />
-              {preflightResult.items.some((item) => item.requiresForce) ? (
-                <label className="flex items-center gap-2">
-                  <Checkbox
-                    checked={forceAcknowledged}
-                    onCheckedChange={(checked) => setForceAcknowledged(checked === true)}
-                    disabled={deletePending}
-                  />
-                  I understand force deletion may discard uncommitted work.
-                </label>
-              ) : null}
-              <Button
-                size="sm"
-                variant="destructive"
-                disabled={
-                  deletePending ||
-                  preflightPending ||
-                  preflightResult.items.some((item) => item.blocked) ||
-                  (!forceAcknowledged && preflightResult.items.some((item) => item.requiresForce))
-                }
-                onClick={deleteWorktrees}
-                aria-busy={deletePending}
-              >
-                {deletePending ? (
-                  <>
-                    <Spinner className="size-3.5" aria-label="Deleting worktrees" /> Deleting…
-                  </>
-                ) : (
-                  "Delete selected worktrees"
-                )}
-              </Button>
-              <ActionFeedback
-                pending={deletePending}
-                pendingLabel="Deleting selected worktrees…"
-                error={actions.errorFor("delete")}
-              />
-            </section>
-          ) : null}
-          {deleteResult ? (
-            <section className="rounded-lg border border-emerald-500/30 bg-emerald-500/8 p-3 text-sm">
-              <p className="font-medium">Deletion results</p>
-              {deleteResult.results.map((item) => (
-                <p
-                  key={`${item.threadId}:${item.path}`}
-                  className={
-                    item.deleted ? "text-emerald-700 dark:text-emerald-400" : "text-destructive"
-                  }
-                >
-                  {item.deleted ? "Deleted" : "Not deleted"} {item.path}
-                  {item.error ? ` · ${item.error}` : ""}
-                  {item.warnings?.map((warning) => (
-                    <span key={warning} className="block">
-                      {warning}
-                    </span>
-                  ))}
-                  {item.detachedWorkspace ? " · thread is now read-only" : ""}
-                </p>
-              ))}
-            </section>
-          ) : null}
-          {notice ? (
-            <p className="text-sm text-muted-foreground" role="status" aria-live="polite">
-              {notice}
-            </p>
-          ) : null}
-        </DialogPanel>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Done
+        <div className="mr-4 flex h-7 shrink-0 items-center justify-end gap-1">
+          <Button size="xs" variant="default" disabled aria-label="Work on issue">
+            <GitBranchIcon aria-hidden className="size-3.5" />
+            <span className="@max-[30rem]/issue-header:hidden">Work on issue</span>
           </Button>
-        </DialogFooter>
-      </DialogPopup>
-    </Dialog>
+          <Button size="icon-xs" variant="ghost" disabled aria-label="Issue actions loading">
+            <EllipsisIcon aria-hidden className="size-4" />
+          </Button>
+        </div>
+        <div className="col-span-2 mt-1 min-w-0 px-4 pb-4 motion-safe:animate-skeleton">
+          <div className="flex min-h-7 min-w-0 items-center sm:min-h-6">
+            <GhostBar className="h-5 w-4/5 max-w-md" />
+          </div>
+          <div className="mt-2 flex min-h-5 min-w-0 items-center gap-2">
+            <GhostBar className="size-4 rounded-full" />
+            <GhostBar className="h-3 w-14" />
+            <GhostBar className="h-3 w-24" />
+            <GhostBar className="ml-auto h-3 w-12" />
+          </div>
+        </div>
+        <nav
+          className="col-span-2 flex min-w-0 flex-wrap items-center gap-2 border-t border-border/60 px-4 py-2"
+          aria-label="Issue tabs"
+          inert
+        >
+          <ToggleGroup
+            className="shrink-0"
+            size="segmented"
+            variant="segmented"
+            value={["summary"]}
+          >
+            {TABS.map((item) => (
+              <Toggle key={item.value} value={item.value} tabIndex={-1}>
+                {item.label}
+              </Toggle>
+            ))}
+          </ToggleGroup>
+          <GhostBar className="ml-auto h-3 w-16" />
+        </nav>
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden motion-safe:animate-skeleton">
+        <section className="space-y-2 px-4 pt-2.5 pb-1">
+          {[
+            { icon: <UsersIcon aria-hidden className="size-3.5" />, label: "Assignees" },
+            { icon: <TagIcon aria-hidden className="size-3.5" />, label: "Labels" },
+          ].map((row) => (
+            <div
+              key={row.label}
+              className="grid min-h-7 min-w-0 grid-cols-[6rem_minmax(0,1fr)] items-center gap-2 text-xs sm:min-h-6"
+            >
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                {row.icon}
+                {row.label}
+              </span>
+              <span className="flex min-w-0 items-center gap-1.5">
+                <GhostBar className="h-4.5 w-20" />
+                <GhostBar className="h-4.5 w-16" />
+              </span>
+            </div>
+          ))}
+        </section>
+        <section className="space-y-2 px-4 py-3">
+          <GhostBar className="mb-3 h-3 w-20" />
+          <GhostBar className="h-4 w-full" />
+          <GhostBar className="h-4 w-11/12" />
+          <GhostBar className="h-4 w-4/5" />
+          <GhostBar className="h-4 w-2/3" />
+        </section>
+      </div>
+    </div>
   );
 }

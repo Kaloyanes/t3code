@@ -38,7 +38,7 @@ import {
   resolvePullRequestState,
 } from "./pullRequestPresentation";
 
-function GhostBar({ className }: { className?: string | undefined }) {
+export function GhostBar({ className }: { className?: string | undefined }) {
   return <div aria-hidden className={cn("h-3 rounded bg-muted-foreground/15", className)} />;
 }
 
@@ -51,19 +51,27 @@ const DEFAULT_DETAIL_TABS = [
   { value: "code", label: "Code" },
 ] as const;
 
-/** Rows in the list's own grid — glyph, title over meta, time over diffstat. */
+/**
+ * Rows in the list's own grid — glyph, title over meta, time over diffstat. Issue rows carry no
+ * diffstat, so they leave that bar out.
+ */
 export function PullRequestListGhost({
   rows = 7,
   caption,
+  label = "Loading pull requests",
+  diffStat = true,
 }: {
   rows?: number;
   /** Said where the group headers speak, for the states with something to say — a search. */
   caption?: string;
+  /** Announced while loading when there is no caption. */
+  label?: string;
+  diffStat?: boolean;
 }) {
   return (
     <div
       role="status"
-      aria-label={caption ?? "Loading pull requests"}
+      aria-label={caption ?? label}
       className="motion-safe:animate-skeleton space-y-0.5"
     >
       {caption ? (
@@ -81,7 +89,7 @@ export function PullRequestListGhost({
           </div>
           <div className="flex flex-col items-end gap-1.5">
             <GhostBar className="w-12" />
-            <GhostBar className="w-16" />
+            {diffStat ? <GhostBar className="w-16" /> : null}
           </div>
         </div>
       ))}

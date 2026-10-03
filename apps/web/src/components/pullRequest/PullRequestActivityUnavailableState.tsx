@@ -8,10 +8,12 @@ export function PullRequestActivityUnavailableState({
   error,
   onRetry,
   compact = false,
+  title = "Could not load pull request activity",
 }: {
   error: string;
   onRetry: () => void;
   compact?: boolean;
+  title?: string;
 }) {
   return (
     <div
@@ -20,7 +22,7 @@ export function PullRequestActivityUnavailableState({
         compact ? "py-3" : "min-h-48 px-4 py-10",
       )}
     >
-      <p className="text-sm font-medium text-foreground">Could not load pull request activity</p>
+      <p className="text-sm font-medium text-foreground">{title}</p>
       <p className="max-w-md text-xs text-muted-foreground">{error}</p>
       <Button size="sm" variant="outline" onClick={onRetry}>
         <RefreshIcon aria-hidden size="sm" />

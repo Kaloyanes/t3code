@@ -199,6 +199,8 @@ import {
   IssueCommentUpdateResult,
   IssueCommentsInput,
   IssueCommentsResult,
+  IssueTimelineInput,
+  IssueTimelineResult,
   IssueCreateInput,
   IssueCreateResult,
   IssueDetail,
@@ -536,6 +538,7 @@ export const WS_METHODS = {
   issuesList: "issues.list",
   issuesDetail: "issues.detail",
   issuesComments: "issues.comments",
+  issuesTimeline: "issues.timeline",
   issuesCandidates: "issues.candidates",
   issuesTemplates: "issues.templates",
   issuesCreate: "issues.create",
@@ -1266,6 +1269,12 @@ const WsIssuesDetailRpc = Rpc.make(WS_METHODS.issuesDetail, {
 const WsIssuesCommentsRpc = Rpc.make(WS_METHODS.issuesComments, {
   payload: IssueCommentsInput,
   success: IssueCommentsResult,
+  error: IssueRpcErrorWithAuthorization,
+});
+
+const WsIssuesTimelineRpc = Rpc.make(WS_METHODS.issuesTimeline, {
+  payload: IssueTimelineInput,
+  success: IssueTimelineResult,
   error: IssueRpcErrorWithAuthorization,
 });
 
@@ -2140,6 +2149,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsIssuesListRpc,
   WsIssuesDetailRpc,
   WsIssuesCommentsRpc,
+  WsIssuesTimelineRpc,
   WsIssuesCandidatesRpc,
   WsIssuesTemplatesRpc,
   WsIssuesCreateRpc,

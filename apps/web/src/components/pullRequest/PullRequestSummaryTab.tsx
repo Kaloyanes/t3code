@@ -57,19 +57,20 @@ import { PullRequestCommentBody } from "./PullRequestCommentBody";
 import { PullRequestMarkdownEditor } from "./PullRequestMarkdownEditor";
 import { PullRequestReactionBar } from "./PullRequestReactions";
 import { PullRequestConversationGhost } from "./PullRequestGhosts";
-import { sectionCollapseAnchorScrollTop } from "./pullRequestSummaryScroll.logic";
+import { MetaRow, Section } from "../workItem/WorkItemSummaryParts";
 
 /** One reviewer, however a host happens to have cased their login this time. */
 function reviewerKey(login: string): string {
   return login.toLowerCase();
 }
 
-function CommentIdentity({
+/** Who wrote a remark and when, linking to it on the host. Shared with the issue panel. */
+export function CommentIdentity({
   comment,
   detail,
 }: {
-  comment: PullRequestComment;
-  detail: PullRequestDetailView;
+  comment: Pick<PullRequestComment, "author" | "url" | "createdAt">;
+  detail: Pick<PullRequestDetailView, "provider" | "url">;
 }) {
   const actor = comment.author;
   const profileUrl =
@@ -257,94 +258,6 @@ function CollapsedComment({
           ) : null}
         </CollapsiblePanel>
       </article>
-    </Collapsible>
-  );
-}
-
-function MetaRow({
-  icon,
-  label,
-  children,
-}: {
-  icon: ReactNode;
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="grid min-h-7 min-w-0 grid-cols-[6rem_minmax(0,1fr)] items-center gap-2 text-xs sm:min-h-6">
-      <span className="flex items-center gap-1.5 text-muted-foreground">
-        {icon}
-        {label}
-      </span>
-      <span className="min-w-0 text-foreground">{children}</span>
-    </div>
-  );
-}
-
-function Section({
-  title,
-  defaultOpen = true,
-  keepMounted = false,
-  actions,
-  children,
-}: {
-  title: string;
-  defaultOpen?: boolean;
-  keepMounted?: boolean;
-  /** Heading controls stay separate from the collapse trigger so they remain independently usable. */
-  actions?: ReactNode;
-  children: ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const headingRef = useRef<HTMLDivElement>(null);
-  const setOpenWithScrollAnchor = (nextOpen: boolean) => {
-    if (!nextOpen) {
-      const heading = headingRef.current;
-      const section = heading?.closest<HTMLElement>("[data-pull-request-summary-section]");
-      const scroller = heading?.closest<HTMLElement>("[data-pull-request-summary-scroll]");
-      if (heading && section && scroller) {
-        const target = sectionCollapseAnchorScrollTop({
-          scrollTop: scroller.scrollTop,
-          viewportTop: scroller.getBoundingClientRect().top,
-          sectionTop: section.getBoundingClientRect().top,
-          headingTop: heading.getBoundingClientRect().top,
-        });
-        // Synchronous with the press: React commits the collapsed height before the browser
-        // paints, so the reader sees the heading they pressed stay put rather than a jump first.
-        if (target !== null) scroller.scrollTop = target;
-      }
-    }
-    setOpen(nextOpen);
-  };
-  return (
-    <Collapsible
-      open={open}
-      onOpenChange={setOpenWithScrollAnchor}
-      render={<section aria-label={title} />}
-      data-pull-request-summary-section
-    >
-      {/* The heading rides the top of the scroll box the way a diff's file header does, so a
-          section can be collapsed from wherever its body has been read to rather than only from
-          where it started. Opaque, because the rows it covers scroll beneath it. */}
-      <div
-        ref={headingRef}
-        className="sticky top-0 z-10 flex w-full items-center bg-background pr-4"
-      >
-        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1.5 px-4 py-3 text-left text-xs font-medium text-muted-foreground hover:text-foreground">
-          <span>{title}</span>
-          <ChevronRightIcon
-            aria-hidden
-            className={cn(
-              "size-3.5 text-muted-foreground/60 transition-transform",
-              open && "rotate-90",
-            )}
-          />
-        </CollapsibleTrigger>
-        {actions}
-      </div>
-      <CollapsiblePanel keepMounted={keepMounted}>
-        <div className="px-4 pb-4">{children}</div>
-      </CollapsiblePanel>
     </Collapsible>
   );
 }

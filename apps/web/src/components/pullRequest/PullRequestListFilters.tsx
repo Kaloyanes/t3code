@@ -98,11 +98,15 @@ export function PullRequestSearchInput({
   value,
   busy,
   onChange,
+  placeholder = "Search pull requests, or label:bug",
+  ariaLabel = "Search pull requests",
 }: {
   value: string;
   /** A search is on its way to the hosts, said where the typing is rather than over the list. */
   busy?: boolean;
   onChange: (value: string) => void;
+  placeholder?: string;
+  ariaLabel?: string;
 }) {
   return (
     <InputGroup className="min-w-0 flex-1 **:[input]:h-9 sm:**:[input]:h-8">
@@ -113,8 +117,8 @@ export function PullRequestSearchInput({
         type="search"
         value={value}
         onChange={(event) => onChange(event.currentTarget.value)}
-        placeholder="Search pull requests, or label:bug"
-        aria-label="Search pull requests"
+        placeholder={placeholder}
+        aria-label={ariaLabel}
       />
     </InputGroup>
   );
@@ -209,7 +213,7 @@ function PullRequestFilterRadioGroup<Value extends string>({
   );
 }
 
-function PullRequestFilterRadioSubmenu<Value extends string>({
+export function PullRequestFilterRadioSubmenu<Value extends string>({
   label,
   value,
   options,
@@ -243,14 +247,32 @@ function PullRequestFilterRadioSubmenu<Value extends string>({
   );
 }
 
-function PullRequestAuthorFilter({
+const mergesLoaded = (option: { readonly mergedCount?: number }) =>
+  `${option.mergedCount ?? 0} merges loaded`;
+
+/**
+ * One person narrowing: a searchable list of the people the loaded rows name. The issue page
+ * reuses it for both authors and assignees, so `label`, the noun and the count line are its own.
+ */
+export function PullRequestAuthorFilter({
   value,
   options,
   onChange,
+  label = "Author",
+  noun = "authors",
+  detail = mergesLoaded,
 }: {
   value: string | undefined;
-  options: ReadonlyArray<PullRequestAuthorFacet>;
+  options: ReadonlyArray<
+    Pick<PullRequestAuthorFacet, "actor" | "count"> & { mergedCount?: number }
+  >;
   onChange: (author: string | undefined) => void;
+  label?: string;
+  /** Plural, lowercase: "Search authors", "No authors found". */
+  noun?: string;
+  detail?: (
+    option: Pick<PullRequestAuthorFacet, "actor" | "count"> & { mergedCount?: number },
+  ) => string;
 }) {
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
@@ -271,7 +293,7 @@ function PullRequestAuthorFilter({
     <MenuSub>
       <MenuSubTrigger>
         <UserRoundIcon aria-hidden className="size-3.5" />
-        <span className="flex-1">Author</span>
+        <span className="flex-1">{label}</span>
         <span className="min-w-0 max-w-32 truncate text-xs text-muted-foreground">
           {value ?? "Anyone"}
         </span>
@@ -290,8 +312,8 @@ function PullRequestAuthorFilter({
               onKeyDown={(event) => {
                 if (event.key !== "ArrowDown" && event.key !== "Escape") event.stopPropagation();
               }}
-              placeholder="Search authors"
-              aria-label="Search authors"
+              placeholder={`Search ${noun}`}
+              aria-label={`Search ${noun}`}
             />
           </InputGroup>
         </div>
@@ -308,19 +330,19 @@ function PullRequestAuthorFilter({
                 <PullRequestActorAvatar actor={option.actor} />
                 <span className="min-w-0 flex-1 truncate">{option.actor.login}</span>
                 <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                  {option.mergedCount} merges loaded
+                  {detail(option)}
                 </span>
               </span>
             </MenuRadioItem>
           ))}
-          {visible.length === 0 ? <MenuItem disabled>No authors found</MenuItem> : null}
+          {visible.length === 0 ? <MenuItem disabled>No {noun} found</MenuItem> : null}
         </MenuRadioGroup>
       </MenuSubPopup>
     </MenuSub>
   );
 }
 
-function PullRequestLabelFilter({
+export function PullRequestLabelFilter({
   value,
   options,
   onChange,

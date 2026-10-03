@@ -1,8 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
-import { IssueListResult } from "@t3tools/contracts";
+import { EnvironmentId as EnvironmentIdSchema, IssueListResult } from "@t3tools/contracts";
 import type {
   EnvironmentId,
   IssueAuthStatus,
@@ -11,9 +12,11 @@ import type {
   IssueCandidatesResult,
   IssueCommentsInput,
   IssueCommentsResult,
+  IssueTimelineInput,
+  IssueTimelineResult,
   IssueDetail,
-  IssueListEntry,
   IssueListInput,
+  IssueListSort,
   IssueRepositorySelection,
   IssueTemplatesInput,
   IssueTemplatesResult,
@@ -21,6 +24,8 @@ import type {
 } from "@t3tools/contracts";
 import { createIssueEnvironmentAtoms } from "@t3tools/client-runtime/state/issues";
 import { useCallback, useMemo } from "react";
+
+import { mergeIssueListResults, type MergedIssueList } from "../components/issue/issue.logic";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -84,42 +89,31 @@ function createMergedIssueQuery<Input, A>(
   };
 }
 
-export interface MergedIssueList {
-  readonly entries: ReadonlyArray<IssueListEntry>;
-  readonly providers: IssueListResult["providers"];
-  readonly errors: IssueListResult["errors"];
-  readonly truncatedEnvironments: ReadonlyArray<EnvironmentId>;
-  readonly nextCursorsByEnvironment: ReadonlyMap<EnvironmentId, IssueListResult["nextCursors"]>;
-}
-
 const useIssueListsQuery = createMergedIssueQuery("web-issues:list", issueEnvironment.list);
 
-export function useIssueList(targets: ReadonlyArray<EnvironmentQueryTarget<IssueListInput>>): {
+export function useIssueList(
+  targets: ReadonlyArray<EnvironmentQueryTarget<IssueListInput>>,
+  sort?: IssueListSort,
+): {
   readonly data: MergedIssueList | null;
+  /** Each server's raw answer, for the snapshot cache. */
+  readonly values: ReadonlyArray<readonly [EnvironmentId, IssueListResult]>;
   readonly error: string | null;
   readonly isPending: boolean;
   readonly refresh: (override?: ReadonlyArray<EnvironmentQueryTarget<IssueListInput>>) => void;
 } {
   const query = useIssueListsQuery(targets);
-  const data = useMemo<MergedIssueList | null>(() => {
-    if (query.values.length === 0) return null;
-    const entries = query.values
-      .flatMap(([, result]) => result.entries)
-      .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-    const providers = query.values.flatMap(([, result]) => result.providers);
-    const errors = query.values.flatMap(([, result]) => result.errors);
-    const truncatedEnvironments = query.values.flatMap(([environmentId, result]) =>
-      result.truncated ? [environmentId] : [],
-    );
-    const nextCursorsByEnvironment = new Map<EnvironmentId, IssueListResult["nextCursors"]>();
-    for (const [environmentId, result] of query.values) {
-      if (Object.keys(result.nextCursors).length > 0) {
-        nextCursorsByEnvironment.set(environmentId, result.nextCursors);
-      }
-    }
-    return { entries, providers, errors, truncatedEnvironments, nextCursorsByEnvironment };
-  }, [query.values]);
-  return { data, error: query.error, isPending: query.isPending, refresh: query.refresh };
+  const data = useMemo<MergedIssueList | null>(
+    () => (query.values.length === 0 ? null : mergeIssueListResults(query.values, sort)),
+    [query.values, sort],
+  );
+  return {
+    data,
+    values: query.values,
+    error: query.error,
+    isPending: query.isPending,
+    refresh: query.refresh,
+  };
 }
 
 const EMPTY_DETAIL_RESULT = Atom.make(AsyncResult.initial<IssueDetail, unknown>()).pipe(
@@ -127,6 +121,9 @@ const EMPTY_DETAIL_RESULT = Atom.make(AsyncResult.initial<IssueDetail, unknown>(
 );
 const EMPTY_COMMENTS_RESULT = Atom.make(AsyncResult.initial<IssueCommentsResult, unknown>()).pipe(
   Atom.withLabel("web-issues:comments:empty"),
+);
+const EMPTY_TIMELINE_RESULT = Atom.make(AsyncResult.initial<IssueTimelineResult, unknown>()).pipe(
+  Atom.withLabel("web-issues:timeline:empty"),
 );
 const EMPTY_CANDIDATES_RESULT = Atom.make(
   AsyncResult.initial<IssueCandidatesResult, unknown>(),
@@ -146,6 +143,8 @@ function useIssueQuery<A, Input>(
   readonly error: string | null;
   readonly isPending: boolean;
   readonly refresh: () => void;
+  /** The server predates this request: it answers that it does not know the method. */
+  readonly unsupported: boolean;
 } {
   const result = useAtomValue(atom);
   const refresh = useCallback(() => {
@@ -156,6 +155,10 @@ function useIssueQuery<A, Input>(
     error: active && result._tag === "Failure" ? formatEnvironmentQueryError(result.cause) : null,
     isPending: active && result.waiting,
     refresh,
+    unsupported:
+      active &&
+      result._tag === "Failure" &&
+      String(Cause.squash(result.cause)).includes("Unknown request tag"),
   };
 }
 
@@ -181,6 +184,19 @@ export function useIssueComments(target: EnvironmentQueryTarget<IssueCommentsInp
 } {
   return useIssueQuery(
     target === null ? EMPTY_COMMENTS_RESULT : issueEnvironment.comments(target),
+    target !== null,
+  );
+}
+
+export function useIssueTimeline(target: EnvironmentQueryTarget<IssueTimelineInput> | null): {
+  readonly data: IssueTimelineResult | null;
+  readonly error: string | null;
+  readonly isPending: boolean;
+  readonly refresh: () => void;
+  readonly unsupported: boolean;
+} {
+  return useIssueQuery(
+    target === null ? EMPTY_TIMELINE_RESULT : issueEnvironment.timeline(target),
     target !== null,
   );
 }
@@ -235,8 +251,9 @@ export interface IssueDraft {
 }
 
 const ISSUE_DRAFT_STORAGE_KEY = "t3code:issue-drafts:v1";
-const ISSUE_SELECTION_STORAGE_KEY = "t3code:issue-selection:v1";
-const ISSUE_SNAPSHOT_STORAGE_KEY = "t3code:issue-snapshots:v1";
+const ISSUE_SNAPSHOT_STORAGE_KEY = "t3code:issue-snapshots:v2";
+/** Keys earlier builds wrote and nothing reads any more. */
+const RETIRED_ISSUE_STORAGE_KEYS = ["t3code:issue-snapshots:v1", "t3code:issue-selection:v1"];
 const MAX_DRAFTS = 100;
 const MAX_SNAPSHOTS = 100;
 
@@ -331,54 +348,18 @@ export function clearIssueDraft(
   }
 }
 
-function validIssueSelection(value: unknown): value is IssueRepositorySelection {
-  if (!value || typeof value !== "object") return false;
-  const selection = value as Partial<IssueRepositorySelection>;
-  return (
-    typeof selection.projectId === "string" &&
-    typeof selection.repository === "string" &&
-    selection.repository.trim().length > 0 &&
-    (selection.host === undefined || typeof selection.host === "string")
-  );
-}
-
-export function readIssueRepositorySelection(
-  storage?: Pick<Storage, "getItem">,
-): IssueRepositorySelection | null {
-  if (!storage) return null;
-  try {
-    const raw = storage.getItem(ISSUE_SELECTION_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    return validIssueSelection(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-export function writeIssueRepositorySelection(
-  storage: Pick<Storage, "setItem"> | undefined,
-  selection: IssueRepositorySelection,
-): void {
-  if (!storage) return;
-  try {
-    storage.setItem(ISSUE_SELECTION_STORAGE_KEY, JSON.stringify(selection));
-  } catch {
-    // Persistence is best effort; the URL remains authoritative for this visit.
-  }
-}
-
+/** One list question's last good answers, per server, so the rows keep the server they came from. */
 export interface IssueListSnapshot {
-  readonly version: 1;
+  readonly version: 2;
   readonly savedAt: number;
-  readonly result: IssueListResult;
+  readonly results: ReadonlyArray<readonly [EnvironmentId, IssueListResult]>;
 }
 
 const decodeIssueListSnapshot = Schema.decodeUnknownOption(
   Schema.Struct({
-    version: Schema.Literal(1),
+    version: Schema.Literal(2),
     savedAt: Schema.Number,
-    result: IssueListResult,
+    results: Schema.Array(Schema.Tuple([EnvironmentIdSchema, IssueListResult])),
   }),
 );
 
@@ -410,12 +391,13 @@ export function readIssueListSnapshot(
 export function writeIssueListSnapshot(
   storage: Pick<Storage, "getItem" | "setItem"> | undefined,
   key: string,
-  result: IssueListResult,
+  results: IssueListSnapshot["results"],
   savedAt = Date.now(),
-): void {
-  if (!storage) return;
+): IssueListSnapshot | null {
+  if (!storage) return null;
   const current = readSnapshotMap(storage);
-  current[key] = { version: 1, savedAt, result };
+  const snapshot: IssueListSnapshot = { version: 2, savedAt, results };
+  current[key] = snapshot;
   const bounded = Object.fromEntries(
     Object.entries(current)
       .toSorted(([, left], [, right]) => right.savedAt - left.savedAt)
@@ -425,5 +407,18 @@ export function writeIssueListSnapshot(
     storage.setItem(ISSUE_SNAPSHOT_STORAGE_KEY, JSON.stringify(bounded));
   } catch {
     // Persistence is best effort; a failed cache write must not hide live results.
+  }
+  return snapshot;
+}
+
+/** Drops what earlier builds stored and nothing reads any more. Best effort. */
+export function removeRetiredIssueStorage(storage: Pick<Storage, "removeItem"> | undefined): void {
+  if (!storage) return;
+  for (const key of RETIRED_ISSUE_STORAGE_KEYS) {
+    try {
+      storage.removeItem(key);
+    } catch {
+      // A blocked store keeps the old keys; they are inert.
+    }
   }
 }

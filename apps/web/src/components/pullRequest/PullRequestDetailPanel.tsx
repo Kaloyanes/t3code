@@ -46,7 +46,6 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -88,6 +87,7 @@ import {
 } from "~/state/pullRequests";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { PullRequestStackMenu } from "./PullRequestStackMenu";
+import { useCondensingChrome } from "../workItem/useCondensingChrome";
 import { PullRequestThreadLinks } from "./PullRequestThreadLinks";
 import { vcsEnvironment } from "~/state/vcs";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
@@ -541,25 +541,7 @@ export function PullRequestDetailPanel({
       return { key: tabScopeKey, tabs: new Set(previous.tabs).add(tab) };
     });
   }, [tab, tabScopeKey]);
-  const [chromeCondensed, setChromeCondensed] = useState(false);
-  // Each mounted tab remembers its own scroll chrome; short tabs cannot scroll to reopen it.
-  const chromeStateByTab = useRef<Partial<Record<DetailTab, boolean>>>({});
-  useEffect(() => {
-    setChromeCondensed(chromeStateByTab.current[tab] ?? false);
-  }, [tab]);
-  const condensed = chromeCondensed;
-  const scrollerRef = useRef<HTMLElement | null>(null);
-  const foldRef = useRef<HTMLDivElement | null>(null);
-  const condensedRowRef = useRef<HTMLDivElement | null>(null);
-  // Refund after the fold commits so the content under the reader does not jump with its height.
-  const compensationRef = useRef<number | null>(null);
-  useLayoutEffect(() => {
-    if (compensationRef.current === null) return;
-    const scroller = scrollerRef.current;
-    const delta = compensationRef.current;
-    compensationRef.current = null;
-    if (scroller) scroller.scrollTop = Math.max(0, scroller.scrollTop + delta);
-  }, [condensed]);
+  const { condensed, foldRef, condensedRowRef, onScrollCapture } = useCondensingChrome(tab);
   const lastSelectedMergeMethod = useUiStateStore((state) => state.pullRequestMergeMethod);
   const setLastSelectedMergeMethod = useUiStateStore((state) => state.setPullRequestMergeMethod);
   // Server-side and per project, like every other project setting. The
@@ -2692,30 +2674,7 @@ export function PullRequestDetailPanel({
 
       <div
         className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
-        onScrollCapture={(event) => {
-          const scroller = event.target as HTMLElement;
-          scrollerRef.current = scroller;
-          const top = scroller.scrollTop;
-          setChromeCondensed((previous) => {
-            let next = previous;
-            const foldHeight = foldRef.current?.scrollHeight ?? 0;
-            // The condensed row remains mounted, so refund only the height that actually leaves.
-            const chromeDelta = foldHeight - (condensedRowRef.current?.scrollHeight ?? 0);
-            if (previous) {
-              // The hard top reopens the chrome with no refund: the reader asked for the top,
-              // and moving them a fold's height back down would snatch it away — the fold
-              // slides in above while the content stays where they left it.
-              if (top < 4 && foldHeight > 0) {
-                next = false;
-              }
-            } else if (foldHeight > 0 && top > foldHeight + 32) {
-              compensationRef.current = -chromeDelta;
-              next = true;
-            }
-            chromeStateByTab.current[tab] = next;
-            return next;
-          });
-        }}
+        onScrollCapture={onScrollCapture}
       >
         {detailQuery.error && !detail ? (
           <PullRequestsUnavailableState

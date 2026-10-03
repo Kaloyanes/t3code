@@ -1,7 +1,16 @@
-import { ProjectId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ThreadId, type IssueListEntry } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  collectIssueListFacets,
+  groupIssueEntries,
+  issueRepositoriesWithCursors,
+  mergeIssueListResults,
+  issueLinkedWorkForEntry,
+  issueQueryControls,
+  parseIssueQuery,
+  planIssueBulkAction,
+  sortIssueEntries,
   issueDeletePreflightSummary,
   issueLabelForeground,
   issueWorktreePrimaryAction,
@@ -140,5 +149,320 @@ describe("issueDeletePreflightSummary", () => {
         },
       ]),
     ).toEqual({ deletable: 2, blocked: 1, forceRequired: 1 });
+  });
+});
+
+function issueEntry(overrides: Partial<IssueListEntry> & { readonly number: number }) {
+  return {
+    provider: "github" as const,
+    host: "github.com",
+    projectId: ProjectId.make("project-1"),
+    repository: "t3tools/t3code",
+    title: `Issue ${overrides.number}`,
+    url: `https://github.com/t3tools/t3code/issues/${overrides.number}`,
+    author: { login: "octocat", name: null, avatarUrl: null },
+    state: "open" as const,
+    stateReason: null,
+    assignees: [],
+    milestone: null,
+    labels: [],
+    commentsCount: 0,
+    createdAt: "2026-09-01T00:00:00.000Z",
+    updatedAt: "2026-09-01T00:00:00.000Z",
+    closedAt: null,
+    environmentId: EnvironmentId.make("env-1"),
+    ...overrides,
+  };
+}
+
+describe("parseIssueQuery", () => {
+  it("lifts label, author, assignee and milestone qualifiers out of the text", () => {
+    expect(
+      parseIssueQuery(
+        'crash label:bug,regression -label:wontfix author:octo assignee:me milestone:"v1 beta" on login',
+      ),
+    ).toEqual({
+      text: "crash on login",
+      filters: {
+        labels: [["bug", "regression"]],
+        excludedLabels: ["wontfix"],
+        author: "octo",
+        assignee: "@me",
+        milestone: "v1 beta",
+      },
+    });
+  });
+
+  it("reads me and @me as the signed-in account for people, but not for milestones", () => {
+    expect(parseIssueQuery("author:@ME assignee:me milestone:me").filters).toEqual({
+      author: "@me",
+      assignee: "@me",
+      milestone: "me",
+    });
+  });
+
+  it("reads unknown keys as namespaced labels, the same way the pull request list does", () => {
+    expect(parseIssueQuery("area:web size:S,XS").filters.labels).toEqual([
+      ["area:web"],
+      ["size:S", "size:XS"],
+    ]);
+  });
+
+  it("leaves GitHub search keys, links, negated people and empty values as text", () => {
+    expect(
+      parseIssueQuery("is:locked no:assignee https://github.com -author:bot label: plain"),
+    ).toEqual({
+      text: "is:locked no:assignee https://github.com -author:bot label: plain",
+      filters: {},
+    });
+  });
+
+  it("never sends a typed state or sort, which the request carries on its own", () => {
+    expect(parseIssueQuery("crash is:closed sort:comments state:open")).toEqual({
+      text: "crash",
+      filters: {},
+    });
+  });
+});
+
+describe("issueQueryControls", () => {
+  it("moves a typed state and sort onto the controls, the last of each winning", () => {
+    expect(
+      issueQueryControls('crash is:open label:"needs triage" state:closed sort:created'),
+    ).toEqual({ query: 'crash label:"needs triage"', state: "closed", sort: "created-desc" });
+    expect(issueQueryControls("sort:created-asc")).toEqual({ query: "", sort: "created-asc" });
+  });
+
+  it("is null when nothing typed names a state or sort the controls offer", () => {
+    expect(issueQueryControls("is:locked -is:open sort:reactions state:merged")).toBeNull();
+  });
+});
+
+describe("sortIssueEntries", () => {
+  const entries = [
+    issueEntry({
+      number: 1,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+      commentsCount: 5,
+    }),
+    issueEntry({
+      number: 2,
+      createdAt: "2026-02-01T00:00:00.000Z",
+      updatedAt: "2026-02-01T00:00:00.000Z",
+      commentsCount: 9,
+    }),
+    issueEntry({
+      number: 3,
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      commentsCount: 1,
+    }),
+  ];
+  const order = (sort: Parameters<typeof sortIssueEntries>[1]) =>
+    sortIssueEntries(entries, sort).map((entry) => entry.number);
+
+  it("merges answers in the order the reader chose", () => {
+    expect(order("updated")).toEqual([1, 2, 3]);
+    expect(order("created-desc")).toEqual([3, 2, 1]);
+    expect(order("created-asc")).toEqual([1, 2, 3]);
+    expect(order("comments")).toEqual([2, 1, 3]);
+  });
+});
+
+describe("groupIssueEntries", () => {
+  const working = issueEntry({
+    number: 1,
+    linkedWork: { threadId: ThreadId.make("t"), branch: "b", worktreePath: null, source: "manual" },
+  });
+  const mine = issueEntry({ number: 2, assignees: [{ login: "Me", name: null, avatarUrl: null }] });
+  const other = issueEntry({ number: 3 });
+
+  it("shelves linked work, then the viewer's assignments, then the rest, keeping order", () => {
+    expect(
+      groupIssueEntries([other, mine, working], "all", "me").map((group) => [
+        group.key,
+        group.entries.map((entry) => entry.number),
+      ]),
+    ).toEqual([
+      ["working", [1]],
+      ["assigned", [2]],
+      ["others", [3]],
+    ]);
+  });
+
+  it("does not group a narrowed involvement, and needs a viewer to know what is theirs", () => {
+    expect(groupIssueEntries([other, mine], "assigned", "me")).toEqual([
+      { key: "others", label: "", entries: [other, mine] },
+    ]);
+    expect(groupIssueEntries([mine], "all", null).map((group) => group.key)).toEqual(["others"]);
+  });
+});
+
+describe("collectIssueListFacets", () => {
+  it("counts people, labels and milestones across rows once each", () => {
+    const facets = collectIssueListFacets([
+      issueEntry({
+        number: 1,
+        labels: [{ name: "bug", color: "d73a4a" }],
+        assignees: [{ login: "a", name: null, avatarUrl: null }],
+        milestone: { number: 1, title: "v1", state: "open", dueOn: null },
+      }),
+      issueEntry({ number: 2, labels: [{ name: "Bug", color: null }] }),
+      issueEntry({ number: 2, labels: [{ name: "bug", color: null }] }),
+    ]);
+    expect(facets.labels).toEqual([{ name: "bug", color: "d73a4a", count: 2 }]);
+    expect(facets.authors.map((facet) => [facet.actor.login, facet.count])).toEqual([
+      ["octocat", 2],
+    ]);
+    expect(facets.assignees.map((facet) => facet.actor.login)).toEqual(["a"]);
+    expect(facets.milestones).toEqual([{ title: "v1", count: 1 }]);
+  });
+});
+
+describe("planIssueBulkAction", () => {
+  const open = issueEntry({ number: 1, labels: [{ name: "bug", color: null }] });
+  const closed = issueEntry({ number: 2, state: "closed", stateReason: "completed" });
+
+  it("only sends requests that change something", () => {
+    expect(
+      planIssueBulkAction([open, closed], { kind: "close", reason: "not-planned" }).map((step) => [
+        step.command,
+        step.entry.number,
+        step.input,
+      ]),
+    ).toEqual([
+      [
+        "close",
+        1,
+        {
+          projectId: open.projectId,
+          host: "github.com",
+          repository: "t3tools/t3code",
+          number: 1,
+          reason: "not-planned",
+        },
+      ],
+    ]);
+    expect(
+      planIssueBulkAction([open, closed], { kind: "reopen" }).map((step) => step.entry.number),
+    ).toEqual([2]);
+  });
+
+  it("adds one label or assignee, never the row's whole set, skipping rows that have it", () => {
+    const labelSteps = planIssueBulkAction([open, closed], { kind: "add-label", label: "BUG" });
+    expect(labelSteps.map((step) => step.entry.number)).toEqual([2]);
+    const labelInput = planIssueBulkAction([open], { kind: "add-label", label: " ui " })[0]?.input;
+    expect(labelInput).toMatchObject({ addLabels: ["ui"] });
+    expect(labelInput).not.toHaveProperty("labels");
+    const assigned = issueEntry({
+      number: 3,
+      assignees: [{ login: "Octo", name: null, avatarUrl: null }],
+    });
+    const assignSteps = planIssueBulkAction([open, assigned], { kind: "assign", login: "octo" });
+    expect(assignSteps.map((step) => [step.entry.number, step.input])).toEqual([
+      [1, expect.objectContaining({ addAssignees: ["octo"] })],
+    ]);
+    expect(assignSteps[0]?.input).not.toHaveProperty("assignees");
+  });
+
+  it("treats a row from an older server, without assignees, as having none", () => {
+    const { assignees: _assignees, ...older } = issueEntry({ number: 4 });
+    expect(planIssueBulkAction([older], { kind: "assign", login: "a" })).toHaveLength(1);
+  });
+});
+
+describe("issueLinkedWorkForEntry", () => {
+  it("rebuilds the dialog's linked-work record from a row summary", () => {
+    expect(issueLinkedWorkForEntry(issueEntry({ number: 1 }))).toBeNull();
+    expect(
+      issueLinkedWorkForEntry(
+        issueEntry({
+          number: 7,
+          linkedWork: {
+            threadId: ThreadId.make("thread-7"),
+            branch: "fix/7",
+            worktreePath: "/w/7",
+            source: "created",
+          },
+        }),
+      ),
+    ).toMatchObject({
+      issue: { provider: "github", host: "github.com", repository: "t3tools/t3code", number: 7 },
+      threadId: "thread-7",
+      branch: "fix/7",
+      worktreePath: "/w/7",
+      source: "created",
+    });
+  });
+});
+
+describe("mergeIssueListResults", () => {
+  const result = (
+    entries: ReadonlyArray<IssueListEntry>,
+    nextCursors: Record<string, string> = {},
+  ) => ({
+    providers: [],
+    entries,
+    errors: [],
+    truncated: Object.keys(nextCursors).length > 0,
+    nextCursors,
+  });
+  const { environmentId: _environmentId, ...plain } = issueEntry({ number: 1 });
+  const row = (number: number, updatedAt: string, comments = 0): IssueListEntry => ({
+    ...plain,
+    number,
+    updatedAt,
+    commentsCount: comments,
+  });
+  const envA = EnvironmentId.make("env-a");
+  const envB = EnvironmentId.make("env-b");
+
+  it("tags rows with their server, keeps a re-read row once, and honors the sort", () => {
+    const merged = mergeIssueListResults(
+      [
+        [
+          envA,
+          result([row(1, "2026-01-01T00:00:00.000Z", 3), row(2, "2026-03-01T00:00:00.000Z", 1)]),
+        ],
+        [envA, result([row(1, "2026-01-01T00:00:00.000Z", 3)])],
+        [envB, result([row(1, "2026-02-01T00:00:00.000Z", 9)])],
+      ],
+      "comments",
+    );
+    expect(merged.entries.map((entry) => [entry.environmentId, entry.number])).toEqual([
+      [envB, 1],
+      [envA, 1],
+      [envA, 2],
+    ]);
+  });
+
+  it("takes each server's paging state from its latest answer", () => {
+    const merged = mergeIssueListResults(
+      [
+        [envA, result([], { "p:github.com:o/r": "c1" })],
+        [envB, result([], { "p:github.com:o/s": "c2" })],
+        [envA, result([])],
+      ],
+      undefined,
+    );
+    expect([...merged.nextCursorsByEnvironment.keys()]).toEqual([envB]);
+    expect(merged.truncatedEnvironments).toEqual([envB]);
+  });
+});
+
+describe("issueRepositoriesWithCursors", () => {
+  const web = { projectId: ProjectId.make("p1"), host: "github.com", repository: "T3/Web" };
+  const api = { projectId: ProjectId.make("p2"), host: "github.com", repository: "t3/api" };
+
+  it("narrows a continuation to the repositories with pages left, whatever host the key names", () => {
+    expect(issueRepositoriesWithCursors([web, api], { "p1:ghe.local:t3/web": "x" })).toEqual([web]);
+  });
+
+  it("asks every repository again when no cursor matches", () => {
+    expect(issueRepositoriesWithCursors([web, api], { "p9:github.com:x/y": "x" })).toEqual([
+      web,
+      api,
+    ]);
   });
 });

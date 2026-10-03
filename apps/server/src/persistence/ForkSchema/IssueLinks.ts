@@ -17,6 +17,11 @@ export default Effect.gen(function* () {
       detached_at TEXT
     )
   `;
+  // Last issue state the server observed, so worktree chips can show closed issues.
+  const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(projection_issue_links)`;
+  if (!columns.some((column) => column.name === "state")) {
+    yield* sql`ALTER TABLE projection_issue_links ADD COLUMN state TEXT`;
+  }
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_projection_issue_links_issue
     ON projection_issue_links(host, repository, number)
