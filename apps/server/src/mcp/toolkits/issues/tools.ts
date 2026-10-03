@@ -38,6 +38,15 @@ export class IssueThreadNotFoundError extends Schema.TaggedError<IssueThreadNotF
   }
 }
 
+export class IssueOutsideThreadProjectError extends Schema.TaggedError<IssueOutsideThreadProjectError>()(
+  "IssueOutsideThreadProjectError",
+  { projectId: Schema.String },
+) {
+  override get message(): string {
+    return `Issues can only be changed in this thread's own project, not project ${this.projectId}.`;
+  }
+}
+
 export class IssueListFailedError extends Schema.TaggedError<IssueListFailedError>()(
   "IssueListFailedError",
   { cause: Schema.Defect() },
@@ -104,6 +113,7 @@ export class IssueLinkFailedError extends Schema.TaggedError<IssueLinkFailedErro
 const IssueToolError = Schema.Union([
   McpCapabilityUnavailableError,
   IssueThreadNotFoundError,
+  IssueOutsideThreadProjectError,
   IssueListFailedError,
   IssueReadFailedError,
   IssueCommentFailedError,
@@ -184,7 +194,7 @@ const ReopenIssueTool = Tool.make("reopen_issue", {
 
 const UpdateIssueTool = Tool.make("update_issue", {
   description:
-    "Update a GitHub issue's title, body, labels, assignees or milestone. Omitted fields are preserved; supplied labels and assignees replace the current lists.",
+    "Update a GitHub issue's title, body, labels, assignees or milestone. Omitted fields are preserved. Prefer addLabels, removeLabels, addAssignees and removeAssignees, which keep changes others made; labels and assignees replace the current lists.",
   parameters: IssueUpdateInput,
   success: IssueUpdateResult,
   failure: IssueToolError,

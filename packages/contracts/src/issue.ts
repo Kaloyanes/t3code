@@ -136,9 +136,10 @@ export const IssueListEntry = Schema.Struct({
   url: TrimmedNonEmptyString,
   author: Schema.NullOr(IssueActor),
   state: IssueState,
-  stateReason: IssueStateReason,
-  assignees: Schema.Array(IssueActor),
-  milestone: Schema.NullOr(IssueMilestone),
+  // Optional so newer clients can still list issues from servers that predate these fields.
+  stateReason: Schema.optional(IssueStateReason),
+  assignees: Schema.optional(Schema.Array(IssueActor)),
+  milestone: Schema.optional(Schema.NullOr(IssueMilestone)),
   linkedWork: Schema.optional(Schema.NullOr(Schema.suspend(() => IssueLinkedWorkSummary))),
   labels: Schema.Array(IssueLabel),
   commentsCount: NonNegativeInt,
@@ -427,6 +428,13 @@ export const IssueUpdateInput = Schema.Struct({
   labels: Schema.optional(Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(25))),
   assignees: Schema.optional(Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(25))),
   milestone: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  /** Additive edits, applied without replacing what others set since the issue was read. */
+  addLabels: Schema.optional(Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(25))),
+  removeLabels: Schema.optional(Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(25))),
+  addAssignees: Schema.optional(Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(25))),
+  removeAssignees: Schema.optional(
+    Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(25)),
+  ),
 });
 export type IssueUpdateInput = typeof IssueUpdateInput.Type;
 

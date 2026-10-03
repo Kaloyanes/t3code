@@ -8,6 +8,7 @@ import {
   IssueCommentFailedError,
   IssueLinkFailedError,
   IssueListFailedError,
+  IssueOutsideThreadProjectError,
   IssueReadFailedError,
   IssueReopenFailedError,
   IssuesToolkit,
@@ -39,6 +40,24 @@ const make = Effect.gen(function* () {
     return thread;
   });
 
+  // Like the pull request tools, writes stay inside the calling thread's own work;
+  // reads may span projects so an agent can find related issues.
+  const requireOwnProject = Effect.fn("IssuesToolkit.requireOwnProject")(function* (
+    Failure:
+      | typeof IssueCommentFailedError
+      | typeof IssueCloseFailedError
+      | typeof IssueReopenFailedError
+      | typeof IssueUpdateFailedError
+      | typeof IssueLinkFailedError,
+    projectId: string,
+  ) {
+    const thread = yield* requireThread(Failure);
+    if (thread.projectId !== projectId) {
+      return yield* new IssueOutsideThreadProjectError({ projectId });
+    }
+    return thread;
+  });
+
   return IssuesToolkit.of({
     list_issues: (input) =>
       Effect.gen(function* () {
@@ -57,35 +76,35 @@ const make = Effect.gen(function* () {
       }),
     comment_on_issue: (input) =>
       Effect.gen(function* () {
-        yield* requireThread(IssueCommentFailedError);
+        yield* requireOwnProject(IssueCommentFailedError, input.projectId);
         return yield* issues
           .commentCreate(input)
           .pipe(Effect.mapError((cause) => new IssueCommentFailedError({ cause })));
       }),
     close_issue: (input) =>
       Effect.gen(function* () {
-        yield* requireThread(IssueCloseFailedError);
+        yield* requireOwnProject(IssueCloseFailedError, input.projectId);
         return yield* issues
           .close(input)
           .pipe(Effect.mapError((cause) => new IssueCloseFailedError({ cause })));
       }),
     reopen_issue: (input) =>
       Effect.gen(function* () {
-        yield* requireThread(IssueReopenFailedError);
+        yield* requireOwnProject(IssueReopenFailedError, input.projectId);
         return yield* issues
           .reopen(input)
           .pipe(Effect.mapError((cause) => new IssueReopenFailedError({ cause })));
       }),
     update_issue: (input) =>
       Effect.gen(function* () {
-        yield* requireThread(IssueUpdateFailedError);
+        yield* requireOwnProject(IssueUpdateFailedError, input.projectId);
         return yield* issues
           .update(input)
           .pipe(Effect.mapError((cause) => new IssueUpdateFailedError({ cause })));
       }),
     link_issue: (input) =>
       Effect.gen(function* () {
-        const thread = yield* requireThread(IssueLinkFailedError);
+        const thread = yield* requireOwnProject(IssueLinkFailedError, input.projectId);
         return yield* issues
           .link({ ...input, threadId: thread.id, source: "agent" })
           .pipe(Effect.mapError((cause) => new IssueLinkFailedError({ cause })));

@@ -362,6 +362,25 @@ describe("issues toolkit handlers", () => {
     }),
   );
 
+  it.effect("refuses to change issues outside the calling thread's project but reads them", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const other = { ...REF, projectId: ProjectId.make("project-2") };
+      for (const request of REQUESTS.slice(2)) {
+        const error = yield* harness
+          .call(request.name, { ...request.input, projectId: other.projectId })
+          .pipe(Effect.flip);
+        expect(error).toMatchObject({
+          _tag: "IssueOutsideThreadProjectError",
+          projectId: "project-2",
+        });
+      }
+      expect(harness.calls).toEqual([]);
+      yield* harness.call("read_issue", other);
+      expect(harness.calls.map((call) => call.method)).toEqual(["detail", "comments"]);
+    }),
+  );
+
   it.effect("rejects an invalid issue number before calling the service", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();

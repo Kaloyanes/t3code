@@ -1,6 +1,22 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { describe, expect, it } from "@effect/vitest";
 
+import * as ServerConfig from "../config.ts";
+import * as GitWorkflowService from "../git/GitWorkflowService.ts";
+import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as ProjectService from "../project/ProjectService.ts";
+import * as ProjectWorktreeLinks from "../project/ProjectWorktreeLinks.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as GitHubCli from "../sourceControl/GitHubCli.ts";
+import * as WorktreeRunManager from "../worktreeRun/Manager.ts";
+import * as IssueService from "./IssueService.ts";
 import {
   isSafeIssueWorktreePath,
   issueWorktreeBranch,
@@ -13,7 +29,13 @@ import {
   normalizeLinkedPullRequests,
   normalizeIssueTimelineEvents,
 } from "./IssueService.ts";
-import { IssueListEntry, IssueTimelineEvent, ProjectId, ThreadId } from "@t3tools/contracts";
+import {
+  IssueListEntry,
+  IssueTimelineEvent,
+  ProjectId,
+  ThreadId,
+  type OrchestrationProjectShell,
+} from "@t3tools/contracts";
 
 describe("IssueService pure issue helpers", () => {
   it("normalizes a GitHub issue without trusting missing fields", () => {
@@ -314,4 +336,387 @@ describe("IssueService related work and timeline", () => {
     expect(normalizeIssueTimelineEvents({ ...base, __typename: "UnknownEvent" })).toEqual([]);
     expect(normalizeIssueTimelineEvents({ __typename: "ReopenedEvent" })).toEqual([]);
   });
+});
+
+type GhCall = {
+  readonly args: ReadonlyArray<string>;
+  readonly endpoint: string;
+  readonly method: string;
+  readonly query: string;
+  readonly variables: Record<string, unknown>;
+  readonly body: unknown;
+};
+
+type GhPayload = { readonly query?: string; readonly variables?: Record<string, unknown> };
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
+const projectShell = (id: string, repository: string): OrchestrationProjectShell => ({
+  id: ProjectId.make(id),
+  title: repository,
+  workspaceRoot: `/repos/${id}`,
+  repositoryIdentity: {
+    canonicalKey: `github.com/${repository}`,
+    locator: {
+      source: "git-remote",
+      remoteName: "origin",
+      remoteUrl: `https://github.com/${repository}.git`,
+    },
+    provider: "github",
+    owner: repository.split("/")[0]!,
+    name: repository.split("/")[1]!,
+  },
+  defaultModelSelection: null,
+  scripts: [],
+  createdAt,
+  updatedAt: createdAt,
+});
+
+const PROJECTS = [projectShell("project-1", "owner/repo"), projectShell("project-2", "owner/api")];
+
+const notFound = new GitHubCli.GitHubPullRequestNotFoundError({
+  command: "gh",
+  cwd: "/repos/project-1",
+  cause: "HTTP 404",
+});
+
+const rawIssue = (number: number, extra: Record<string, unknown> = {}) => ({
+  number,
+  title: `Issue ${number}`,
+  state: "OPEN",
+  createdAt,
+  updatedAt: `2026-01-0${(number % 9) + 1}T00:00:00.000Z`,
+  ...extra,
+});
+
+const page = (numbers: ReadonlyArray<number>, endCursor: string | null) => ({
+  nodes: numbers.map((number) => rawIssue(number)),
+  pageInfo: { hasNextPage: endCursor !== null, endCursor },
+});
+
+/** Runs the real service against a scripted `gh` and in-memory storage. */
+const withIssueService = <A, E>(
+  respond: (call: GhCall) => unknown,
+  use: (
+    service: IssueService.IssueService["Service"],
+    calls: ReadonlyArray<GhCall>,
+  ) => Effect.Effect<A, E, SqlClient.SqlClient>,
+) =>
+  Effect.gen(function* () {
+    const calls: Array<GhCall> = [];
+    const gh = Layer.mock(GitHubCli.GitHubCli)({
+      execute: (input) =>
+        Effect.suspend(() => {
+          const payload =
+            input.stdin === undefined ? null : (decodeJson(input.stdin) as GhPayload | null);
+          const methodIndex = input.args.indexOf("--method");
+          const call: GhCall = {
+            args: input.args,
+            endpoint: input.args[input.args.indexOf("--hostname") + 2] ?? "",
+            method: methodIndex === -1 ? "GET" : input.args[methodIndex + 1]!,
+            query: payload?.query ?? "",
+            variables: payload?.variables ?? {},
+            body: payload,
+          };
+          calls.push(call);
+          const reply = respond(call);
+          return GitHubCli.isGitHubCliError(reply)
+            ? Effect.fail(reply)
+            : Effect.succeed({
+                exitCode: ChildProcessSpawner.ExitCode(0),
+                stdout: reply === undefined ? "" : encodeJson(reply),
+                stderr: "",
+                stdoutTruncated: false,
+                stderrTruncated: false,
+              });
+        }),
+    });
+    const layer = IssueService.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          gh,
+          Layer.mock(ProjectService.ProjectService)({
+            getShell: (projectId) =>
+              Effect.succeed(Option.fromNullishOr(PROJECTS.find((item) => item.id === projectId))),
+            listShells: (options) =>
+              Effect.succeed(
+                PROJECTS.filter(
+                  (item) =>
+                    options?.projectIds === undefined || options.projectIds.includes(item.id),
+                ),
+              ),
+          }),
+          Layer.mock(ThreadManagement.ThreadManagementService)({}),
+          Layer.mock(ProjectWorktreeLinks.ProjectWorktreeLinks)({ publish: () => Effect.void }),
+          Layer.mock(GitWorkflowService.GitWorkflowService)({}),
+          Layer.mock(WorktreeRunManager.WorktreeRunManager)({}),
+          Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
+          ServerConfig.layerTest("/repos", { prefix: "issue-service-test" }),
+          ServerSettings.layerTest(),
+        ),
+      ),
+      Layer.provideMerge(SqlitePersistenceMemory),
+      Layer.provide(NodeServices.layer),
+    );
+    return yield* Effect.gen(function* () {
+      return yield* use(yield* IssueService.IssueService, calls);
+    }).pipe(Effect.provide(layer));
+  });
+
+const graphQl = (data: unknown) => ({ data });
+const graphQlError = (message: string) => ({ errors: [{ message }] });
+
+describe("IssueService against GitHub", () => {
+  it.effect("joins only attached links into list rows and picks the latest per issue", () =>
+    withIssueService(
+      (call) => {
+        if (call.query.includes("issues(first"))
+          return graphQl({ repository: { issues: page([1, 2, 3], null) } });
+        if (call.query.includes("viewer")) return graphQl({ repository: { issue: rawIssue(1) } });
+        return graphQl({ repository: { issue: {} } });
+      },
+      (service, calls) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const insert = (
+            thread: string,
+            number: number,
+            linkedAt: string,
+            branch: string | null,
+            detachedAt: string | null = null,
+          ) => sql`
+            INSERT INTO projection_issue_links (
+              thread_id, project_id, host, repository, number, source, linked_at,
+              branch, worktree_path, detached_at
+            ) VALUES (${thread}, 'project-1', 'github.com', 'owner/repo', ${number}, 'manual',
+              ${linkedAt}, ${branch}, ${null}, ${detachedAt})
+          `;
+          yield* insert("older", 1, "2026-01-01T00:00:00.000Z", "fix/old");
+          yield* insert("newer", 1, "2026-01-03T00:00:00.000Z", "fix/new");
+          yield* insert("detached-newest", 1, "2026-01-05T00:00:00.000Z", null, createdAt);
+          yield* insert("only-detached", 2, "2026-01-05T00:00:00.000Z", null, createdAt);
+          yield* insert("blank", 3, "2026-01-02T00:00:00.000Z", "");
+
+          const result = yield* service.list({ state: "open", projectId: PROJECTS[0]!.id });
+          const linked = new Map(result.entries.map((entry) => [entry.number, entry.linkedWork]));
+          expect(linked.get(1)).toMatchObject({ threadId: "newer", branch: "fix/new" });
+          expect(linked.get(2)).toBeNull();
+          expect(linked.get(3)).toMatchObject({ threadId: "blank", branch: null });
+          expect(calls[0]!.query).not.toContain("description");
+
+          const detail = yield* service.detail({ ...context, number: 1 });
+          expect(detail.linkedWork).toMatchObject({ threadId: "newer" });
+        }),
+    ),
+  );
+
+  it.effect("searches with a bare viewer qualifier and keeps rows it cannot re-check", () =>
+    withIssueService(
+      (call) =>
+        call.query.includes("search(")
+          ? graphQl({
+              search: page([4], null),
+            })
+          : undefined,
+      (service, calls) =>
+        Effect.gen(function* () {
+          const result = yield* service.list({
+            state: "open",
+            projectId: PROJECTS[0]!.id,
+            filters: { assignee: "@me", author: "ME" },
+          });
+          expect(result.entries.map((entry) => entry.number)).toEqual([4]);
+          expect(calls).toHaveLength(1);
+          const query = String(calls[0]!.variables.query);
+          expect(query).toContain("assignee:@me");
+          expect(query).toContain("author:@me");
+          expect(query).not.toContain('"@me"');
+        }),
+    ),
+  );
+
+  it.effect("returns every fetched row across repositories and keeps searching the rest", () =>
+    withIssueService(
+      (call) => {
+        const query = String(call.variables.query);
+        if (query.includes("repo:owner/repo"))
+          return graphQl({
+            search:
+              call.variables.after === "repo-next" ? page([3], null) : page([1, 2], "repo-next"),
+          });
+        if (query.includes("repo:owner/api")) return graphQl({ search: page([5, 6], null) });
+        return undefined;
+      },
+      (service) =>
+        Effect.gen(function* () {
+          const first = yield* service.list({ state: "open", limit: 2 });
+          expect(
+            first.entries.map((entry) => `${entry.repository}#${entry.number}`).sort(),
+          ).toEqual(["owner/api#5", "owner/api#6", "owner/repo#1", "owner/repo#2"]);
+          expect(first.truncated).toBe(true);
+          expect(first.nextCursors).toEqual({
+            "project-1:github.com:owner/repo": "search:repo-next",
+          });
+
+          const next = yield* service.list({
+            state: "open",
+            limit: 2,
+            repositories: [{ projectId: PROJECTS[0]!.id, repository: "owner/repo" }],
+            cursors: first.nextCursors,
+          });
+          expect(next.entries.map((entry) => entry.number)).toEqual([3]);
+          expect(next.truncated).toBe(false);
+        }),
+    ),
+  );
+
+  it.effect("degrades to timeline pull requests and no sub-issues on older hosts", () =>
+    withIssueService(
+      (call) => {
+        if (call.query.includes("subIssues"))
+          return graphQlError("Field 'subIssues' doesn't exist");
+        if (call.query.includes("closedByPullRequestsReferences"))
+          return graphQlError(
+            "Field 'closedByPullRequestsReferences' doesn't accept argument 'includeClosedPrs'",
+          );
+        if (call.query.includes("viewer"))
+          return graphQl({
+            repository: {
+              issue: rawIssue(42, { timelineItems: { nodes: [{ source: pr }] } }),
+            },
+            viewer: { login: "octocat" },
+          });
+        return undefined;
+      },
+      (service, calls) =>
+        Effect.gen(function* () {
+          const detail = yield* service.detail({ ...context, number: 42 });
+          expect(detail.linkedPullRequests?.map((item) => item.number)).toEqual([7]);
+          expect(detail).not.toHaveProperty("subIssues");
+          expect(detail.viewer).toBe("octocat");
+          expect(calls.filter((call) => call.query.includes("viewer"))).toHaveLength(2);
+        }),
+    ),
+  );
+
+  it.effect("still fails detail for errors unrelated to closing pull requests", () =>
+    withIssueService(
+      (call) =>
+        call.query.includes("subIssues")
+          ? graphQl({ repository: { issue: {} } })
+          : graphQlError("Could not resolve to a Repository"),
+      (service, calls) =>
+        Effect.gen(function* () {
+          const error = yield* service.detail({ ...context, number: 42 }).pipe(Effect.flip);
+          expect(error).toMatchObject({ _tag: "IssueOperationError" });
+          expect(calls.filter((call) => call.query.includes("viewer"))).toHaveLength(1);
+        }),
+    ),
+  );
+
+  it.effect("normalizes timeline pages, including bot assignees", () =>
+    withIssueService(
+      (call) =>
+        call.query.includes("timelineItems(first: $first")
+          ? graphQl({
+              repository: {
+                issue: {
+                  timelineItems: {
+                    nodes: [
+                      {
+                        __typename: "AssignedEvent",
+                        id: "assigned-1",
+                        createdAt,
+                        actor: { login: "octocat" },
+                        assignee: { login: "renovate[bot]", avatarUrl: null },
+                      },
+                      { __typename: "UnknownEvent", id: "skip", createdAt },
+                      {
+                        __typename: "IssueComment",
+                        id: "comment-node",
+                        databaseId: 99,
+                        body: "On it",
+                        createdAt,
+                        author: { login: "hubot" },
+                      },
+                    ],
+                    totalCount: 3,
+                    pageInfo: { hasNextPage: true, endCursor: "timeline-next" },
+                  },
+                },
+              },
+            })
+          : undefined,
+      (service, calls) =>
+        Effect.gen(function* () {
+          const result = yield* service.timeline({ ...context, number: 42, limit: 2 });
+          expect(calls[0]!.query).toContain("... on Bot");
+          expect(calls[0]!.variables).toMatchObject({ number: 42, first: 2, after: null });
+          expect(result).toMatchObject({
+            totalCount: 3,
+            nextCursor: "timeline-next",
+            truncated: true,
+            events: [
+              { _tag: "assigned", assignee: { login: "renovate[bot]" } },
+              { _tag: "comment", actor: { login: "hubot" }, comment: { body: "On it" } },
+            ],
+          });
+        }),
+    ),
+  );
+
+  it.effect("applies additive label and assignee edits through their own endpoints", () =>
+    withIssueService(
+      (call) => {
+        if (call.endpoint.endsWith("/labels/gone%20label")) return notFound;
+        if (call.query.includes("viewer"))
+          return graphQl({ repository: { issue: rawIssue(42) }, viewer: { login: "octocat" } });
+        if (call.query.includes("subIssues")) return graphQl({ repository: { issue: {} } });
+        return {};
+      },
+      (service, calls) =>
+        Effect.gen(function* () {
+          const result = yield* service.update({
+            ...context,
+            number: 42,
+            title: "Renamed",
+            addLabels: ["bug"],
+            removeLabels: ["gone label", "area/web"],
+            addAssignees: ["octocat"],
+            removeAssignees: ["hubot"],
+          });
+          expect(result.issue.number).toBe(42);
+          const issue = "repos/owner/repo/issues/42";
+          expect(
+            calls
+              .filter((call) => !call.args.includes("graphql"))
+              .map((call) => [call.method, call.endpoint, call.body]),
+          ).toEqual([
+            ["PATCH", issue, { title: "Renamed" }],
+            ["POST", `${issue}/labels`, { labels: ["bug"] }],
+            ["DELETE", `${issue}/labels/gone%20label`, null],
+            ["DELETE", `${issue}/labels/area%2Fweb`, null],
+            ["POST", `${issue}/assignees`, { assignees: ["octocat"] }],
+            ["DELETE", `${issue}/assignees`, { assignees: ["hubot"] }],
+          ]);
+        }),
+    ),
+  );
+
+  it.effect("fails an additive edit on errors other than an already removed label", () =>
+    withIssueService(
+      (call) =>
+        call.endpoint.endsWith("/assignees")
+          ? new GitHubCli.GitHubCliCommandError({ command: "gh", cwd: "/repos", cause: "422" })
+          : {},
+      (service, calls) =>
+        Effect.gen(function* () {
+          const error = yield* service
+            .update({ ...context, number: 42, addAssignees: ["ghost"] })
+            .pipe(Effect.flip);
+          expect(error).toMatchObject({ _tag: "IssueOperationError" });
+          expect(calls.map((call) => call.method)).toEqual(["POST"]);
+        }),
+    ),
+  );
 });

@@ -109,15 +109,20 @@ import {
   parseGitHubAuthStatus,
 } from "../sourceControl/gitHubAuthStatus.ts";
 
-const GRAPHQL_LIST_FIELDS = `
+const GRAPHQL_ROW_FIELDS = `
   number title url state stateReason createdAt updatedAt closedAt
   author { login avatarUrl }
-  labels(first: 100) { nodes { name color description } }
   assignees(first: 100) { nodes { login name avatarUrl } }
-  milestone { number title state description dueOn }
   comments { totalCount }
 `;
-const GRAPHQL_ISSUE_FIELDS = `${GRAPHQL_LIST_FIELDS}
+// List rows never show label or milestone descriptions, so only the detail fetches them.
+const GRAPHQL_LIST_FIELDS = `${GRAPHQL_ROW_FIELDS}
+  labels(first: 100) { nodes { name color } }
+  milestone { number title state dueOn }
+`;
+const GRAPHQL_ISSUE_FIELDS = `${GRAPHQL_ROW_FIELDS}
+  labels(first: 100) { nodes { name color description } }
+  milestone { number title state description dueOn }
   body
   reactions(first: 100) { nodes { content user { login } } }
 `;
@@ -152,11 +157,11 @@ query($query: String!, $first: Int!, $after: String) {
   }
 }
 `;
-const DETAIL_QUERY = `${GRAPHQL_ISSUE_FRAGMENT}
+const detailQuery = (closingPullRequests: boolean) => `${GRAPHQL_ISSUE_FRAGMENT}
 query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) { issue(number: $number) {
     ...IssueFields
-    closedByPullRequestsReferences(first: 20, includeClosedPrs: true) { nodes { ${GRAPHQL_PR_FIELDS} } }
+    ${closingPullRequests ? `closedByPullRequestsReferences(first: 20, includeClosedPrs: true) { nodes { ${GRAPHQL_PR_FIELDS} } }` : ""}
     timelineItems(itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT], first: 50) {
       nodes {
         ... on CrossReferencedEvent { source { ${GRAPHQL_SOURCE_FIELDS} } }
@@ -167,6 +172,10 @@ query($owner: String!, $name: String!, $number: Int!) {
   viewer { login }
 }
 `;
+const DETAIL_QUERY = detailQuery(true);
+// Older GitHub Enterprise Server releases lack closedByPullRequestsReferences or its
+// includeClosedPrs argument; the detail then reads only timeline-linked pull requests.
+const DETAIL_QUERY_WITHOUT_CLOSING_PRS = detailQuery(false);
 const SUB_ISSUES_QUERY = `
 query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) { issue(number: $number) {
@@ -205,8 +214,8 @@ query($owner: String!, $name: String!, $number: Int!, $first: Int!, $after: Stri
         __typename
         ... on LabeledEvent { ${GRAPHQL_EVENT_FIELDS} label { name color } }
         ... on UnlabeledEvent { ${GRAPHQL_EVENT_FIELDS} label { name color } }
-        ... on AssignedEvent { ${GRAPHQL_EVENT_FIELDS} assignee { ... on User { login name avatarUrl } ... on Mannequin { login avatarUrl } } }
-        ... on UnassignedEvent { ${GRAPHQL_EVENT_FIELDS} assignee { ... on User { login name avatarUrl } ... on Mannequin { login avatarUrl } } }
+        ... on AssignedEvent { ${GRAPHQL_EVENT_FIELDS} assignee { ... on User { login name avatarUrl } ... on Bot { login avatarUrl } ... on Mannequin { login avatarUrl } } }
+        ... on UnassignedEvent { ${GRAPHQL_EVENT_FIELDS} assignee { ... on User { login name avatarUrl } ... on Bot { login avatarUrl } ... on Mannequin { login avatarUrl } } }
         ... on ClosedEvent { ${GRAPHQL_EVENT_FIELDS} stateReason }
         ... on ReopenedEvent { ${GRAPHQL_EVENT_FIELDS} }
         ... on RenamedTitleEvent { ${GRAPHQL_EVENT_FIELDS} previousTitle currentTitle }
@@ -227,6 +236,8 @@ query($owner: String!, $name: String!, $number: Int!, $first: Int!, $after: Stri
   } }
 }
 `;
+
+const SEARCH_CURSOR_PREFIX = "search:";
 
 const REACTION_CONTENT: Readonly<Record<IssueReaction["content"], string>> = {
   "thumbs-up": "+1",
@@ -281,6 +292,9 @@ export interface IssueNormalizationContext {
 }
 
 export type NormalizedIssue = IssueListEntry & {
+  readonly stateReason: IssueDetail["stateReason"];
+  readonly assignees: ReadonlyArray<IssueActor>;
+  readonly milestone: IssueMilestone | null;
   readonly body: string;
   readonly reactions: ReadonlyArray<IssueReaction>;
 };
@@ -669,15 +683,20 @@ export function normalizeIssueTimelineEvents(raw: unknown): ReadonlyArray<IssueT
   }
 }
 
+/** `me` and `@me` stand for the authenticated viewer, whose login only the host knows. */
+const isViewerFilter = (value: string): boolean => /^@?me$/i.test(value.trim());
+
 /** Translate structured filters into host search qualifiers before pagination. */
 export function issueFilterSearchTerms(filters: IssueListInput["filters"]): ReadonlyArray<string> {
   if (!filters) return [];
   const quote = (value: string) => `"${value.replace(/["\\]/g, "").replace(/\s+/g, " ").trim()}"`;
+  // A quoted "@me" would search for a literal login, so the viewer qualifier stays bare.
+  const person = (value: string) => (isViewerFilter(value) ? "@me" : quote(value));
   return [
     ...(filters.labels ?? []).map((group) => `label:${group.map(quote).join(",")}`),
     ...(filters.excludedLabels ?? []).map((label) => `-label:${quote(label)}`),
-    ...(filters.author === undefined ? [] : [`author:${quote(filters.author)}`]),
-    ...(filters.assignee === undefined ? [] : [`assignee:${quote(filters.assignee)}`]),
+    ...(filters.author === undefined ? [] : [`author:${person(filters.author)}`]),
+    ...(filters.assignee === undefined ? [] : [`assignee:${person(filters.assignee)}`]),
     ...(filters.milestone === undefined ? [] : [`milestone:${quote(filters.milestone)}`]),
   ];
 }
@@ -789,12 +808,14 @@ export const matchesFilters = (entry: NormalizedIssue, input: IssueListInput): b
   }
   if (
     filters.author !== undefined &&
+    !isViewerFilter(filters.author) &&
     entry.author?.login.toLowerCase() !== filters.author.toLowerCase()
   ) {
     return false;
   }
   if (
     filters.assignee !== undefined &&
+    !isViewerFilter(filters.assignee) &&
     !entry.assignees.some(
       (assignee) => assignee.login.toLowerCase() === filters.assignee?.toLowerCase(),
     )
@@ -1120,6 +1141,7 @@ export const make = Effect.gen(function* () {
         detached_at AS "detachedAt"
       FROM projection_issue_links
       WHERE host = ${host} AND repository = ${repository} AND number = ${number}
+      ORDER BY detached_at IS NOT NULL, linked_at DESC, thread_id
       LIMIT 1
     `.pipe(
       Effect.map((rows) => rows[0] ?? null),
@@ -1204,12 +1226,14 @@ export const make = Effect.gen(function* () {
     return "manual";
   };
 
+  const blankToNull = (value: string | null): string | null => (value === "" ? null : value);
+
   const linkedWorkFromRow = (repo: Repo, number: number, row: IssueLinkRow): IssueLinkedWork => ({
     issue: { provider: "github", host: repo.host, repository: repo.repository, number },
     threadId: ThreadId.make(row.threadId),
     projectId: ProjectId.make(row.projectId),
-    branch: row.branch,
-    worktreePath: row.worktreePath,
+    branch: blankToNull(row.branch),
+    worktreePath: blankToNull(row.worktreePath),
     linkedAt: iso(row.linkedAt),
     source: sourceValue(row.source),
   });
@@ -1240,6 +1264,10 @@ export const make = Effect.gen(function* () {
       Effect.catch((cause) => Effect.logWarning("failed to record linked issue state", { cause })),
     );
 
+  const lacksClosingPullRequests = (error: IssueError): boolean =>
+    error._tag === "IssueOperationError" &&
+    /closedByPullRequestsReferences|includeClosedPrs/.test(error.detail);
+
   const detail = (input: IssueRef): Effect.Effect<IssueDetail, IssueError> =>
     cached(
       detailCache,
@@ -1250,31 +1278,29 @@ export const make = Effect.gen(function* () {
         const parsed = splitRepository(repo.repository);
         if (parsed === null)
           return yield* operationError("detail", "Repository must be owner/name.");
-        const response = yield* graph(repo, DETAIL_QUERY, {
-          owner: parsed.owner,
-          name: parsed.name,
-          number: input.number,
-        });
+        const variables = { owner: parsed.owner, name: parsed.name, number: input.number };
+        const mainQuery = Effect.catchIf(
+          graph(repo, DETAIL_QUERY, variables),
+          lacksClosingPullRequests,
+          () => graph(repo, DETAIL_QUERY_WITHOUT_CLOSING_PRS, variables),
+        );
+        // Hosts without sub-issues fail this query; the detail then omits them.
+        const subIssuesQuery = graph(repo, SUB_ISSUES_QUERY, variables, true).pipe(
+          Effect.catchTag("IssueOperationError", () => Effect.succeed(null)),
+        );
+        const [response, subIssueResponse, linked] = yield* Effect.all(
+          [mainQuery, subIssuesQuery, linkedWork(repo, input.number)],
+          { concurrency: "unbounded" },
+        );
         const repository = record(record(response.data).repository);
         const rawIssue = repository.issue;
         const issue = normalizeIssue(rawIssue, repo);
         if (issue === null) return yield* operationError("detail", "Issue was not found.");
-        const subIssueResponse = yield* graph(
-          repo,
-          SUB_ISSUES_QUERY,
-          {
-            owner: parsed.owner,
-            name: parsed.name,
-            number: input.number,
-          },
-          true,
-        ).pipe(Effect.catchTag("IssueOperationError", () => Effect.succeed(null)));
         const subIssueData =
           subIssueResponse === null
             ? null
             : record(record(record(subIssueResponse.data).repository).issue);
         const viewer = stringValue(record(record(response.data).viewer).login).trim();
-        const linked = yield* linkedWork(repo, input.number);
         if (linked !== null) yield* recordLinkedState(repo, input.number, issue.state);
         return {
           ...issue,
@@ -1328,11 +1354,17 @@ export const make = Effect.gen(function* () {
           const previous = grouped.get(repo.host) ?? [];
           grouped.set(repo.host, [...previous, repo]);
         }
+        // Search and repository cursors are not interchangeable. A continuation may name
+        // fewer repositories than the first page, so a search cursor keeps it searching.
+        const continuesSearch = Object.values(input.cursors ?? {}).some((cursor) =>
+          cursor.startsWith(SEARCH_CURSOR_PREFIX),
+        );
         const providers: IssueListResult["providers"] = [...grouped.entries()].map(
           ([host, hostRepos]) => ({
             provider: "github",
             host,
             searchesOnHost:
+              continuesSearch ||
               input.filters !== undefined ||
               input.query !== undefined ||
               (input.involvement !== undefined && input.involvement !== "all") ||
@@ -1343,6 +1375,7 @@ export const make = Effect.gen(function* () {
           }),
         );
         const shouldSearch =
+          continuesSearch ||
           input.filters !== undefined ||
           input.query !== undefined ||
           (input.involvement !== undefined && input.involvement !== "all") ||
@@ -1361,7 +1394,13 @@ export const make = Effect.gen(function* () {
             continue;
           }
           const cursorKey = `${repo.projectId}:${repo.host}:${repo.repository}`;
-          const after = input.cursors?.[cursorKey] ?? null;
+          const cursor = input.cursors?.[cursorKey];
+          const after =
+            cursor === undefined
+              ? null
+              : cursor.startsWith(SEARCH_CURSOR_PREFIX)
+                ? cursor.slice(SEARCH_CURSOR_PREFIX.length)
+                : cursor;
           const searchTerms = [
             `repo:${repo.repository}`,
             "is:issue",
@@ -1397,19 +1436,23 @@ export const make = Effect.gen(function* () {
                 const number = positiveInteger(record(raw).number);
                 return number === null ? [] : [number];
               });
+              // Same pick as findLinked for attached links: the most recent one per issue.
               return sql<IssueLinkRow & { readonly number: number }>`
               SELECT number, thread_id AS "threadId", project_id AS "projectId", branch,
                 worktree_path AS "worktreePath", linked_at AS "linkedAt", source, detached_at AS "detachedAt"
               FROM projection_issue_links
-              WHERE host = ${repo.host} AND repository = ${repo.repository} AND ${sql.in("number", numbers)}
+              WHERE host = ${repo.host} AND repository = ${repo.repository}
+                AND detached_at IS NULL AND ${sql.in("number", numbers)}
+              ORDER BY linked_at DESC, thread_id
             `.pipe(
                 Effect.mapError((cause) =>
                   operationError("link.read", "Unable to read issue links.", cause),
                 ),
-                Effect.map((rows) => ({
-                  response,
-                  links: new Map(rows.map((row) => [row.number, row])),
-                })),
+                Effect.map((rows) => {
+                  const links = new Map<number, IssueLinkRow>();
+                  for (const row of rows) if (!links.has(row.number)) links.set(row.number, row);
+                  return { response, links };
+                }),
               );
             }),
             Effect.matchEffect({
@@ -1438,8 +1481,8 @@ export const make = Effect.gen(function* () {
                             ? null
                             : {
                                 threadId: ThreadId.make(row.threadId),
-                                branch: row.branch,
-                                worktreePath: row.worktreePath,
+                                branch: blankToNull(row.branch),
+                                worktreePath: blankToNull(row.worktreePath),
                                 source: sourceValue(row.source),
                               },
                         ),
@@ -1449,18 +1492,23 @@ export const make = Effect.gen(function* () {
                   const pageInfo = record(container.pageInfo);
                   const hasNext = pageInfo.hasNextPage === true;
                   const endCursor = stringValue(pageInfo.endCursor).trim();
-                  if (hasNext && endCursor.length > 0) nextCursors[cursorKey] = endCursor;
+                  if (hasNext && endCursor.length > 0) {
+                    nextCursors[cursorKey] = shouldSearch
+                      ? `${SEARCH_CURSOR_PREFIX}${endCursor}`
+                      : endCursor;
+                  }
                 }),
             }),
           );
         }
         entries.sort((left, right) => compareIssueListEntries(left, right, input.sort));
-        const truncated = entries.length > limit || Object.keys(nextCursors).length > 0;
+        // Every fetched row is returned: each repository asks for at most `limit` rows, and
+        // cutting the merged list would lose rows whose repository cursor already advanced.
         return {
           providers,
-          entries: entries.slice(0, limit),
+          entries,
           errors,
-          truncated,
+          truncated: Object.keys(nextCursors).length > 0,
           nextCursors,
         };
       }),
@@ -1531,15 +1579,13 @@ export const make = Effect.gen(function* () {
       }),
     );
 
+  /** Runs the writes, then re-reads the issue; caches drop even when a later write fails. */
   const mutationIssue = (
-    repo: Repo,
-    endpoint: string,
-    method: "POST" | "PATCH",
-    body: JsonRecord,
+    writes: ReadonlyArray<Effect.Effect<unknown, IssueError>>,
     input: IssueRef,
   ): Effect.Effect<IssueDetail, IssueError> =>
-    rest(repo, method, endpoint, body).pipe(
-      Effect.tap(() =>
+    Effect.all(writes, { discard: true }).pipe(
+      Effect.ensuring(
         Effect.sync(() => {
           listCache.clear();
           detailCache.clear();
@@ -1548,6 +1594,10 @@ export const make = Effect.gen(function* () {
       ),
       Effect.flatMap(() => detail(input)),
     );
+
+  const isGitHubNotFound = Schema.is(GitHubCli.GitHubPullRequestNotFoundError);
+  const isNotFound = (error: IssueError): boolean =>
+    error._tag === "IssueOperationError" && isGitHubNotFound(error.cause);
 
   const create = (input: IssueCreateInput): Effect.Effect<IssueCreateResult, IssueError> =>
     Effect.gen(function* () {
@@ -1597,15 +1647,27 @@ export const make = Effect.gen(function* () {
             "Milestone must be a numeric GitHub milestone id.",
           );
       }
-      return {
-        issue: yield* mutationIssue(
-          repo,
-          `repos/${repo.repository}/issues/${input.number}`,
-          "PATCH",
-          body,
-          input,
+      const issuePath = `repos/${repo.repository}/issues/${input.number}`;
+      // Additive edits leave labels and assignees others set since the issue was read.
+      const writes = [
+        ...(Object.keys(body).length > 0 ? [rest(repo, "PATCH", issuePath, body)] : []),
+        ...(input.addLabels?.length
+          ? [rest(repo, "POST", `${issuePath}/labels`, { labels: input.addLabels })]
+          : []),
+        ...(input.removeLabels ?? []).map((name) =>
+          rest(repo, "DELETE", `${issuePath}/labels/${encodeURIComponent(name)}`).pipe(
+            // A label that is already gone is the outcome the caller asked for.
+            Effect.catchIf(isNotFound, () => Effect.void),
+          ),
         ),
-      };
+        ...(input.addAssignees?.length
+          ? [rest(repo, "POST", `${issuePath}/assignees`, { assignees: input.addAssignees })]
+          : []),
+        ...(input.removeAssignees?.length
+          ? [rest(repo, "DELETE", `${issuePath}/assignees`, { assignees: input.removeAssignees })]
+          : []),
+      ];
+      return { issue: yield* mutationIssue(writes, input) };
     });
 
   const close = (input: IssueCloseInput): Effect.Effect<IssueCloseResult, IssueError> =>
@@ -1617,10 +1679,7 @@ export const make = Effect.gen(function* () {
       }
       return {
         issue: yield* mutationIssue(
-          repo,
-          `repos/${repo.repository}/issues/${input.number}`,
-          "PATCH",
-          body,
+          [rest(repo, "PATCH", `repos/${repo.repository}/issues/${input.number}`, body)],
           input,
         ),
       };
@@ -1631,10 +1690,11 @@ export const make = Effect.gen(function* () {
       const repo = yield* repoFor(input);
       return {
         issue: yield* mutationIssue(
-          repo,
-          `repos/${repo.repository}/issues/${input.number}`,
-          "PATCH",
-          { state: "open" },
+          [
+            rest(repo, "PATCH", `repos/${repo.repository}/issues/${input.number}`, {
+              state: "open",
+            }),
+          ],
           input,
         ),
       };
