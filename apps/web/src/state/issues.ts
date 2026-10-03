@@ -11,6 +11,8 @@ import type {
   IssueCandidatesResult,
   IssueCommentsInput,
   IssueCommentsResult,
+  IssueTimelineInput,
+  IssueTimelineResult,
   IssueDetail,
   IssueListEntry,
   IssueListInput,
@@ -128,6 +130,9 @@ const EMPTY_DETAIL_RESULT = Atom.make(AsyncResult.initial<IssueDetail, unknown>(
 const EMPTY_COMMENTS_RESULT = Atom.make(AsyncResult.initial<IssueCommentsResult, unknown>()).pipe(
   Atom.withLabel("web-issues:comments:empty"),
 );
+const EMPTY_TIMELINE_RESULT = Atom.make(AsyncResult.initial<IssueTimelineResult, unknown>()).pipe(
+  Atom.withLabel("web-issues:timeline:empty"),
+);
 const EMPTY_CANDIDATES_RESULT = Atom.make(
   AsyncResult.initial<IssueCandidatesResult, unknown>(),
 ).pipe(Atom.withLabel("web-issues:candidates:empty"));
@@ -181,6 +186,18 @@ export function useIssueComments(target: EnvironmentQueryTarget<IssueCommentsInp
 } {
   return useIssueQuery(
     target === null ? EMPTY_COMMENTS_RESULT : issueEnvironment.comments(target),
+    target !== null,
+  );
+}
+
+export function useIssueTimeline(target: EnvironmentQueryTarget<IssueTimelineInput> | null): {
+  readonly data: IssueTimelineResult | null;
+  readonly error: string | null;
+  readonly isPending: boolean;
+  readonly refresh: () => void;
+} {
+  return useIssueQuery(
+    target === null ? EMPTY_TIMELINE_RESULT : issueEnvironment.timeline(target),
     target !== null,
   );
 }
