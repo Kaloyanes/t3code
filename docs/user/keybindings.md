@@ -43,6 +43,15 @@ to copy its URL and `mod+shift+k` to copy its number with a `#` prefix.
 Both shortcuts can be changed in Settings. Search for “Copy Link or Thread ID”
 or “Copy Number”. They copy the selected PR and leave terminal input alone.
 
+## Pull Requests and Issues lists
+
+On the Pull Requests and Issues pages, `j` and `k` move through the list (the arrow keys
+also work once a row has focus) and Enter opens the focused row. `mod+F` searches the list.
+These keys are ignored while you type in a field.
+
+On the Issues page, `x` selects the focused issue, `mod+A` selects every shown issue, and
+Escape clears the selection. Shift-click selects a range. `c` starts a new issue.
+
 ## iPad
 
 With a hardware keyboard, use `Cmd+1` through `Cmd+9` to open the first nine

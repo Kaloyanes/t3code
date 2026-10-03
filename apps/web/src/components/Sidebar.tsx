@@ -141,6 +141,7 @@ import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../termina
 import { isMacPlatform } from "~/lib/utils";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { issueLinkExternalUrl, useOpenIssueLink } from "../lib/openIssueLink";
+import { ISSUE_CHIP_TONE } from "./issue/issuePresentation";
 import { readLocalApi } from "../localApi";
 import { requestConfirmDialog } from "../confirmDialog";
 import {
@@ -1549,13 +1550,6 @@ function WorkspaceServersPopover(props: {
     </Popover>
   );
 }
-
-// Matches GitHub: open issues are green, closed ones purple like merged pull requests.
-const ISSUE_CHIP_TONE = {
-  open: "text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300",
-  closed:
-    "text-violet-600 hover:text-violet-700 dark:text-violet-300/90 dark:hover:text-violet-200",
-} as const;
 
 const SidebarWorktreeHeader = memo(function SidebarWorktreeHeader(props: {
   readonly environmentId: EnvironmentId;

@@ -1,5 +1,6 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { ExternalLinkIcon } from "lucide-react";
+import type { ElementType } from "react";
 
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
@@ -11,17 +12,20 @@ export function PullRequestsUnavailableState({
   onRetry,
   refreshing = false,
   gitHubUrl,
+  Icon = PullRequestGlyph.pullRequest,
 }: {
   title?: string;
   error: string;
   onRetry?: () => void;
   refreshing?: boolean;
   gitHubUrl?: string;
+  /** The page's own subject; the issue list shares this state. */
+  Icon?: ElementType;
 }) {
   return (
     <Empty className="min-h-0 justify-center-safe overflow-y-auto [&>*]:shrink-0">
       <EmptyMedia variant="icon">
-        <PullRequestGlyph.pullRequest />
+        <Icon />
       </EmptyMedia>
       <EmptyHeader>
         <EmptyTitle>{title}</EmptyTitle>

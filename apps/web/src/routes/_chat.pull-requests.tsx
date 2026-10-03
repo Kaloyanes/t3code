@@ -100,6 +100,8 @@ import {
 import { PullRequestsUnavailableState } from "../components/pullRequest/PullRequestsUnavailableState";
 import { RightPanelTabs, type PullRequestTabStatusSeed } from "../components/RightPanelTabs";
 import { CompactFilterMenu, WorkItemListColumn } from "../components/workItem/WorkItemListColumn";
+import { useWorkItemListKeyboard } from "../components/workItem/useWorkItemListKeyboard";
+import { WorkItemGroupHeader } from "../components/workItem/WorkItemGroupHeader";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { isElectron } from "../env";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
@@ -134,7 +136,6 @@ import {
 } from "../state/pullRequests";
 import { useAtomCommand } from "../state/use-atom-command";
 import { cn } from "~/lib/utils";
-import { Separator } from "~/components/ui/separator";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
@@ -177,31 +178,12 @@ export interface PullRequestsSearch extends PullRequestListPreferences {
   readonly selectedEnvironmentId?: EnvironmentId;
 }
 
-/**
- * A group reads like the sidebar's shelves: its glyph, its name, how many, then a rule out
- * to the edge. The glyph is the one the involvement filter uses for the same idea.
- */
+/** Each group wears the glyph the involvement filter uses for the same idea. */
 const GROUP_ICONS: Record<string, LucideIcon> = {
   authored: PenLineIcon,
   reviewRequested: EyeIcon,
   others: UsersIcon,
 };
-
-function PullRequestGroupHeader({
-  group,
-}: {
-  group: { key: string; label: string; entries: ReadonlyArray<unknown> };
-}) {
-  const Icon = GROUP_ICONS[group.key] ?? LayersIcon;
-  return (
-    <div className="flex items-center gap-2 px-3 pb-1 text-xs font-medium text-muted-foreground/70">
-      <Icon aria-hidden className="size-3.5 shrink-0" />
-      <h2 className="shrink-0">{group.label}</h2>
-      <span className="shrink-0 tabular-nums text-muted-foreground/50">{group.entries.length}</span>
-      <Separator className="min-w-2 flex-1" />
-    </div>
-  );
-}
 
 // The state filters wear the same glyphs the rows do, so the two read as one vocabulary.
 const INVOLVEMENT_TABS = [
@@ -1298,6 +1280,8 @@ function PullRequestsRouteView() {
   );
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  // j/k walk the rows and Enter opens one; the rows are buttons, so focus is the cursor.
+  useWorkItemListKeyboard({ listRef: scrollRef, enabled: pullRequestsSupported });
 
   /**
    * The line counts, asked for once the rows are on screen. On GitHub they are forty per cent of
@@ -1768,7 +1752,13 @@ function PullRequestsRouteView() {
         <div className="space-y-3">
           {displayGroups.map((group) => (
             <div key={group.key} className="space-y-0.5">
-              {group.label ? <PullRequestGroupHeader group={group} /> : null}
+              {group.label ? (
+                <WorkItemGroupHeader
+                  icon={GROUP_ICONS[group.key] ?? LayersIcon}
+                  label={group.label}
+                  count={group.entries.length}
+                />
+              ) : null}
               {group.entries.map((entry) => {
                 const entryKey = pullRequestEntryKey(entry);
                 return (

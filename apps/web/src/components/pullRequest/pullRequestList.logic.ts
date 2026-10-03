@@ -180,7 +180,7 @@ const CHECKS_VALUES: Record<string, PullRequestListFilters["checks"]> = {
  * part of the token, so `label:"needs design"` stays whole. An unbalanced quote is dropped rather
  * than swallowing the rest of the line.
  */
-const QUERY_TOKEN = /(?:[^\s"]|"[^"]*")+/g;
+export const WORK_ITEM_QUERY_TOKEN = /(?:[^\s"]|"[^"]*")+/g;
 /** The contract's own ceilings on a qualifier: this many names, each this long. */
 const MAX_QUALIFIER_VALUES = 10;
 const MAX_QUALIFIER_LENGTH = 200;
@@ -214,6 +214,48 @@ function boundedNames(names: ReadonlyArray<string>): string[] {
     .filter((name) => name.length > 0);
 }
 
+/** One typed `key:value` token, or null for plain text. The value is unquoted and trimmed. */
+export function parseWorkItemQualifier(token: string): {
+  readonly key: string;
+  readonly rawValue: string;
+  readonly value: string;
+  readonly negated: boolean;
+} | null {
+  const qualifier = /^(-?)([A-Za-z][A-Za-z0-9_-]*):(.*)$/.exec(token);
+  if (qualifier === null) return null;
+  const rawValue = qualifier[3] ?? "";
+  return {
+    key: qualifier[2] ?? "",
+    rawValue,
+    value: qualifierValue(rawValue),
+    negated: qualifier[1] === "-",
+  };
+}
+
+/** A typed value cut to the contract's ceiling for one qualifier. */
+export function boundedWorkItemQualifier(value: string): string {
+  return value.slice(0, MAX_QUALIFIER_LENGTH).trim();
+}
+
+/**
+ * The label names a `label:` qualifier — or an unknown key, read as the namespaced label it
+ * almost always is — asks for. Null when the token is not a label after all: a pasted link is
+ * not one, and `https://…` would otherwise become a label named after its own scheme.
+ */
+export function workItemQueryLabelNames(key: string, rawValue: string): string[] | null {
+  if (key.toLowerCase() === "label") return boundedNames(splitQualifierList(rawValue));
+  if (qualifierValue(rawValue).startsWith("/")) return null;
+  // The key names the namespace, so the bare parts of `size:S,XS` are both sizes. A part that
+  // already carries a colon names its whole label — `size:S,size:XS` is the same pair written
+  // out, and prefixing it again would ask for `size:size:XS`.
+  return boundedNames(
+    splitQualifierList(rawValue).map((name) => (name.includes(":") ? name : `${key}:${name}`)),
+  );
+}
+
+/** The contract's ceiling on how many label groups or exclusions one query carries. */
+export const MAX_WORK_ITEM_QUALIFIER_VALUES = MAX_QUALIFIER_VALUES;
+
 /**
  * A typed query split into the qualifiers the hosts can act on and the text that is left. Written
  * GitHub's way — `label:foo`, `-label:"needs design"`, `author:octocat`, `draft:true`,
@@ -239,23 +281,14 @@ export function parsePullRequestQuery(raw: string): {
   let draft: PullRequestListFilters["draft"];
   let review: PullRequestListFilters["review"];
   let checks: PullRequestListFilters["checks"];
-  for (const [token] of raw.matchAll(QUERY_TOKEN)) {
-    const qualifier = /^(-?)([A-Za-z][A-Za-z0-9_-]*):(.*)$/.exec(token);
-    const value = qualifier === null ? "" : qualifierValue(qualifier[3] ?? "");
-    const negated = qualifier?.[1] === "-";
-    switch (value.length === 0 ? "" : (qualifier?.[2]?.toLowerCase() ?? "")) {
-      case "label": {
-        // GitHub's own OR: `label:a,b` is one qualifier satisfied by either name. Negated, the
-        // comma excludes each — a row carrying any of them goes.
-        const names = boundedNames(splitQualifierList(qualifier?.[3] ?? ""));
-        if (names.length === 0) break;
-        if (negated) excludedLabels.push(...names);
-        else labels.push(names);
-        continue;
-      }
+  for (const [token] of raw.matchAll(WORK_ITEM_QUERY_TOKEN)) {
+    const qualifier = parseWorkItemQualifier(token);
+    const value = qualifier?.value ?? "";
+    const negated = qualifier?.negated === true;
+    switch (value.length === 0 ? "" : (qualifier?.key.toLowerCase() ?? "")) {
       case "author":
         if (negated) break;
-        author = value.slice(0, MAX_QUALIFIER_LENGTH).trim();
+        author = boundedWorkItemQualifier(value);
         continue;
       case "draft":
         if (negated || (value.toLowerCase() !== "true" && value.toLowerCase() !== "false")) break;
@@ -276,23 +309,16 @@ export function parsePullRequestQuery(raw: string): {
       }
       case "":
         break;
-      default:
-        // An unknown key, read as the namespaced label it almost always is. A pasted link is
-        // not one — `https://…` would otherwise become a label named after its own scheme.
-        if (!value.startsWith("/")) {
-          // The key names the namespace, so the bare parts of `size:S,XS` are both sizes. A part
-          // that already carries a colon names its whole label — `size:S,size:XS` is the same
-          // pair written out, and prefixing it again would ask for `size:size:XS`.
-          const names = boundedNames(
-            splitQualifierList(qualifier?.[3] ?? "").map((name) =>
-              name.includes(":") ? name : `${qualifier?.[2] ?? ""}:${name}`,
-            ),
-          );
-          if (names.length === 0) break;
-          if (negated) excludedLabels.push(...names);
-          else labels.push(names);
-          continue;
-        }
+      default: {
+        // `label:` itself and any unknown key. GitHub's own OR: `label:a,b` is one qualifier
+        // satisfied by either name. Negated, the comma excludes each — a row carrying any goes.
+        const names =
+          qualifier === null ? null : workItemQueryLabelNames(qualifier.key, qualifier.rawValue);
+        if (names === null || names.length === 0) break;
+        if (negated) excludedLabels.push(...names);
+        else labels.push(names);
+        continue;
+      }
     }
     text.push(token);
   }

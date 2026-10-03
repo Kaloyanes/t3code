@@ -7,7 +7,7 @@ import { getSourceControlPresentationForKind } from "~/sourceControlPresentation
 
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PullRequestChecksPopover } from "./PullRequestChecksPopover";
-import type { EnvironmentPullRequestEntry } from "./pullRequestList.logic";
+import { pullRequestEntryKey, type EnvironmentPullRequestEntry } from "./pullRequestList.logic";
 import { openOnHostLabel, showPullRequestLinkContextMenu } from "./pullRequestLinkContextMenu";
 import {
   PULL_REQUEST_ROW_CLASS,
@@ -34,7 +34,12 @@ const LABEL_SLOTS = [
   { overflow: "" },
 ] as const;
 
-function PullRequestRowLabels({ labels }: { labels: EnvironmentPullRequestEntry["labels"] }) {
+/** Needs a meta line marked `@container/pr-row-meta`; the issue rows share it. */
+export function PullRequestRowLabels({
+  labels,
+}: {
+  labels: ReadonlyArray<Pick<EnvironmentPullRequestEntry["labels"][number], "name" | "color">>;
+}) {
   if (labels.length === 0) return null;
   return (
     <span className="flex min-w-0 items-center gap-1">
@@ -109,6 +114,8 @@ function PullRequestRowImpl({
     <button
       ref={statsRef}
       data-pull-request-stats-key={statsKey}
+      // The work item lists' j/k cursor walks these.
+      data-work-item-row={pullRequestEntryKey(entry)}
       type="button"
       aria-current={selected ? "true" : undefined}
       onClick={() => onSelect(entry)}

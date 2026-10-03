@@ -1,6 +1,7 @@
 import type { EnvironmentId, PullRequestRef, ScopedThreadRef } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
+import * as Schema from "effect/Schema";
 import { type MouseEvent, useCallback, useMemo } from "react";
 
 import { pullRequestHostOf, type SourceControlProviderKind } from "@t3tools/contracts";
@@ -11,6 +12,7 @@ import {
 } from "@t3tools/shared/sourceControl";
 
 import { useOpenLink } from "../browser/useOpenLink";
+import { PullRequestListSort } from "../components/pullRequest/pullRequestListPreferences";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useRightPanelStore } from "../rightPanelStore";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
@@ -18,6 +20,8 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { useProjects, useServerConfigs } from "../state/entities";
 import { serverEnvironment } from "../state/server";
 import { usePrimaryEnvironmentId } from "../state/environments";
+
+const isPullRequestListSort = Schema.is(PullRequestListSort);
 
 export {
   parseChangeRequestUrl,
@@ -286,9 +290,13 @@ export function useOpenChangeRequestLink(
         if (!resolvedThreadRef) {
           void navigate({
             to: "/pull-requests",
-            search: (previous) => ({
+            search: ({ involvement, sort, ...previous }) => ({
               ...previous,
-              involvement: previous.involvement ?? "all",
+              // Coming from another list (the issues page has its own involvements and sorts),
+              // only the pull request page's own answers carry over.
+              involvement:
+                involvement === "authored" || involvement === "reviewing" ? involvement : "all",
+              ...(isPullRequestListSort(sort) ? { sort } : {}),
               state: previous.state ?? "all",
               repository,
               number: parsed.number,
