@@ -3,6 +3,7 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type {
   EnvironmentId,
   IssueInvolvement,
+  IssueRef,
   IssueListFilters,
   IssueListInput,
   IssueListSort,
@@ -41,6 +42,7 @@ import {
   issueLinkedWorkForEntry,
   issueListEntryKey,
   issueListSnapshotKey,
+  issueQueryControls,
   issueRefForEntry,
   issueRepositoriesWithCursors,
   issueRepositoryForProject,
@@ -48,6 +50,7 @@ import {
   issueSelectionScopeKey,
   mergeIssueListResults,
   normalizeIssueHost,
+  normalizeIssuePerson,
   parseIssueQuery,
   planIssueBulkAction,
   type EnvironmentIssueEntry,
@@ -119,6 +122,7 @@ import {
   clearIssueDraft,
   issueEnvironment,
   readIssueListSnapshot,
+  removeRetiredIssueStorage,
   useIssueAuthStatus,
   useIssueCandidates,
   useIssueList,
@@ -418,11 +422,28 @@ function IssuesRouteView() {
   const querySettled = typedQuery === sentQuery;
   const typedParsed = useMemo(() => parseIssueQuery(typedQuery), [typedQuery]);
   const sentParsed = useMemo(() => parseIssueQuery(sentQuery), [sentQuery]);
+  // A typed `is:closed` or `sort:comments` is a word about the page's own controls; once the
+  // text settles it moves onto them, rather than fighting the state and sort the request sends.
+  const typedControls = useMemo(
+    () => (querySettled ? issueQueryControls(sentQuery) : null),
+    [querySettled, sentQuery],
+  );
+  const applyTypedControls = useEffectEvent(
+    (controls: NonNullable<ReturnType<typeof issueQueryControls>>) =>
+      updateListScope({
+        q: controls.query || undefined,
+        ...(controls.state === undefined ? {} : { state: controls.state }),
+        ...(controls.sort === undefined ? {} : { sort: controls.sort }),
+      }),
+  );
+  useEffect(() => {
+    if (typedControls !== null) applyTypedControls(typedControls);
+  }, [typedControls]);
   const menuFilters = useMemo(
     (): IssueListFilters => ({
       ...(search.labels ? { labels: [search.labels.slice(0, 25)] } : {}),
-      ...(search.author ? { author: search.author } : {}),
-      ...(search.assignee ? { assignee: search.assignee } : {}),
+      ...(search.author ? { author: normalizeIssuePerson(search.author) } : {}),
+      ...(search.assignee ? { assignee: normalizeIssuePerson(search.assignee) } : {}),
       ...(search.milestone ? { milestone: search.milestone } : {}),
     }),
     [search.assignee, search.author, search.labels, search.milestone],
@@ -516,10 +537,19 @@ function IssuesRouteView() {
     [listKey, snapshot],
   );
   useEffect(() => {
+    removeRetiredIssueStorage(browserStorage());
+  }, []);
+  // The whole cache is rewritten on each save, so an answer identical to the last one saved for
+  // the same question is not saved again.
+  const lastSavedRef = useRef<string | null>(null);
+  useEffect(() => {
     if (listQuery.isPending || listQuery.error !== null || listQuery.values.length === 0) return;
     const data = listQuery.data;
     // A partial failure is still worth keeping unless it is all failure.
     if (data === null || (data.entries.length === 0 && data.errors.length > 0)) return;
+    const saved = JSON.stringify([listKey, listQuery.values]);
+    if (saved === lastSavedRef.current) return;
+    lastSavedRef.current = saved;
     const value = writeIssueListSnapshot(browserStorage(), listKey, listQuery.values);
     setSnapshot({ key: listKey, value });
   }, [listKey, listQuery.data, listQuery.error, listQuery.isPending, listQuery.values]);
@@ -648,25 +678,30 @@ function IssuesRouteView() {
   const renderedRightPanelSurfaces = rightPanelPresence.value?.surfaces ?? [];
   const rightPanelAvailable = selectedIssueSurface !== null;
 
-  const openIssue = useCallback(
-    (entry: EnvironmentIssueEntry) => {
+  const openIssueReference = useCallback(
+    (environmentId: EnvironmentId, issue: IssueRef & { readonly url?: string }) => {
       useRightPanelStore.getState().openIssue(ISSUES_PANEL_REF, {
-        environmentId: entry.environmentId,
-        projectId: entry.projectId,
-        host: entry.host,
-        repository: entry.repository,
-        number: entry.number,
-        url: entry.url,
+        environmentId,
+        projectId: issue.projectId,
+        ...(issue.host === undefined ? {} : { host: issue.host }),
+        repository: issue.repository,
+        number: issue.number,
+        ...(issue.url === undefined ? {} : { url: issue.url }),
       });
       updateSearch({
-        selectedIssue: entry.number,
-        selectedProjectId: entry.projectId,
-        selectedEnvironmentId: entry.environmentId,
-        selectedRepository: entry.repository,
-        selectedHost: entry.host,
+        selectedIssue: issue.number,
+        selectedProjectId: issue.projectId,
+        selectedEnvironmentId: environmentId,
+        selectedRepository: issue.repository,
+        selectedHost: issue.host,
       });
     },
     [updateSearch],
+  );
+  const openIssue = useCallback(
+    (entry: EnvironmentIssueEntry) =>
+      openIssueReference(entry.environmentId, { ...issueRefForEntry(entry), url: entry.url }),
+    [openIssueReference],
   );
   // A link to one issue opens it in the panel through the checkout it names, or the scoped one.
   const linkedProject = useMemo(() => {
@@ -841,7 +876,7 @@ function IssuesRouteView() {
   const [bulkRunning, setBulkRunning] = useState(false);
   const checkedEntries = orderedEntries.filter((entry) => checked.has(issueListEntryKey(entry)));
   const runBulkAction = async (action: IssueBulkAction) => {
-    if (bulkRunning) return;
+    if (bulkRunning || stale || showingCarried) return;
     const plan = planIssueBulkAction(checkedEntries, action);
     const [doing, done] =
       action.kind === "close"
@@ -1253,6 +1288,9 @@ function IssuesRouteView() {
           canClose={checkedEntries.some((entry) => entry.state === "open")}
           canReopen={checkedEntries.some((entry) => entry.state === "closed")}
           running={bulkRunning}
+          // Saved or carried rows may no longer say what is on GitHub; acting on them could
+          // close what was reopened, so the bar waits for a live answer.
+          outdated={stale || showingCarried}
           labelOptions={labelOptions}
           assigneeOptions={assigneeOptions}
           onPickerOpenChange={setBulkPickerOpen}
@@ -1417,6 +1455,14 @@ function IssuesRouteView() {
                   number: renderedIssueSurface.number,
                 }}
                 onBack={() => closeSurface(renderedIssueSurface)}
+                onOpenIssue={(issue) =>
+                  openIssueReference(
+                    (renderedIssueSurface.environmentId as EnvironmentId | undefined) ??
+                      panelEnvironmentId,
+                    issue,
+                  )
+                }
+                onActed={() => listQuery.refresh()}
               />
             ) : null}
           </RightPanelTabs>

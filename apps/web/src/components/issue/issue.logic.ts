@@ -8,6 +8,7 @@ import type {
   IssueListFilters,
   IssueListResult,
   IssueListSort,
+  IssueListState,
   IssueLinkedWork,
   IssueRef,
   IssueReopenInput,
@@ -181,10 +182,71 @@ const GITHUB_SEARCH_KEYS = new Set([
   "project",
 ]);
 
+/** `me` and `@me` both name the signed-in account, which the host reads as `@me`. */
+export function normalizeIssuePerson(value: string): string {
+  const lower = value.toLowerCase();
+  return lower === "me" || lower === "@me" ? "@me" : value;
+}
+
+const TYPED_STATES: Readonly<Record<string, IssueListState>> = { open: "open", closed: "closed" };
+const TYPED_SORTS: Readonly<Record<string, IssueListSort>> = {
+  updated: "updated",
+  "updated-desc": "updated",
+  created: "created-desc",
+  "created-desc": "created-desc",
+  "created-asc": "created-asc",
+  comments: "comments",
+  "comments-desc": "comments",
+};
+
+/** What `is:open`, `state:closed` or `sort:created-asc` asks of the page's own controls. */
+function issueQueryControl(
+  token: string,
+): { readonly state: IssueListState } | { readonly sort: IssueListSort } | null {
+  const qualifier = parseWorkItemQualifier(token);
+  if (qualifier === null || qualifier.negated) return null;
+  const key = qualifier.key.toLowerCase();
+  const value = qualifier.value.toLowerCase();
+  if (key === "is" || key === "state") {
+    const state = TYPED_STATES[value];
+    return state === undefined ? null : { state };
+  }
+  if (key === "sort") {
+    const sort = TYPED_SORTS[value];
+    return sort === undefined ? null : { sort };
+  }
+  return null;
+}
+
+/**
+ * The state and sort a typed query asks for, and the query without them. The list request
+ * carries its own state and sort, so a typed one moves onto the page's controls instead of
+ * contradicting them. Null when nothing typed names either.
+ */
+export function issueQueryControls(raw: string): {
+  readonly query: string;
+  readonly state?: IssueListState;
+  readonly sort?: IssueListSort;
+} | null {
+  const rest: string[] = [];
+  const controls: { state?: IssueListState; sort?: IssueListSort } = {};
+  let found = false;
+  for (const [token] of raw.matchAll(WORK_ITEM_QUERY_TOKEN)) {
+    const control = issueQueryControl(token);
+    if (control === null) rest.push(token);
+    else {
+      found = true;
+      Object.assign(controls, control);
+    }
+  }
+  return found ? { query: rest.join(" "), ...controls } : null;
+}
+
 /**
  * A typed issue query split into the qualifiers the list request carries as filters and the text
  * that is left: `label:a,b` (either), `-label:x`, `author:`, `assignee:`, `milestone:`. Label
- * parsing is the pull request list's, so `area:web` reads as that label on both pages.
+ * parsing is the pull request list's, so `area:web` reads as that label on both pages. Typed
+ * state and sort are left to `issueQueryControls`, and never reach the text.
  */
 export function parseIssueQuery(raw: string): {
   readonly text: string;
@@ -195,6 +257,7 @@ export function parseIssueQuery(raw: string): {
   const excludedLabels: string[] = [];
   const single: { author?: string; assignee?: string; milestone?: string } = {};
   for (const [token] of raw.matchAll(WORK_ITEM_QUERY_TOKEN)) {
+    if (issueQueryControl(token) !== null) continue;
     const qualifier = parseWorkItemQualifier(token);
     if (qualifier === null || qualifier.value.length === 0) {
       text.push(token);
@@ -203,7 +266,10 @@ export function parseIssueQuery(raw: string): {
     const key = qualifier.key.toLowerCase();
     if (key === "author" || key === "assignee" || key === "milestone") {
       if (qualifier.negated) text.push(token);
-      else single[key] = boundedWorkItemQualifier(qualifier.value);
+      else {
+        const value = boundedWorkItemQualifier(qualifier.value);
+        single[key] = key === "milestone" ? value : normalizeIssuePerson(value);
+      }
       continue;
     }
     const names = GITHUB_SEARCH_KEYS.has(key)
@@ -383,7 +449,7 @@ export function collectIssueListFacets(entries: ReadonlyArray<IssueListEntry>): 
     if (seen.has(key)) continue;
     seen.add(key);
     if (entry.author !== null) countActor(authors, entry.author);
-    for (const assignee of entry.assignees) countActor(assignees, assignee);
+    for (const assignee of entry.assignees ?? []) countActor(assignees, assignee);
     for (const label of entry.labels) {
       const labelKey = label.name.toLowerCase();
       const held = labels.get(labelKey);
@@ -393,11 +459,12 @@ export function collectIssueListFacets(entries: ReadonlyArray<IssueListEntry>): 
         count: (held?.count ?? 0) + 1,
       });
     }
-    if (entry.milestone !== null) {
-      const milestoneKey = entry.milestone.title.toLowerCase();
+    const milestone = entry.milestone ?? null;
+    if (milestone !== null) {
+      const milestoneKey = milestone.title.toLowerCase();
       const held = milestones.get(milestoneKey);
       milestones.set(milestoneKey, {
-        title: held?.title ?? entry.milestone.title,
+        title: held?.title ?? milestone.title,
         count: (held?.count ?? 0) + 1,
       });
     }
@@ -447,7 +514,7 @@ export function groupIssueEntries<Entry extends IssueListEntry>(
     if (entry.linkedWork) buckets.working.push(entry);
     else if (
       viewer !== null &&
-      entry.assignees.some((assignee) => assignee.login.toLowerCase() === viewer)
+      (entry.assignees ?? []).some((assignee) => assignee.login.toLowerCase() === viewer)
     ) {
       buckets.assigned.push(entry);
     } else buckets.others.push(entry);
@@ -468,19 +535,15 @@ export type IssueBulkStep<Entry extends IssueListEntry> =
   | { readonly entry: Entry; readonly command: "reopen"; readonly input: IssueReopenInput }
   | { readonly entry: Entry; readonly command: "update"; readonly input: IssueUpdateInput };
 
-/** GitHub's own ceiling on labels or assignees set in one update. */
-const MAX_ISSUE_UPDATE_VALUES = 25;
-
-function withName(names: ReadonlyArray<string>, name: string): ReadonlyArray<string> | null {
-  if (names.some((existing) => existing.toLowerCase() === name.toLowerCase())) return null;
-  return names.length >= MAX_ISSUE_UPDATE_VALUES ? null : [...names, name];
+function hasName(names: ReadonlyArray<string>, name: string): boolean {
+  return names.some((existing) => existing.toLowerCase() === name.toLowerCase());
 }
 
 /**
  * One request per selected issue that the action would actually change. Closing a closed issue,
  * reopening an open one, or adding a label it already carries is left out rather than sent, so
- * the progress count only counts real work. Labels and assignees are sent whole, since an update
- * replaces the set: the row's own set plus the new name.
+ * the progress count only counts real work. Labels and assignees are added rather than sent
+ * whole, so a row read a while ago never undoes what someone set since.
  */
 export function planIssueBulkAction<Entry extends IssueListEntry>(
   entries: ReadonlyArray<Entry>,
@@ -496,20 +559,22 @@ export function planIssueBulkAction<Entry extends IssueListEntry>(
       case "reopen":
         return entry.state === "closed" ? [{ entry, command: "reopen", input: ref }] : [];
       case "add-label": {
-        const labels = withName(
-          entry.labels.map((label) => label.name),
-          action.label.trim(),
-        );
-        return labels === null ? [] : [{ entry, command: "update", input: { ...ref, labels } }];
+        const label = action.label.trim();
+        return hasName(
+          entry.labels.map((held) => held.name),
+          label,
+        )
+          ? []
+          : [{ entry, command: "update", input: { ...ref, addLabels: [label] } }];
       }
       case "assign": {
-        const assignees = withName(
-          entry.assignees.map((assignee) => assignee.login),
-          action.login.trim(),
-        );
-        return assignees === null
+        const login = action.login.trim();
+        return hasName(
+          (entry.assignees ?? []).map((held) => held.login),
+          login,
+        )
           ? []
-          : [{ entry, command: "update", input: { ...ref, assignees } }];
+          : [{ entry, command: "update", input: { ...ref, addAssignees: [login] } }];
       }
     }
   });

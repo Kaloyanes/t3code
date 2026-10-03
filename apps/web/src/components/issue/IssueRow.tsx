@@ -28,7 +28,11 @@ import { IssueStateGlyph } from "./IssueStateGlyph";
 /** Assignees past this many collapse into the tooltip; the stack stays one glance wide. */
 const MAX_ASSIGNEE_AVATARS = 3;
 
-function IssueAssignees({ assignees }: { assignees: EnvironmentIssueEntry["assignees"] }) {
+function IssueAssignees({
+  assignees,
+}: {
+  assignees: NonNullable<EnvironmentIssueEntry["assignees"]>;
+}) {
   if (assignees.length === 0) return null;
   const logins = assignees.map((assignee) => assignee.login).join(", ");
   return (
@@ -192,7 +196,7 @@ function IssueRowImpl({
                   {entry.commentsCount}
                 </span>
               ) : null}
-              <IssueAssignees assignees={entry.assignees} />
+              <IssueAssignees assignees={entry.assignees ?? []} />
             </>
           }
           metaClassName="@container/pr-row-meta"

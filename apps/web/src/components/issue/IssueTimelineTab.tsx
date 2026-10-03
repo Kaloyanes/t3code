@@ -339,12 +339,21 @@ function IssueTimelinePage({
   if (query.data === null) {
     return query.error ? (
       <div className="pl-12">
-        <PullRequestActivityUnavailableState
-          compact
-          title="Could not load the timeline"
-          error={query.error}
-          onRetry={query.refresh}
-        />
+        {query.unsupported ? (
+          <PullRequestActivityUnavailableState
+            compact
+            title="Timeline unavailable"
+            error="Update this T3 Code server to see an issue's timeline."
+            onRetry={query.refresh}
+          />
+        ) : (
+          <PullRequestActivityUnavailableState
+            compact
+            title="Could not load the timeline"
+            error={query.error}
+            onRetry={query.refresh}
+          />
+        )}
       </div>
     ) : (
       <div role="status" aria-label="Loading timeline" className="motion-safe:animate-skeleton">

@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import { EnvironmentId as EnvironmentIdSchema, IssueListResult } from "@t3tools/contracts";
@@ -142,6 +143,8 @@ function useIssueQuery<A, Input>(
   readonly error: string | null;
   readonly isPending: boolean;
   readonly refresh: () => void;
+  /** The server predates this request: it answers that it does not know the method. */
+  readonly unsupported: boolean;
 } {
   const result = useAtomValue(atom);
   const refresh = useCallback(() => {
@@ -152,6 +155,10 @@ function useIssueQuery<A, Input>(
     error: active && result._tag === "Failure" ? formatEnvironmentQueryError(result.cause) : null,
     isPending: active && result.waiting,
     refresh,
+    unsupported:
+      active &&
+      result._tag === "Failure" &&
+      String(Cause.squash(result.cause)).includes("Unknown request tag"),
   };
 }
 
@@ -186,6 +193,7 @@ export function useIssueTimeline(target: EnvironmentQueryTarget<IssueTimelineInp
   readonly error: string | null;
   readonly isPending: boolean;
   readonly refresh: () => void;
+  readonly unsupported: boolean;
 } {
   return useIssueQuery(
     target === null ? EMPTY_TIMELINE_RESULT : issueEnvironment.timeline(target),
@@ -244,6 +252,8 @@ export interface IssueDraft {
 
 const ISSUE_DRAFT_STORAGE_KEY = "t3code:issue-drafts:v1";
 const ISSUE_SNAPSHOT_STORAGE_KEY = "t3code:issue-snapshots:v2";
+/** Keys earlier builds wrote and nothing reads any more. */
+const RETIRED_ISSUE_STORAGE_KEYS = ["t3code:issue-snapshots:v1", "t3code:issue-selection:v1"];
 const MAX_DRAFTS = 100;
 const MAX_SNAPSHOTS = 100;
 
@@ -399,4 +409,16 @@ export function writeIssueListSnapshot(
     // Persistence is best effort; a failed cache write must not hide live results.
   }
   return snapshot;
+}
+
+/** Drops what earlier builds stored and nothing reads any more. Best effort. */
+export function removeRetiredIssueStorage(storage: Pick<Storage, "removeItem"> | undefined): void {
+  if (!storage) return;
+  for (const key of RETIRED_ISSUE_STORAGE_KEYS) {
+    try {
+      storage.removeItem(key);
+    } catch {
+      // A blocked store keeps the old keys; they are inert.
+    }
+  }
 }

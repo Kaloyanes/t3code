@@ -7,6 +7,7 @@ import {
   issueRepositoriesWithCursors,
   mergeIssueListResults,
   issueLinkedWorkForEntry,
+  issueQueryControls,
   parseIssueQuery,
   planIssueBulkAction,
   sortIssueEntries,
@@ -186,9 +187,17 @@ describe("parseIssueQuery", () => {
         labels: [["bug", "regression"]],
         excludedLabels: ["wontfix"],
         author: "octo",
-        assignee: "me",
+        assignee: "@me",
         milestone: "v1 beta",
       },
+    });
+  });
+
+  it("reads me and @me as the signed-in account for people, but not for milestones", () => {
+    expect(parseIssueQuery("author:@ME assignee:me milestone:me").filters).toEqual({
+      author: "@me",
+      assignee: "@me",
+      milestone: "me",
     });
   });
 
@@ -201,11 +210,31 @@ describe("parseIssueQuery", () => {
 
   it("leaves GitHub search keys, links, negated people and empty values as text", () => {
     expect(
-      parseIssueQuery("is:open no:assignee https://github.com -author:bot label: plain"),
+      parseIssueQuery("is:locked no:assignee https://github.com -author:bot label: plain"),
     ).toEqual({
-      text: "is:open no:assignee https://github.com -author:bot label: plain",
+      text: "is:locked no:assignee https://github.com -author:bot label: plain",
       filters: {},
     });
+  });
+
+  it("never sends a typed state or sort, which the request carries on its own", () => {
+    expect(parseIssueQuery("crash is:closed sort:comments state:open")).toEqual({
+      text: "crash",
+      filters: {},
+    });
+  });
+});
+
+describe("issueQueryControls", () => {
+  it("moves a typed state and sort onto the controls, the last of each winning", () => {
+    expect(
+      issueQueryControls('crash is:open label:"needs triage" state:closed sort:created'),
+    ).toEqual({ query: 'crash label:"needs triage"', state: "closed", sort: "created-desc" });
+    expect(issueQueryControls("sort:created-asc")).toEqual({ query: "", sort: "created-asc" });
+  });
+
+  it("is null when nothing typed names a state or sort the controls offer", () => {
+    expect(issueQueryControls("is:locked -is:open sort:reactions state:merged")).toBeNull();
   });
 });
 
@@ -320,17 +349,26 @@ describe("planIssueBulkAction", () => {
     ).toEqual([2]);
   });
 
-  it("sends the whole label and assignee sets, skipping rows that already have the name", () => {
+  it("adds one label or assignee, never the row's whole set, skipping rows that have it", () => {
     const labelSteps = planIssueBulkAction([open, closed], { kind: "add-label", label: "BUG" });
     expect(labelSteps.map((step) => step.entry.number)).toEqual([2]);
-    expect(planIssueBulkAction([open], { kind: "add-label", label: "ui" })[0]?.input).toMatchObject(
-      {
-        labels: ["bug", "ui"],
-      },
-    );
-    expect(planIssueBulkAction([open], { kind: "assign", login: "me" })[0]?.input).toMatchObject({
-      assignees: ["me"],
+    const labelInput = planIssueBulkAction([open], { kind: "add-label", label: " ui " })[0]?.input;
+    expect(labelInput).toMatchObject({ addLabels: ["ui"] });
+    expect(labelInput).not.toHaveProperty("labels");
+    const assigned = issueEntry({
+      number: 3,
+      assignees: [{ login: "Octo", name: null, avatarUrl: null }],
     });
+    const assignSteps = planIssueBulkAction([open, assigned], { kind: "assign", login: "octo" });
+    expect(assignSteps.map((step) => [step.entry.number, step.input])).toEqual([
+      [1, expect.objectContaining({ addAssignees: ["octo"] })],
+    ]);
+    expect(assignSteps[0]?.input).not.toHaveProperty("assignees");
+  });
+
+  it("treats a row from an older server, without assignees, as having none", () => {
+    const { assignees: _assignees, ...older } = issueEntry({ number: 4 });
+    expect(planIssueBulkAction([older], { kind: "assign", login: "a" })).toHaveLength(1);
   });
 });
 

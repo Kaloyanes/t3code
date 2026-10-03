@@ -15,6 +15,7 @@ import { Button } from "../ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { IssueActorFacet, IssueBulkAction, IssueLabelFacet } from "./issue.logic";
 
 /** A name picker for the bar: the loaded names, filtered as typed, or the typed name itself. */
@@ -102,6 +103,7 @@ export function IssueBulkActionBar({
   canClose,
   canReopen,
   running,
+  outdated,
   labelOptions,
   assigneeOptions,
   onPickerOpenChange,
@@ -113,6 +115,8 @@ export function IssueBulkActionBar({
   canReopen: boolean;
   /** A batch is going; the controls wait for it rather than queue a second. */
   running: boolean;
+  /** The rows are saved or carried over, not a live answer, so nothing acts on them yet. */
+  outdated: boolean;
   labelOptions: ReadonlyArray<IssueLabelFacet>;
   assigneeOptions: ReadonlyArray<IssueActorFacet>;
   /** A picker opened, so the page can fetch the repository's own candidates. */
@@ -120,6 +124,87 @@ export function IssueBulkActionBar({
   onAction: (action: IssueBulkAction) => void;
   onClear: () => void;
 }) {
+  const blocked = running || outdated;
+  const actions = (
+    <>
+      <Menu>
+        <MenuTrigger disabled={blocked || !canClose} render={<Button size="sm" variant="ghost" />}>
+          <CircleCheckIcon aria-hidden className="size-3.5" />
+          Close
+        </MenuTrigger>
+        <MenuPopup align="center" side="top">
+          <MenuItem onClick={() => onAction({ kind: "close", reason: "completed" })}>
+            <CircleCheckIcon aria-hidden />
+            Close as completed
+          </MenuItem>
+          <MenuItem onClick={() => onAction({ kind: "close", reason: "not-planned" })}>
+            <CircleSlashIcon aria-hidden />
+            Close as not planned
+          </MenuItem>
+        </MenuPopup>
+      </Menu>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={blocked || !canReopen}
+        onClick={() => onAction({ kind: "reopen" })}
+      >
+        <CircleDotIcon aria-hidden className="size-3.5" />
+        Reopen
+      </Button>
+      <BulkPickerMenu
+        noun="label"
+        disabled={blocked}
+        trigger={
+          <>
+            <TagIcon aria-hidden className="size-3.5" />
+            Add label
+          </>
+        }
+        options={labelOptions.map((option) => {
+          const dot = pullRequestLabelColor(option.color);
+          return {
+            value: option.name,
+            search: option.name,
+            label: (
+              <span className="flex min-w-0 items-center gap-2">
+                <span
+                  aria-hidden
+                  className="size-2.5 shrink-0 rounded-full bg-muted-foreground"
+                  {...(dot ? { style: { backgroundColor: dot } } : {})}
+                />
+                <span className="min-w-0 truncate">{option.name}</span>
+              </span>
+            ),
+          };
+        })}
+        onPick={(label) => onAction({ kind: "add-label", label })}
+        onOpenChange={onPickerOpenChange}
+      />
+      <BulkPickerMenu
+        noun="assignee"
+        disabled={blocked}
+        trigger={
+          <>
+            <UserRoundPlusIcon aria-hidden className="size-3.5" />
+            Assign
+          </>
+        }
+        options={assigneeOptions.map((option) => ({
+          value: option.actor.login,
+          search: `${option.actor.login} ${option.actor.name ?? ""}`,
+          label: (
+            <span className="flex min-w-0 items-center gap-2">
+              <PullRequestActorAvatar actor={option.actor} />
+              <span className="min-w-0 truncate">{option.actor.login}</span>
+            </span>
+          ),
+        }))}
+        onPick={(login) => onAction({ kind: "assign", login })}
+        onOpenChange={onPickerOpenChange}
+      />
+    </>
+  );
   return (
     <div className="pointer-events-none sticky bottom-3 z-10 flex justify-center">
       <div
@@ -131,85 +216,18 @@ export function IssueBulkActionBar({
           {running ? <Spinner aria-hidden size="sm" /> : null}
           {count} selected
         </span>
-        <Menu>
-          <MenuTrigger
-            disabled={running || !canClose}
-            render={<Button size="sm" variant="ghost" />}
-          >
-            <CircleCheckIcon aria-hidden className="size-3.5" />
-            Close
-          </MenuTrigger>
-          <MenuPopup align="center" side="top">
-            <MenuItem onClick={() => onAction({ kind: "close", reason: "completed" })}>
-              <CircleCheckIcon aria-hidden />
-              Close as completed
-            </MenuItem>
-            <MenuItem onClick={() => onAction({ kind: "close", reason: "not-planned" })}>
-              <CircleSlashIcon aria-hidden />
-              Close as not planned
-            </MenuItem>
-          </MenuPopup>
-        </Menu>
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={running || !canReopen}
-          onClick={() => onAction({ kind: "reopen" })}
-        >
-          <CircleDotIcon aria-hidden className="size-3.5" />
-          Reopen
-        </Button>
-        <BulkPickerMenu
-          noun="label"
-          disabled={running}
-          trigger={
-            <>
-              <TagIcon aria-hidden className="size-3.5" />
-              Add label
-            </>
-          }
-          options={labelOptions.map((option) => {
-            const dot = pullRequestLabelColor(option.color);
-            return {
-              value: option.name,
-              search: option.name,
-              label: (
-                <span className="flex min-w-0 items-center gap-2">
-                  <span
-                    aria-hidden
-                    className="size-2.5 shrink-0 rounded-full bg-muted-foreground"
-                    {...(dot ? { style: { backgroundColor: dot } } : {})}
-                  />
-                  <span className="min-w-0 truncate">{option.name}</span>
-                </span>
-              ),
-            };
-          })}
-          onPick={(label) => onAction({ kind: "add-label", label })}
-          onOpenChange={onPickerOpenChange}
-        />
-        <BulkPickerMenu
-          noun="assignee"
-          disabled={running}
-          trigger={
-            <>
-              <UserRoundPlusIcon aria-hidden className="size-3.5" />
-              Assign
-            </>
-          }
-          options={assigneeOptions.map((option) => ({
-            value: option.actor.login,
-            search: `${option.actor.login} ${option.actor.name ?? ""}`,
-            label: (
-              <span className="flex min-w-0 items-center gap-2">
-                <PullRequestActorAvatar actor={option.actor} />
-                <span className="min-w-0 truncate">{option.actor.login}</span>
-              </span>
-            ),
-          }))}
-          onPick={(login) => onAction({ kind: "assign", login })}
-          onOpenChange={onPickerOpenChange}
-        />
+        {outdated ? (
+          <Tooltip>
+            <TooltipTrigger render={<span className="flex items-center gap-0.5" />}>
+              {actions}
+            </TooltipTrigger>
+            <TooltipPopup side="top">
+              These issues may have changed on GitHub. Refresh the list to act on them.
+            </TooltipPopup>
+          </Tooltip>
+        ) : (
+          actions
+        )}
         <Button size="icon-sm" variant="ghost" aria-label="Clear selection" onClick={onClear}>
           <XIcon aria-hidden className="size-4" />
         </Button>

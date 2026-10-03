@@ -5,6 +5,7 @@ import {
   groupIssueTimelineEvents,
   issueCandidatesInput,
   issueSubIssueProgress,
+  issueNameChanges,
   toggleIssueName,
 } from "./issueDetail.logic";
 
@@ -39,6 +40,16 @@ describe("issueSubIssueProgress", () => {
   it("has nothing to say without sub-issues", () => {
     expect(issueSubIssueProgress({ total: 0, completed: 0, percentCompleted: 0 }, [])).toBeNull();
     expect(issueSubIssueProgress(undefined, undefined)).toBeNull();
+  });
+});
+
+describe("issueNameChanges", () => {
+  it("names only what was added and removed, ignoring case", () => {
+    expect(issueNameChanges(["bug", "docs"], ["Bug", "ui"])).toEqual({
+      added: ["ui"],
+      removed: ["docs"],
+    });
+    expect(issueNameChanges(["a"], ["A"])).toEqual({ added: [], removed: [] });
   });
 });
 

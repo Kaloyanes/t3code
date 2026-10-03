@@ -56,6 +56,20 @@ export function hasIssueName(names: ReadonlyArray<string>, name: string): boolea
 }
 
 /**
+ * What moving from one set of names to another adds and removes, ignoring case as the host does.
+ * Sent as an edit rather than the whole set, so a name someone else changed meanwhile survives.
+ */
+export function issueNameChanges(
+  from: ReadonlyArray<string>,
+  to: ReadonlyArray<string>,
+): { readonly added: ReadonlyArray<string>; readonly removed: ReadonlyArray<string> } {
+  return {
+    added: to.filter((name) => !hasIssueName(from, name)),
+    removed: from.filter((name) => !hasIssueName(to, name)),
+  };
+}
+
+/**
  * One candidates read per repository and kind, whoever asks: the summary's picker, the new-issue
  * dialog and its chips all key the same query, so the keys must match field for field.
  */

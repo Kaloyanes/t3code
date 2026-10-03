@@ -45,7 +45,7 @@ import {
   PullRequestStateGlyph,
 } from "../pullRequest/pullRequestPresentation";
 import { formatActionError } from "./issueActions";
-import { issueSubIssueProgress, toggleIssueName } from "./issueDetail.logic";
+import { issueNameChanges, issueSubIssueProgress, toggleIssueName } from "./issueDetail.logic";
 import { IssueAssigneePicker, IssueLabelPicker } from "./IssuePickers";
 import { IssueStateGlyph } from "./IssueStateGlyph";
 
@@ -156,11 +156,24 @@ export function IssueSummaryTab({
     failure: string,
   ) => {
     const optimistic = field === "labels" ? labels : assignees;
+    const { added, removed } = issueNameChanges(optimistic.shown, names);
+    if (added.length === 0 && removed.length === 0) return;
     optimistic.set(names);
     setSaving(field);
     const result = await update({
       environmentId,
-      input: { ...reference, ...(field === "labels" ? { labels: names } : { assignees: names }) },
+      input: {
+        ...reference,
+        ...(field === "labels"
+          ? {
+              ...(added.length > 0 ? { addLabels: added } : {}),
+              ...(removed.length > 0 ? { removeLabels: removed } : {}),
+            }
+          : {
+              ...(added.length > 0 ? { addAssignees: added } : {}),
+              ...(removed.length > 0 ? { removeAssignees: removed } : {}),
+            }),
+      },
     });
     setSaving(null);
     if (result._tag === "Failure") {
