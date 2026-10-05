@@ -11,7 +11,10 @@ import { ChatCanvasContext } from "./ChatCanvasContext";
 import { resolveChatCanvasLayout, type ChatCanvasPreview } from "./chatCanvasLayout";
 import type { PreviewMiniPlayerObstacles } from "../preview/previewMiniPlayerLayout";
 
-/** Owns the available conversation space. Floating cards never reserve it themselves. */
+/**
+ * Owns the available conversation space. Cards only report where they sit; the
+ * canvas decides when chat moves over to make room for them.
+ */
 export function ChatCanvas({
   composerOverlayElement,
   children,
@@ -24,20 +27,15 @@ export function ChatCanvas({
   const [timelineElement, registerTimeline] = useState<HTMLElement | null>(null);
   const [preview, setPreview] = useState<ChatCanvasPreview | null>(null);
   const [detailsCard, setDetailsCard] = useState<PreviewMiniPlayerObstacles["detailsCard"]>(null);
-  const hasPreview = preview !== null;
-  const reportDetailsCard = useCallback(
-    (next: PreviewMiniPlayerObstacles["detailsCard"]) => {
-      if (!hasPreview) return;
-      setDetailsCard((current) =>
-        current?.left === next?.left &&
-        current?.right === next?.right &&
-        current?.bottom === next?.bottom
-          ? current
-          : next,
-      );
-    },
-    [hasPreview],
-  );
+  const reportDetailsCard = useCallback((next: PreviewMiniPlayerObstacles["detailsCard"]) => {
+    setDetailsCard((current) =>
+      current?.left === next?.left &&
+      current?.right === next?.right &&
+      current?.bottom === next?.bottom
+        ? current
+        : next,
+    );
+  }, []);
   const [measurements, setMeasurements] = useState({
     width: 0,
     height: 0,
@@ -99,14 +97,10 @@ export function ChatCanvas({
   }, [composerOverlayElement, timelineElement]);
   const context = useMemo(() => {
     const container = { width: measurements.width, height: measurements.height };
-    const preferredLayout = resolveChatCanvasLayout({ ...measurements, container, preview });
     return {
       container,
-      layout: detailsCard
-        ? resolveChatCanvasLayout({ ...measurements, container, preview, detailsCard })
-        : preferredLayout,
-      // Card avoidance must not change the width the card measures and reports.
-      preferredChat: preferredLayout.chat,
+      lane: { padding: measurements.padding, minChatWidth: measurements.minChatWidth },
+      layout: resolveChatCanvasLayout({ ...measurements, container, preview, detailsCard }),
       previewKey: preview?.key ?? null,
       reportPreview,
       clearPreview,

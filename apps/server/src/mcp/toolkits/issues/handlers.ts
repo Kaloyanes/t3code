@@ -31,11 +31,16 @@ const make = Effect.gen(function* () {
       | typeof IssueLinkFailedError,
   ) {
     const scope = yield* McpInvocationContext.requireMcpCapability("pull-requests");
+    // Issue tools act inside the calling thread's own project, so an MCP client
+    // signed in from outside a thread has nothing to scope to.
+    const { thread: caller } = yield* Effect.gen(function* () {
+      return yield* McpInvocationContext.requireThreadScope(scope, "Issue tools");
+    }).pipe(Effect.mapError((cause) => new Failure({ cause })));
     const thread = yield* engine
-      .getThreadShell(scope.threadId)
+      .getThreadShell(caller.threadId)
       .pipe(Effect.mapError((cause) => new Failure({ cause })));
     if (thread === null) {
-      return yield* new IssueThreadNotFoundError({ threadId: scope.threadId });
+      return yield* new IssueThreadNotFoundError({ threadId: caller.threadId });
     }
     return thread;
   });

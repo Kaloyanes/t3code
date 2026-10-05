@@ -206,9 +206,13 @@ const makeHarness = Effect.fn("makeIssuesToolkitHarness")(function* (
       ),
       Effect.provideService(McpInvocationContext.McpInvocationContext, {
         environmentId: EnvironmentId.make("environment-1"),
-        threadId: THREAD_ID,
-        providerSessionId: "provider-session-1",
-        providerInstanceId: ProviderInstanceId.make("codex"),
+        thread: {
+          threadId: THREAD_ID,
+          providerSessionId: "provider-session-1",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
+        requestNamespace: "test",
         capabilities: new Set(capabilities),
         issuedAt: 1,
       }),
