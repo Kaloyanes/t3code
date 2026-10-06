@@ -21,6 +21,8 @@ if (
     const { runAcpMcpCliFastPath } = await import("./mcp/AcpMcpStdioBridge.ts");
     await runAcpMcpCliFastPath(command, process.argv.slice(3));
   } else {
+    const { installSocketErrorGuard } = await import("./socketErrorGuard.ts");
+    installSocketErrorGuard();
     const { runCli } = await import("./binCli.ts");
     runCli();
   }
