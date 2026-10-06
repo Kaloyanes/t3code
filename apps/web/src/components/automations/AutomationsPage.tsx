@@ -13,7 +13,7 @@ import {
   type RuntimeMode,
 } from "@t3tools/contracts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import * as Option from "effect/Option";
 import {
   CalendarClockIcon,

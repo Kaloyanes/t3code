@@ -19,7 +19,7 @@ import {
 } from "@t3tools/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import { resolveProjectScripts } from "@t3tools/shared/projectScripts";
 import * as Schema from "effect/Schema";
@@ -2073,7 +2073,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const topStatus =
     status === "working"
       ? {
-          label: "Working",
+          // A native /goal keeps the agent going across turns until it is met.
+          label: thread.goal?.status === "active" ? "Goal" : "Working",
           icon: "working" as const,
           // No shimmer: a label that animates forever is noise in a sidebar
           // full of them (and repaints every vsync on high-refresh displays).

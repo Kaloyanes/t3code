@@ -65,6 +65,7 @@ const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettin
   ],
   "source-control": [
     "defaultAutoPull",
+    "removeAgentCreditsOnMerge",
     "newWorktreesStartFromOrigin",
     "branchNamingMode",
     "branchNamePrefix",
@@ -478,6 +479,16 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     disabled={disabledFor("branchNamingMode")}
                     onChange={write}
                   />
+                  <SettingsSection title="Pull requests">
+                    <SettingsSwitchRow
+                      icon="arrow.triangle.merge"
+                      label="Remove agent credits when merging"
+                      subtitle="Remove recognized agent credits from GitHub merge and squash messages, keeping human co-authors. Includes auto-merge. Excludes merge queues, stack merges, and existing commits."
+                      value={uniform("removeAgentCreditsOnMerge")}
+                      disabled={disabledFor("removeAgentCreditsOnMerge")}
+                      onValueChange={(value) => write({ removeAgentCreditsOnMerge: value })}
+                    />
+                  </SettingsSection>
                   <SettingsSection title="Default branch">
                     <SettingsSwitchRow
                       icon="arrow.down.circle"

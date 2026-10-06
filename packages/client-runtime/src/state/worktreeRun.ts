@@ -6,7 +6,7 @@ import type {
 } from "@t3tools/contracts";
 import { WS_METHODS } from "@t3tools/contracts";
 import * as Stream from "effect/Stream";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { subscribe, type EnvironmentRpcInput } from "../rpc/client.ts";
@@ -97,14 +97,14 @@ export function createWorktreeRunEnvironmentAtoms<R, E>(
       label: "environment-data:worktree-runs:metadata",
       subscribe: (_input: null) =>
         subscribe(WS_METHODS.subscribeWorktreeRuns, {}).pipe(
-          Stream.scan([] as ReadonlyArray<WorktreeRunSummary>, applyWorktreeRunMetadataEvent),
+          Stream.scan((): ReadonlyArray<WorktreeRunSummary> => [], applyWorktreeRunMetadataEvent),
         ),
     }),
     attach: createEnvironmentSubscriptionAtomFamily(runtime, {
       label: "environment-data:worktree-runs:attach",
       subscribe: (input: EnvironmentRpcInput<typeof WS_METHODS.worktreeRunAttach>) =>
         subscribe(WS_METHODS.worktreeRunAttach, input).pipe(
-          Stream.scan(null as WorktreeRunState | null, applyWorktreeRunAttachEvent),
+          Stream.scan((): WorktreeRunState | null => null, applyWorktreeRunAttachEvent),
         ),
     }),
     start: createEnvironmentRpcCommand(runtime, {

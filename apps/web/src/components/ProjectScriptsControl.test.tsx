@@ -1,7 +1,7 @@
 import { act, cloneElement, type ReactElement, type ReactNode } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 
 vi.mock("lucide-react", () => {
   const Icon = ({ "data-icon": dataIcon, ...props }: { "data-icon": string }) => (

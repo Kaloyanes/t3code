@@ -3,29 +3,13 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import type * as EffectAcpErrors from "effect-acp/errors";
 
-import { type GrokSettings, type ModelSelection } from "@t3tools/contracts";
-import { formatGeneratedBranchName, sanitizeFeatureBranchName } from "@t3tools/shared/git";
+import { type GrokSettings, TextGenerationError } from "@t3tools/contracts";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
-import { extractJsonObject } from "@t3tools/shared/schemaJson";
 
-import { TextGenerationError } from "@t3tools/contracts";
-import * as TextGeneration from "./TextGeneration.ts";
-import {
-  buildBranchNamePrompt,
-  buildCommitMessagePrompt,
-  buildPrContentPrompt,
-  buildPromptEnhancementPrompt,
-  buildThreadTitlePrompt,
-} from "./TextGenerationPrompts.ts";
-import {
-  sanitizeCommitSubject,
-  sanitizePrTitle,
-  sanitizeThreadTitle,
-} from "./TextGenerationUtils.ts";
-import { makePromptEnhancementJsonDeltaHandler } from "./PromptEnhancementStreaming.ts";
+import * as TextGenerationOperations from "./TextGenerationOperations.ts";
 import {
   applyGrokAcpModelSelection,
   currentGrokModelIdFromSessionSetup,
@@ -45,27 +29,9 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
   const crypto = yield* Crypto.Crypto;
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
-  const runGrokJson = <S extends Schema.Top>({
-    operation,
-    cwd,
-    prompt,
-    outputSchemaJson,
-    modelSelection,
-    onOutputDelta,
-  }: {
-    operation:
-      | "generateCommitMessage"
-      | "generatePrContent"
-      | "generateBranchName"
-      | "generateThreadTitle"
-      | "enhancePrompt";
-    cwd: string;
-    prompt: string;
-    outputSchemaJson: S;
-    modelSelection: ModelSelection;
-    onOutputDelta?: ((delta: string) => Effect.Effect<void>) | undefined;
-  }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
-    Effect.gen(function* () {
+  const runGrokJson: TextGenerationOperations.Runner = (request) => {
+    const { operation, cwd, prompt, modelSelection, onOutputDelta } = request;
+    return Effect.gen(function* () {
       const outputRef = yield* Ref.make("");
       const runtime = yield* makeGrokAcpRuntime({
         grokSettings,
@@ -147,19 +113,7 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
         });
       }
 
-      const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(outputSchemaJson));
-      return yield* decodeOutput(extractJsonObject(trimmed)).pipe(
-        Effect.catchTags({
-          SchemaError: (cause) =>
-            Effect.fail(
-              new TextGenerationError({
-                operation,
-                detail: "Grok Agent returned invalid structured output.",
-                cause,
-              }),
-            ),
-        }),
-      );
+      return yield* TextGenerationOperations.decodeJsonReply(request, "Grok Agent", trimmed);
     }).pipe(
       Effect.mapError((cause) =>
         isTextGenerationError(cause)
@@ -172,125 +126,7 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       ),
       Effect.scoped,
     );
+  };
 
-  const generateCommitMessage: TextGeneration.TextGeneration["Service"]["generateCommitMessage"] =
-    Effect.fn("GrokTextGeneration.generateCommitMessage")(function* (input) {
-      const { prompt, outputSchema } = buildCommitMessagePrompt({
-        branch: input.branch,
-        stagedSummary: input.stagedSummary,
-        stagedPatch: input.stagedPatch,
-        includeBranch: input.includeBranch === true,
-        policy: input.policy,
-      });
-
-      const generated = yield* runGrokJson({
-        operation: "generateCommitMessage",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        subject: sanitizeCommitSubject(generated.subject),
-        body: generated.body.trim(),
-        ...("branch" in generated && typeof generated.branch === "string"
-          ? { branch: sanitizeFeatureBranchName(generated.branch) }
-          : {}),
-      };
-    });
-
-  const generatePrContent: TextGeneration.TextGeneration["Service"]["generatePrContent"] =
-    Effect.fn("GrokTextGeneration.generatePrContent")(function* (input) {
-      const { prompt, outputSchema } = buildPrContentPrompt({
-        baseBranch: input.baseBranch,
-        headBranch: input.headBranch,
-        commitSummary: input.commitSummary,
-        diffSummary: input.diffSummary,
-        diffPatch: input.diffPatch,
-        policy: input.policy,
-        changeRequestTemplate: input.changeRequestTemplate,
-      });
-
-      const generated = yield* runGrokJson({
-        operation: "generatePrContent",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        title: sanitizePrTitle(generated.title),
-        body: generated.body.trim(),
-      };
-    });
-
-  const generateBranchName: TextGeneration.TextGeneration["Service"]["generateBranchName"] =
-    Effect.fn("GrokTextGeneration.generateBranchName")(function* (input) {
-      const { prompt, outputSchema } = buildBranchNamePrompt({
-        message: input.message,
-        attachments: input.attachments,
-        naming: input.naming,
-      });
-
-      const generated = yield* runGrokJson({
-        operation: "generateBranchName",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        branch: formatGeneratedBranchName(generated.branch, input.naming),
-      };
-    });
-
-  const generateThreadTitle: TextGeneration.TextGeneration["Service"]["generateThreadTitle"] =
-    Effect.fn("GrokTextGeneration.generateThreadTitle")(function* (input) {
-      const { prompt, outputSchema } = buildThreadTitlePrompt({
-        message: input.message,
-        previousTitle: input.previousTitle,
-        linkedContext: input.linkedContext,
-        attachments: input.attachments,
-      });
-
-      const generated = yield* runGrokJson({
-        operation: "generateThreadTitle",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        title: sanitizeThreadTitle(generated.title),
-        ...(generated.needsRefinement ? { needsRefinement: true } : {}),
-      } satisfies TextGeneration.ThreadTitleGenerationResult;
-    });
-
-  const enhancePrompt: TextGeneration.TextGeneration["Service"]["enhancePrompt"] = Effect.fn(
-    "GrokTextGeneration.enhancePrompt",
-  )(function* (input) {
-    const { prompt, outputSchema } = buildPromptEnhancementPrompt(input);
-    const onOutputDelta = makePromptEnhancementJsonDeltaHandler(input.onDelta);
-    const generated = yield* runGrokJson({
-      operation: "enhancePrompt",
-      cwd: input.cwd,
-      prompt,
-      outputSchemaJson: outputSchema,
-      modelSelection: input.modelSelection,
-      ...(onOutputDelta ? { onOutputDelta } : {}),
-    });
-    return { prompt: generated.prompt.trim() };
-  });
-
-  return {
-    generateCommitMessage,
-    generatePrContent,
-    generateBranchName,
-    generateThreadTitle,
-    enhancePrompt,
-  } satisfies TextGeneration.TextGeneration["Service"];
+  return TextGenerationOperations.fromRunner("GrokTextGeneration", runGrokJson);
 });

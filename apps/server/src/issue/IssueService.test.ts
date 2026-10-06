@@ -3,14 +3,14 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import * as SqlClient from "effect/sql/SqlClient";
 import { describe, expect, it } from "@effect/vitest";
 
 import * as ServerConfig from "../config.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectWorktreeLinks from "../project/ProjectWorktreeLinks.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -455,7 +455,7 @@ const withIssueService = <A, E>(
           ServerSettings.layerTest(),
         ),
       ),
-      Layer.provideMerge(SqlitePersistenceMemory),
+      Layer.provideMerge(SqlitePersistence.layerMemory),
       Layer.provide(NodeServices.layer),
     );
     return yield* Effect.gen(function* () {

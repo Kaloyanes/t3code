@@ -84,10 +84,10 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import * as ChildProcess from "effect/unstable/process/ChildProcess";
+import * as ChildProcess from "effect/process/ChildProcess";
 import * as WorktreeRunManager from "../worktreeRun/Manager.ts";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { VcsListRefsResult } from "@t3tools/contracts";
 import { parse as parseYaml } from "yaml";
 

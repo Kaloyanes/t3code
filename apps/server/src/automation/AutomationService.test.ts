@@ -5,12 +5,12 @@ import * as Layer from "effect/Layer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
 import { ProjectId, ProviderInstanceId } from "@t3tools/contracts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { AutomationService, layer as automationLayer } from "./AutomationService.ts";
 
 const layer = it.layer(
   automationLayer.pipe(
-    Layer.provideMerge(SqlitePersistenceMemory),
+    Layer.provideMerge(SqlitePersistence.layerMemory),
     Layer.provideMerge(NodeServices.layer),
   ),
 );
