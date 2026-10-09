@@ -1,10 +1,4 @@
-import {
-  ArrowLeftIcon,
-  CalendarClockIcon,
-  ChartNoAxesColumnIcon,
-  CircleDotIcon,
-  SettingsIcon,
-} from "lucide-react";
+import { ArrowLeftIcon, ChartNoAxesColumnIcon, CircleDotIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
@@ -252,7 +246,6 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
   const navigateToMainApp = useNavigateToMainApp();
   const { isMobile, setOpenMobile } = useSidebar();
-  const { environments } = useEnvironments();
   const currentFooterPage = useLocation({
     select: (location) =>
       /^\/settings(?:\/|$)/.test(location.pathname)
@@ -263,10 +256,6 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             ? location.pathname
             : null,
   });
-  const automationsSupported = environments.some(
-    (environment) =>
-      environment.serverConfig?.environment.capabilities.scheduledAutomations === true,
-  );
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) setOpenMobile(false);
   }, [isMobile, setOpenMobile]);
@@ -277,10 +266,6 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const handleUsageClick = useCallback(() => {
     closeMobileSidebar();
     void navigate({ to: "/usage" });
-  }, [closeMobileSidebar, navigate]);
-  const handleAutomationsClick = useCallback(() => {
-    closeMobileSidebar();
-    void navigate({ to: "/automations" });
   }, [closeMobileSidebar, navigate]);
   const handleBackClick = useCallback(() => {
     closeMobileSidebar();
@@ -294,13 +279,6 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           icon={<ChartNoAxesColumnIcon />}
           label="Usage"
           onClick={handleUsageClick}
-        />
-      ) : null}
-      {automationsSupported && currentFooterPage !== "/automations" ? (
-        <SidebarUtilityIconItem
-          icon={<CalendarClockIcon />}
-          label="Automations"
-          onClick={handleAutomationsClick}
         />
       ) : null}
       <SidebarUtilityIconItem
