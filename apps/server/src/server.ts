@@ -43,14 +43,14 @@ import * as ProviderEventIngestor from "./orchestration-v2/ProviderEventIngestor
 import * as ModelManifest from "./provider/ModelManifest.ts";
 import * as ResetCreditCoordinator from "./provider/resetCreditCoordinator.ts";
 import * as ProviderEventLoggers from "./provider/ProviderEventLoggers.ts";
-import * as OpenCodeRuntime from "./provider/opencodeRuntime.ts";
-import * as OpenCodeServerLedger from "./provider/OpenCodeServerLedger.ts";
+import * as OpenCodeRuntime from "@t3tools/provider-opencode/server/OpenCodeRuntime";
+import * as OpenCodeServerLedger from "@t3tools/provider-opencode/server/OpenCodeServerLedger";
 import * as AcpRegistryCatalog from "./provider/AcpRegistryCatalog.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
-import * as GitHubCli from "./sourceControl/GitHubCli.ts";
+import * as GitHubApi from "./sourceControl/GitHubApi.ts";
 import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as ForgejoCli from "./sourceControl/ForgejoCli.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
@@ -123,6 +123,8 @@ import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as WebhookRoute from "./scheduledTasks/webhookRoute.ts";
 import * as RelayDeliveryProof from "./scheduledTasks/RelayDeliveryProof.ts";
 import * as HeldHooksWaker from "./relay/HeldHooksWaker.ts";
+import * as McpOAuth from "./auth/McpOAuth.ts";
+import * as McpOAuthHttp from "./auth/mcpOAuthHttp.ts";
 import {
   relayHookBaseUrl,
   ScheduledTaskWebhookOrigin,
@@ -158,6 +160,7 @@ import * as NativeTelemetryClient from "./resourceTelemetry/NativeTelemetryClien
 import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts";
 import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinary.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
+import * as CursorUsageReader from "./usage/cursorUsageReader.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
@@ -230,7 +233,10 @@ const layerBackground = BackgroundPolicy.layer.pipe(
   Layer.provideMerge(layerServerSettings),
 );
 
-const layerUsage = UsageService.layer.pipe(Layer.provide(layerServerSettings));
+const layerUsage = UsageService.layer.pipe(
+  Layer.provide(layerServerSettings),
+  Layer.provide(CursorUsageReader.layer),
+);
 
 const layerResourceDiagnostics = Layer.mergeAll(
   HostResources.layer,
@@ -276,7 +282,7 @@ const layerSourceControlProviderRegistry = SourceControlProviderRegistry.layer.p
     Layer.mergeAll(
       AzureDevOpsCli.layer,
       BitbucketApi.layer,
-      GitHubCli.layer,
+      GitHubApi.layerWithDependencies,
       GitLabCli.layer,
       ForgejoCli.layer,
     ),
@@ -353,7 +359,6 @@ const layerGitWorkflow = GitWorkflowService.layer.pipe(
 const layerIssueService = IssueService.layer.pipe(
   Layer.provide(layerSourceControlProviderRegistry),
   Layer.provide(layerGitWorkflow),
-  Layer.provide(GitHubCli.layer),
 );
 
 // Starts after the orchestration runtime so linked issues complete when worktree PRs merge.
@@ -596,7 +601,8 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.provideMerge(Layer.merge(ProjectStore.layer, ThreadSearch.layer)),
   Layer.provideMerge(layerServerSettings),
   // The asset route uses the registry's GitHub credential for private PR media.
-  Layer.provideMerge(Layer.mergeAll(layerSourceControlProviderRegistry, GitHubCli.layer)),
+  Layer.provideMerge(layerSourceControlProviderRegistry),
+  Layer.provideMerge(GitHubApi.layerWithDependencies),
   Layer.provideMerge(layerGit),
   Layer.provideMerge(layerVcs),
   Layer.provideMerge(Layer.mergeAll(layerTerminal, layerWorktreeRun, layerPreview, layerDevice)),
@@ -610,8 +616,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // The instance registry is the new routing keystone — text generation,
   // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
-  // `providerInstances` hydration merges `settings.providers.<kind>`
-  // with explicit `providerInstances` entries on boot.
+  // hydration adds their default instances to `providerInstances` on boot.
   Layer.provideMerge(ProviderInstanceRegistryHydration.layer),
   Layer.provideMerge(
     Layer.mergeAll(
@@ -642,7 +647,18 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   // the rewritten registry reads snapshots off the instance registry and
   // no longer transitively provides it. Exposing it at the runtime level
   // keeps a single Live for all opencode consumers.
-  Layer.provideMerge(OpenCodeRuntime.layer.pipe(Layer.provide(OpenCodeServerLedger.layer))),
+  Layer.provideMerge(
+    OpenCodeRuntime.layer.pipe(
+      Layer.provide(
+        Layer.unwrap(
+          Effect.gen(function* () {
+            const config = yield* ServerConfig.ServerConfig;
+            return OpenCodeServerLedger.layer({ stateDir: config.stateDir });
+          }),
+        ),
+      ),
+    ),
+  ),
   Layer.provideMerge(layerWorkspace),
   Layer.provideMerge(ProjectEnrichmentService.layer),
   Layer.provideMerge(Layer.mergeAll(NativeAppIconResolver.layer, layerProjectFaviconResolver)),
@@ -687,6 +703,7 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.mergeAll(
     HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
       Layer.provide(AuthHttp.layer),
+      Layer.provide(McpOAuthHttp.layer.pipe(Layer.provide(McpOAuth.layer))),
       Layer.provide(CloudHttp.layer),
       Layer.provide(OrchestrationHttp.layer),
       Layer.provide(PullRequestHttp.layer),
@@ -710,6 +727,7 @@ const layerMakeRoutes = Layer.mergeAll(
   // what dispatch can actually serve.
   McpHttpServer.layer.pipe(
     Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
+    Layer.provide(McpOAuth.layerMcpClientAuthenticator),
   ),
 ).pipe(
   // Both transports consume the same service instance, so caches single-flight across clients

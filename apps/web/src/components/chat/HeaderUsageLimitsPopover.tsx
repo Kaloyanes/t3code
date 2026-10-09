@@ -29,7 +29,7 @@ import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popov
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
-import { DRIVER_OPTIONS, getDriverOption } from "../settings/providerDriverMeta";
+import { providerClients } from "../settings/providerDriverMeta";
 import { LimitWindows, ResetCreditDialog, resetCreditsSummary } from "../usage/UsageLimits";
 import { usageLimitBarColor } from "../usage/usageLimitColors";
 import { toastManager } from "../ui/toast";
@@ -58,7 +58,7 @@ function accountLabel(account: LimitAccount): string {
   return (
     account.displayName ??
     account.email ??
-    getDriverOption(account.driver)?.label ??
+    providerClients.get(account.driver)?.label ??
     String(account.driver)
   );
 }
@@ -66,7 +66,9 @@ function accountLabel(account: LimitAccount): string {
 export function groupLimitAccounts(
   accounts: readonly LimitAccount[],
 ): readonly LimitAccountGroup[] {
-  const order = new Map(DRIVER_OPTIONS.map((driver, index) => [driver.value, index]));
+  const order = new Map(
+    providerClients.definitions.map((definition, index) => [definition.driverKind, index]),
+  );
   const groups = new Map<ProviderDriverKind, LimitAccount[]>();
   for (const account of accounts) {
     const group = groups.get(account.driver);
@@ -76,7 +78,7 @@ export function groupLimitAccounts(
   return [...groups]
     .map(([driver, members]) => ({
       driver,
-      label: getDriverOption(driver)?.label ?? String(driver),
+      label: providerClients.get(driver)?.label ?? String(driver),
       accounts: members.toSorted(
         (left, right) =>
           accountLabel(left).localeCompare(accountLabel(right)) ||
@@ -92,7 +94,7 @@ export function groupLimitAccounts(
 }
 
 function AccountIdentity({ account }: { readonly account: LimitAccount }) {
-  const providerLabel = getDriverOption(account.driver)?.label ?? String(account.driver);
+  const providerLabel = providerClients.get(account.driver)?.label ?? String(account.driver);
   const where =
     account.environments.length > 0
       ? account.environments.map((environment) => environment.label).join(", ")

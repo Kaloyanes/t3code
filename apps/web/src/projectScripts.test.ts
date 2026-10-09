@@ -4,6 +4,8 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   projectScriptCwd,
   projectScriptRuntimeEnv,
+  projectScriptMenuLabel,
+  settleProjectScript,
   setupProjectScript,
 } from "@t3tools/shared/projectScripts";
 
@@ -14,6 +16,7 @@ import {
   primaryProjectScript,
   projectScriptIdFromCommand,
   resolveRunActionTerminal,
+  releaseClaimedRoles,
 } from "./projectScripts";
 
 describe("projectScripts helpers", () => {
@@ -25,6 +28,7 @@ describe("projectScripts helpers", () => {
         icon: "debug",
         runOnWorktreeCreate: false,
         waitForSetup: false,
+        runOnSettle: false,
         previewUrl: "http://localhost:5733",
         autoOpenPreview: true,
       }),
@@ -47,6 +51,7 @@ describe("projectScripts helpers", () => {
         icon: "test",
         runOnWorktreeCreate: false,
         waitForSetup: false,
+        runOnSettle: false,
         previewUrl: null,
         autoOpenPreview: false,
       }),
@@ -66,6 +71,7 @@ describe("projectScripts helpers", () => {
       icon: "configure",
       previewUrl: null,
       autoOpenPreview: false,
+      runOnSettle: false,
     } as const;
     expect(
       buildProjectScript("setup", { ...input, runOnWorktreeCreate: true, waitForSetup: true }),
@@ -87,6 +93,7 @@ describe("projectScripts helpers", () => {
         scope: "worktree",
         runOnWorktreeCreate: true,
         waitForSetup: false,
+        runOnSettle: false,
         previewUrl: null,
         autoOpenPreview: false,
       }),
@@ -131,7 +138,7 @@ describe("projectScripts helpers", () => {
     expect(nextProjectScriptId("!!!", [])).toBe("script");
   });
 
-  it("resolves primary and setup scripts", () => {
+  it("resolves primary, setup, and settle scripts", () => {
     const scripts = [
       {
         id: "setup",
@@ -139,6 +146,14 @@ describe("projectScripts helpers", () => {
         command: "bun install",
         icon: "configure" as const,
         runOnWorktreeCreate: true,
+      },
+      {
+        id: "clean",
+        name: "Clean",
+        command: "cargo clean",
+        icon: "build" as const,
+        runOnWorktreeCreate: false,
+        runOnSettle: true,
       },
       {
         id: "test",
@@ -151,6 +166,53 @@ describe("projectScripts helpers", () => {
 
     expect(primaryProjectScript(scripts)?.id).toBe("test");
     expect(setupProjectScript(scripts)?.id).toBe("setup");
+    expect(settleProjectScript(scripts)?.id).toBe("clean");
+    // Cleanup is never the one-click run button, even when it is all there is.
+    expect(primaryProjectScript(scripts.filter((script) => script.id === "clean"))).toBeNull();
+  });
+
+  it("labels every lifecycle role a script runs in", () => {
+    const script = {
+      id: "both",
+      name: "Both",
+      command: "true",
+      icon: "play" as const,
+      runOnWorktreeCreate: true,
+    };
+    expect(projectScriptMenuLabel(script)).toBe("Both (setup)");
+    expect(projectScriptMenuLabel({ ...script, runOnSettle: true })).toBe(
+      "Both (setup, on settle)",
+    );
+    expect(projectScriptMenuLabel({ ...script, runOnWorktreeCreate: false })).toBe("Both");
+  });
+
+  it("moves the setup and settle roles to the script that claims them", () => {
+    const input = {
+      name: "Next",
+      command: "true",
+      icon: "play",
+      waitForSetup: false,
+      previewUrl: null,
+      autoOpenPreview: false,
+    } as const;
+    const holder = {
+      id: "holder",
+      name: "Holder",
+      command: "true",
+      icon: "play" as const,
+      runOnWorktreeCreate: true,
+      runOnSettle: true,
+    };
+
+    expect(
+      releaseClaimedRoles(holder, { ...input, runOnWorktreeCreate: false, runOnSettle: true }),
+    ).toMatchObject({ runOnWorktreeCreate: true, runOnSettle: false });
+    expect(
+      releaseClaimedRoles(holder, { ...input, runOnWorktreeCreate: true, runOnSettle: false }),
+    ).toMatchObject({ runOnWorktreeCreate: false, runOnSettle: true });
+    expect(
+      releaseClaimedRoles(holder, { ...input, runOnWorktreeCreate: false, runOnSettle: false }),
+    ).toBe(holder);
   });
 
   it("keeps Run actions on the shared terminal instead of the selected isolated terminal", () => {

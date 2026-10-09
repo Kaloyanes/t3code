@@ -14,7 +14,8 @@ import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectWorktreeLinks from "../project/ProjectWorktreeLinks.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import * as GitHubCli from "../sourceControl/GitHubCli.ts";
+import * as GitHubApi from "../sourceControl/GitHubApi.ts";
+import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as WorktreeRunManager from "../worktreeRun/Manager.ts";
 import * as IssueService from "./IssueService.ts";
 import {
@@ -339,7 +340,7 @@ describe("IssueService related work and timeline", () => {
 });
 
 type GhCall = {
-  readonly args: ReadonlyArray<string>;
+  readonly kind: "rest" | "graphql";
   readonly endpoint: string;
   readonly method: string;
   readonly query: string;
@@ -347,8 +348,6 @@ type GhCall = {
   readonly body: unknown;
 };
 
-type GhPayload = { readonly query?: string; readonly variables?: Record<string, unknown> };
-const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const projectShell = (id: string, repository: string): OrchestrationProjectShell => ({
@@ -374,11 +373,14 @@ const projectShell = (id: string, repository: string): OrchestrationProjectShell
 
 const PROJECTS = [projectShell("project-1", "owner/repo"), projectShell("project-2", "owner/api")];
 
-const notFound = new GitHubCli.GitHubPullRequestNotFoundError({
-  command: "gh",
-  cwd: "/repos/project-1",
-  cause: "HTTP 404",
+const notFound = new GitHubApi.GitHubApiNotFoundError({
+  host: "github.com",
+  operation: "IssueService.rest.delete",
 });
+
+const isGitHubApiError = Schema.is(
+  Schema.Union([GitHubApi.GitHubApiNotFoundError, GitHubApi.GitHubApiResponseError]),
+);
 
 const rawIssue = (number: number, extra: Record<string, unknown> = {}) => ({
   number,
@@ -404,31 +406,44 @@ const withIssueService = <A, E>(
 ) =>
   Effect.gen(function* () {
     const calls: Array<GhCall> = [];
-    const gh = Layer.mock(GitHubCli.GitHubCli)({
-      execute: (input) =>
+    const record = (call: GhCall) => {
+      calls.push(call);
+      return respond(call);
+    };
+    const gh = Layer.mock(GitHubApi.GitHubApi)({
+      rest: (input) =>
         Effect.suspend(() => {
-          const payload =
-            input.stdin === undefined ? null : (decodeJson(input.stdin) as GhPayload | null);
-          const methodIndex = input.args.indexOf("--method");
-          const call: GhCall = {
-            args: input.args,
-            endpoint: input.args[input.args.indexOf("--hostname") + 2] ?? "",
-            method: methodIndex === -1 ? "GET" : input.args[methodIndex + 1]!,
-            query: payload?.query ?? "",
-            variables: payload?.variables ?? {},
-            body: payload,
-          };
-          calls.push(call);
-          const reply = respond(call);
-          return GitHubCli.isGitHubCliError(reply)
+          const reply = record({
+            kind: "rest",
+            endpoint: input.path,
+            method: input.method ?? "GET",
+            query: "",
+            variables: {},
+            body: input.body ?? null,
+          });
+          return isGitHubApiError(reply)
             ? Effect.fail(reply)
             : Effect.succeed({
-                exitCode: ChildProcessSpawner.ExitCode(0),
-                stdout: reply === undefined ? "" : encodeJson(reply),
-                stderr: "",
-                stdoutTruncated: false,
-                stderrTruncated: false,
+                status: 200,
+                headers: {},
+                body: reply === undefined ? "" : encodeJson(reply),
+                truncated: false,
+                invalidUtf8: false,
               });
+        }),
+      graphql: (input) =>
+        Effect.suspend(() => {
+          const reply = record({
+            kind: "graphql",
+            endpoint: "graphql",
+            method: "POST",
+            query: input.query,
+            variables: { ...input.variables },
+            body: { query: input.query, variables: input.variables },
+          });
+          return isGitHubApiError(reply)
+            ? Effect.fail(reply)
+            : Effect.succeed(reply === undefined ? "" : encodeJson(reply));
         }),
     });
     const layer = IssueService.layer.pipe(
@@ -451,6 +466,7 @@ const withIssueService = <A, E>(
           Layer.mock(GitWorkflowService.GitWorkflowService)({}),
           Layer.mock(WorktreeRunManager.WorktreeRunManager)({}),
           Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
+          Layer.mock(VcsProcess.VcsProcess)({}),
           ServerConfig.layerTest("/repos", { prefix: "issue-service-test" }),
           ServerSettings.layerTest(),
         ),
@@ -689,7 +705,7 @@ describe("IssueService against GitHub", () => {
           const issue = "repos/owner/repo/issues/42";
           expect(
             calls
-              .filter((call) => !call.args.includes("graphql"))
+              .filter((call) => call.kind === "rest")
               .map((call) => [call.method, call.endpoint, call.body]),
           ).toEqual([
             ["PATCH", issue, { title: "Renamed" }],
@@ -707,7 +723,11 @@ describe("IssueService against GitHub", () => {
     withIssueService(
       (call) =>
         call.endpoint.endsWith("/assignees")
-          ? new GitHubCli.GitHubCliCommandError({ command: "gh", cwd: "/repos", cause: "422" })
+          ? new GitHubApi.GitHubApiResponseError({
+              host: "github.com",
+              operation: "IssueService.rest.post",
+              status: 422,
+            })
           : {},
       (service, calls) =>
         Effect.gen(function* () {

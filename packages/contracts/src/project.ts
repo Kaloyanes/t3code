@@ -41,6 +41,8 @@ export const ProjectScript = Schema.Struct({
   runOnWorktreeCreate: Schema.Boolean,
   /** Missing preserves the original thread-owned behavior. */
   scope: Schema.optional(ProjectScriptScope),
+  /** Run in the thread's worktree each time the thread settles. */
+  runOnSettle: Schema.optional(Schema.Boolean),
   /** Start the agent while setup runs unless explicitly disabled. */
   async: Schema.optional(Schema.Boolean),
   previewUrl: Schema.optional(TrimmedNonEmptyString),

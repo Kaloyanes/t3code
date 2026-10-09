@@ -19,6 +19,8 @@ import type { Tool } from "effect/ai";
 import * as IssueService from "../../../issue/IssueService.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import { v2PullRequestThread } from "../../../orchestration-v2/testkit/pullRequestFixtures.ts";
+import * as McpToolAccess from "../../McpToolAccess.ts";
+import * as McpToolAccessTestkit from "../../McpToolAccess.testkit.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { IssuesToolkitHandlersLive } from "./handlers.ts";
 import { IssuesToolkit } from "./tools.ts";
@@ -189,9 +191,14 @@ const makeHarness = Effect.fn("makeIssuesToolkitHarness")(function* (
                   }),
             ),
     }),
+    McpToolAccessTestkit.liveThreadsLayer,
   );
   const toolkit = yield* IssuesToolkit.pipe(
-    Effect.provide(IssuesToolkitHandlersLive.pipe(Layer.provide(dependencies))),
+    Effect.provide(
+      McpToolAccess.HandlersLayer.layer(IssuesToolkitHandlersLive).pipe(
+        Layer.provide(dependencies),
+      ),
+    ),
   );
   const call = <Name extends keyof typeof IssuesToolkit.tools>(
     name: Name,

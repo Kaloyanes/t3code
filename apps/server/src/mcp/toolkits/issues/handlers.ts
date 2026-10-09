@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as IssueService from "../../../issue/IssueService.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as McpToolAccess from "../../McpToolAccess.ts";
 import {
   IssueCloseFailedError,
   IssueCommentFailedError,
@@ -63,15 +64,20 @@ const make = Effect.gen(function* () {
     return thread;
   });
 
-  return IssuesToolkit.of({
-    list_issues: (input) =>
+  // Writes act on the calling thread's own project, so they need its run to be live.
+  const writesOwnThread = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
+    McpToolAccess.writesThreads((_params: P) => [undefined], handle);
+
+  return {
+    list_issues: McpToolAccess.reads((input) =>
       Effect.gen(function* () {
         yield* requireThread(IssueListFailedError);
         return yield* issues
           .list(input)
           .pipe(Effect.mapError((cause) => new IssueListFailedError({ cause })));
       }),
-    read_issue: (input) =>
+    ),
+    read_issue: McpToolAccess.reads((input) =>
       Effect.gen(function* () {
         yield* requireThread(IssueReadFailedError);
         return yield* Effect.all({
@@ -79,42 +85,48 @@ const make = Effect.gen(function* () {
           comments: issues.comments(input),
         }).pipe(Effect.mapError((cause) => new IssueReadFailedError({ cause })));
       }),
-    comment_on_issue: (input) =>
+    ),
+    comment_on_issue: writesOwnThread((input) =>
       Effect.gen(function* () {
         yield* requireOwnProject(IssueCommentFailedError, input.projectId);
         return yield* issues
           .commentCreate(input)
           .pipe(Effect.mapError((cause) => new IssueCommentFailedError({ cause })));
       }),
-    close_issue: (input) =>
+    ),
+    close_issue: writesOwnThread((input) =>
       Effect.gen(function* () {
         yield* requireOwnProject(IssueCloseFailedError, input.projectId);
         return yield* issues
           .close(input)
           .pipe(Effect.mapError((cause) => new IssueCloseFailedError({ cause })));
       }),
-    reopen_issue: (input) =>
+    ),
+    reopen_issue: writesOwnThread((input) =>
       Effect.gen(function* () {
         yield* requireOwnProject(IssueReopenFailedError, input.projectId);
         return yield* issues
           .reopen(input)
           .pipe(Effect.mapError((cause) => new IssueReopenFailedError({ cause })));
       }),
-    update_issue: (input) =>
+    ),
+    update_issue: writesOwnThread((input) =>
       Effect.gen(function* () {
         yield* requireOwnProject(IssueUpdateFailedError, input.projectId);
         return yield* issues
           .update(input)
           .pipe(Effect.mapError((cause) => new IssueUpdateFailedError({ cause })));
       }),
-    link_issue: (input) =>
+    ),
+    link_issue: writesOwnThread((input) =>
       Effect.gen(function* () {
         const thread = yield* requireOwnProject(IssueLinkFailedError, input.projectId);
         return yield* issues
           .link({ ...input, threadId: thread.id, source: "agent" })
           .pipe(Effect.mapError((cause) => new IssueLinkFailedError({ cause })));
       }),
-  });
+    ),
+  } satisfies McpToolAccess.Handlers<typeof IssuesToolkit.tools>;
 });
 
-export const IssuesToolkitHandlersLive = IssuesToolkit.toLayer(make);
+export const IssuesToolkitHandlersLive = McpToolAccess.toLayer(IssuesToolkit, make);

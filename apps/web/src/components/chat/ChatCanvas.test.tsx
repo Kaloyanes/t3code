@@ -55,6 +55,10 @@ vi.mock("../BranchToolbar", async () => {
       return panelSection === "branch" && link ? (
         <ThreadDetailsPrRows
           environmentId={EnvironmentId.make("canvas-test")}
+          threadRef={{
+            environmentId: EnvironmentId.make("canvas-test"),
+            threadId: ThreadId.make("canvas-thread"),
+          }}
           links={snapshots.pullRequests}
           currentLink={link}
           number={link.number}
@@ -323,8 +327,6 @@ it("renders agent and PR updates through the details panel without a floating pr
     startFromOrigin: false,
     onStartFromOriginChange: snapshots.command,
     onComposerFocusRequest: snapshots.command,
-    versionMismatch: null,
-    onDismissVersionMismatch: snapshots.command,
     onRunProjectScript: snapshots.command,
     onAddProjectScript: snapshots.command,
     onUpdateProjectScript: snapshots.command,

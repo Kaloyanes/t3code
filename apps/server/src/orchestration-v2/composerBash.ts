@@ -2,7 +2,7 @@ import * as NodeUtil from "node:util";
 import * as Effect from "effect/Effect";
 
 import { ProcessRunner } from "../processRunner.ts";
-import { sanitizeAcpStderrExcerpt } from "../provider/acp/AcpStderr.ts";
+import { sanitizeAcpStderrExcerpt } from "@t3tools/provider-acp/server/stderr";
 
 export function sanitizeComposerBashText(text: string): string {
   let sanitized = NodeUtil.stripVTControlCharacters(text);

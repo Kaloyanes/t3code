@@ -103,7 +103,8 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectWorktreeLinks from "../project/ProjectWorktreeLinks.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import * as GitHubCli from "../sourceControl/GitHubCli.ts";
+import * as GitHubApi from "../sourceControl/GitHubApi.ts";
+import * as VcsProcess from "../vcs/VcsProcess.ts";
 import {
   findAuthenticatedGitHubAccount,
   parseGitHubAuthStatus,
@@ -887,7 +888,8 @@ export class IssueService extends Context.Service<
 >()("t3/issue/IssueService") {}
 
 export const make = Effect.gen(function* () {
-  const gh = yield* GitHubCli.GitHubCli;
+  const github = yield* GitHubApi.GitHubApi;
+  const vcsProcess = yield* VcsProcess.VcsProcess;
   const projectService = yield* ProjectService.ProjectService;
   const threadManagement = yield* ThreadManagement.ThreadManagementService;
   const worktreeLinks = yield* ProjectWorktreeLinks.ProjectWorktreeLinks;
@@ -931,12 +933,12 @@ export const make = Effect.gen(function* () {
     });
   };
 
-  const mapCliError = (
+  const mapApiError = (
     operation: string,
     host: string,
-    error: GitHubCli.GitHubCliError,
+    error: GitHubApi.GitHubApiError,
   ): IssueError => {
-    if (error._tag === "GitHubCliUnavailableError") {
+    if (error._tag === "GitHubCliMissingError") {
       return new IssueUnavailableError({
         reason: "cli-missing",
         provider: "github",
@@ -944,7 +946,7 @@ export const make = Effect.gen(function* () {
         cause: error,
       });
     }
-    if (error._tag === "GitHubCliAuthenticationError") {
+    if (error._tag === "GitHubNotSignedInError" || error._tag === "GitHubApiAuthenticationError") {
       return new IssueUnavailableError({
         reason: "cli-unauthenticated",
         provider: "github",
@@ -953,22 +955,20 @@ export const make = Effect.gen(function* () {
       });
     }
     const detail =
-      error._tag === "GitHubCliRateLimitError"
-        ? error.detail
-        : error._tag === "GitHubPullRequestNotFoundError"
-          ? "GitHub resource was not found. Check the repository and try again."
-          : error._tag === "GitHubCliCommandError"
-            ? "GitHub request failed. Check repository access and try again."
-            : "GitHub returned an invalid response. Retry the operation.";
+      error._tag === "GitHubApiNotFoundError"
+        ? "GitHub resource was not found. Check the repository and try again."
+        : error._tag === "GitHubApiRequestError"
+          ? `Could not reach GitHub at ${host}. Retry the operation.`
+          : error.message;
     return operationError(operation, detail, error);
   };
 
   const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
-  const parseOutput = (
+  const parseBody = (
     operation: string,
-    output: { readonly stdout: string },
+    body: string,
   ): Effect.Effect<unknown, IssueOperationError> => {
-    const text = output.stdout.trim();
+    const text = body.trim();
     if (text.length === 0) return Effect.succeed(null);
     return decodeJson(text).pipe(
       Effect.mapError((cause) => operationError(operation, "GitHub returned invalid JSON.", cause)),
@@ -981,23 +981,18 @@ export const make = Effect.gen(function* () {
     endpoint: string,
     body?: JsonRecord,
   ): Effect.Effect<unknown, IssueError> => {
-    const args = [
-      "api",
-      ...(method === "GET" ? [] : ["--method", method]),
-      "--hostname",
-      repo.host,
-      endpoint,
-      ...(body === undefined ? [] : ["--input", "-"]),
-    ];
-    return gh
-      .execute({
-        cwd: repo.cwd,
-        args,
-        ...(body === undefined ? {} : { stdin: JSON.stringify(body) }),
+    const operation = `rest.${method.toLowerCase()}`;
+    return github
+      .rest({
+        host: repo.host,
+        operation: `IssueService.${operation}`,
+        method,
+        path: endpoint.replace(/^\/+/, ""),
+        ...(body === undefined ? {} : { body }),
       })
       .pipe(
-        Effect.mapError((error) => mapCliError(`rest.${method.toLowerCase()}`, repo.host, error)),
-        Effect.flatMap((output) => parseOutput(`rest.${method.toLowerCase()}`, output)),
+        Effect.mapError((error) => mapApiError(operation, repo.host, error)),
+        Effect.flatMap((response) => parseBody(operation, response.body)),
       );
   };
   const repositoryContents = (
@@ -1019,40 +1014,22 @@ export const make = Effect.gen(function* () {
     repo: Repo,
     query: string,
     variables: JsonRecord,
-    subIssues = false,
   ): Effect.Effect<JsonRecord, IssueError> =>
-    gh
-      .execute({
-        cwd: repo.cwd,
-        args: [
-          "api",
-          "graphql",
-          "--hostname",
-          repo.host,
-          "--input",
-          "-",
-          ...(subIssues ? ["-H", "GraphQL-Features: sub_issues"] : []),
-        ],
-        stdin: JSON.stringify({ query, variables }),
-      })
-      .pipe(
-        Effect.mapError((error) => mapCliError("graphql", repo.host, error)),
-        Effect.flatMap((output) => parseOutput("graphql", output)),
-        Effect.flatMap((value) => {
-          const response = record(value);
-          const errors = arrayValue(response.errors);
-          if (errors.length > 0) {
-            const first = record(errors[0]);
-            return Effect.fail(
-              operationError(
-                "graphql",
-                stringValue(first.message, "GitHub GraphQL request failed."),
-              ),
-            );
-          }
-          return Effect.succeed(response);
-        }),
-      );
+    github.graphql({ host: repo.host, operation: "IssueService.graphql", query, variables }).pipe(
+      Effect.mapError((error) => mapApiError("graphql", repo.host, error)),
+      Effect.flatMap((body) => parseBody("graphql", body)),
+      Effect.flatMap((value) => {
+        const response = record(value);
+        const errors = arrayValue(response.errors);
+        if (errors.length > 0) {
+          const first = record(errors[0]);
+          return Effect.fail(
+            operationError("graphql", stringValue(first.message, "GitHub GraphQL request failed.")),
+          );
+        }
+        return Effect.succeed(response);
+      }),
+    );
 
   const repoFor = (
     selection: IssueRepositorySelection | IssueRef,
@@ -1285,7 +1262,7 @@ export const make = Effect.gen(function* () {
           () => graph(repo, DETAIL_QUERY_WITHOUT_CLOSING_PRS, variables),
         );
         // Hosts without sub-issues fail this query; the detail then omits them.
-        const subIssuesQuery = graph(repo, SUB_ISSUES_QUERY, variables, true).pipe(
+        const subIssuesQuery = graph(repo, SUB_ISSUES_QUERY, variables).pipe(
           Effect.catchTag("IssueOperationError", () => Effect.succeed(null)),
         );
         const [response, subIssueResponse, linked] = yield* Effect.all(
@@ -1595,7 +1572,7 @@ export const make = Effect.gen(function* () {
       Effect.flatMap(() => detail(input)),
     );
 
-  const isGitHubNotFound = Schema.is(GitHubCli.GitHubPullRequestNotFoundError);
+  const isGitHubNotFound = Schema.is(GitHubApi.GitHubApiNotFoundError);
   const isNotFound = (error: IssueError): boolean =>
     error._tag === "IssueOperationError" && isGitHubNotFound(error.cause);
 
@@ -2625,9 +2602,13 @@ export const make = Effect.gen(function* () {
       const host = normalizeHost(input.host);
       const flow = flows.get(host);
       const output = yield* Effect.option(
-        gh.execute({
-          cwd: config.baseDir,
+        vcsProcess.run({
+          operation: "IssueService.authStatus",
+          command: "gh",
           args: ["auth", "status", "--hostname", host, "--json", "hosts"],
+          cwd: config.baseDir,
+          env: { GH_PROMPT_DISABLED: "1" },
+          timeoutMs: 10_000,
         }),
       );
       if (Option.isNone(output)) {

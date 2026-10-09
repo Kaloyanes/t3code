@@ -1,8 +1,12 @@
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { type EnvironmentId, type ProjectId, PullRequestInvolvement } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 
 import type { OpenPreviewMutation } from "./browser/openFileInPreview";
 import type { ClosedView, ClosedViewEntry } from "./closedViewStore";
-import type { PullRequestListPreferences } from "./components/pullRequest/pullRequestListPreferences";
+import {
+  PullRequestListSort,
+  type PullRequestListPreferences,
+} from "./components/pullRequest/pullRequestListPreferences";
 import { openPreviewSession } from "./components/preview/openPreviewSession";
 import {
   type RightPanelSurface,
@@ -57,7 +61,14 @@ export function planNextReopen(
   return { drop, restore: null };
 }
 
-type PullRequestsSearchLike = Partial<PullRequestListPreferences> & {
+const isPullRequestInvolvement = Schema.is(PullRequestInvolvement);
+const isPullRequestListSort = Schema.is(PullRequestListSort);
+
+// The previous search may belong to another list page, such as Issues, whose
+// involvement and sort filters have values the pull request list does not accept.
+type PullRequestsSearchLike = Omit<Partial<PullRequestListPreferences>, "involvement" | "sort"> & {
+  involvement?: string;
+  sort?: string;
   repository?: string;
   number?: number;
   selectedProjectId?: ProjectId;
@@ -76,11 +87,13 @@ export function pullRequestsSearchForRestore<S extends PullRequestsSearchLike>(
     selectedProjectId: _projectId,
     selectedHost: _host,
     selectedEnvironmentId: _environmentId,
+    sort,
     ...filters
   } = previous;
   return {
     ...filters,
-    involvement: previous.involvement ?? "all",
+    ...(isPullRequestListSort(sort) ? { sort } : {}),
+    involvement: isPullRequestInvolvement(previous.involvement) ? previous.involvement : "all",
     state: previous.state ?? "open",
     ...(selected?.kind === "pull-request"
       ? {
@@ -142,6 +155,9 @@ export async function reopenClosedView(
       break;
     case "pull-request":
       panels.openPullRequest(ref, surface);
+      break;
+    case "issue":
+      panels.openIssue(ref, surface);
       break;
     default:
       panels.open(ref, surface.kind);

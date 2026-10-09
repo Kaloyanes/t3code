@@ -14,6 +14,7 @@ import {
   IssueUpdateInput,
   IssueUpdateResult,
   McpCapabilityUnavailableError,
+  OrchestratorMcpFailure,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as Tool from "effect/ai/Tool";
@@ -21,10 +22,12 @@ import * as Toolkit from "effect/ai/Toolkit";
 
 import * as IssueService from "../../../issue/IssueService.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
+import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
+  ThreadManagementService.ThreadManagementService,
   Orchestrator.OrchestratorV2,
   IssueService.IssueService,
 ];
@@ -111,6 +114,7 @@ export class IssueLinkFailedError extends Schema.TaggedError<IssueLinkFailedErro
 }
 
 const IssueToolError = Schema.Union([
+  OrchestratorMcpFailure,
   McpCapabilityUnavailableError,
   IssueThreadNotFoundError,
   IssueOutsideThreadProjectError,

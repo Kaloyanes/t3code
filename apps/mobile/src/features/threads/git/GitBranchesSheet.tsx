@@ -36,6 +36,7 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
   const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
+  const { canChangeThreadBranch } = gitActions;
 
   const gitStatus = useEnvironmentQuery(
     selectedThread !== null && selectedThreadCwd !== null
@@ -149,11 +150,12 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
               icon="plus"
               label="Create & checkout"
               tone="primary"
-              disabled={busy || newBranchName.trim().length === 0}
+              disabled={!canChangeThreadBranch || busy || newBranchName.trim().length === 0}
               onPress={() => {
                 const branch = sanitizeFeatureBranchName(newBranchName.trim());
                 if (branch.length === 0) return;
-                void gitActions.onCreateSelectedThreadBranch(branch).then(() => {
+                void gitActions.onCreateSelectedThreadBranch(branch).then((result) => {
+                  if (result === null) return;
                   setNewBranchName("");
                   navigation.goBack();
                 });
@@ -190,6 +192,7 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
               label="Create worktree"
               tone="primary"
               disabled={
+                !canChangeThreadBranch ||
                 busy ||
                 worktreeBaseBranch.trim().length === 0 ||
                 worktreeBranchName.trim().length === 0
@@ -200,7 +203,8 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
                 if (baseBranch.length === 0 || newBranch.length === 0) return;
                 void gitActions
                   .onCreateSelectedThreadWorktree({ baseBranch, newBranch })
-                  .then(() => {
+                  .then((result) => {
+                    if (result === null) return;
                     setWorktreeBranchName("");
                     navigation.goBack();
                   });
@@ -250,11 +254,14 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
                       )}
                       accessibilityRole="button"
                       accessibilityState={{ selected: branch.current, disabled: busy || disabled }}
-                      disabled={busy || disabled}
+                      disabled={!canChangeThreadBranch || busy || disabled}
                       onPress={() => {
-                        void gitActions.onCheckoutSelectedThreadBranch(branch.name).then(() => {
-                          navigation.goBack();
-                        });
+                        void gitActions
+                          .onCheckoutSelectedThreadBranch(branch.name)
+                          .then((result) => {
+                            if (result === null) return;
+                            navigation.goBack();
+                          });
                       }}
                     >
                       {Platform.OS !== "android" ? (
@@ -277,7 +284,7 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`Delete branch ${branch.name}`}
-                      disabled={busy}
+                      disabled={!canChangeThreadBranch || busy}
                       className="min-h-12 justify-center px-3 disabled:opacity-[0.45]"
                       onPress={() => confirmDeleteBranch(branch.name)}
                     >

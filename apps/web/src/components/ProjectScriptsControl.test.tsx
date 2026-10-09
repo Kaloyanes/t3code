@@ -2,6 +2,7 @@ import { act, cloneElement, type ReactElement, type ReactNode } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { AsyncResult } from "effect/reactivity";
+import { EnvironmentId } from "@t3tools/contracts";
 
 vi.mock("lucide-react", () => {
   const Icon = ({ "data-icon": dataIcon, ...props }: { "data-icon": string }) => (
@@ -24,6 +25,9 @@ vi.mock("~/projectScripts", () => ({
 }));
 
 vi.mock("~/keybindings", () => ({ shortcutLabelForCommand: () => null }));
+vi.mock("@effect/atom-react", () => ({ useAtomValue: () => null }));
+vi.mock("~/state/server", () => ({ serverEnvironment: { configValueAtom: () => null } }));
+vi.mock("~/state/session", () => ({ readEnvironmentScope: () => true }));
 
 vi.mock("./projectScriptEditor", () => ({
   EMPTY_PROJECT_SCRIPT_INPUT: {
@@ -132,7 +136,7 @@ function renderControl(
     nextRenderer = create(
       <ProjectScriptsControl
         scripts={scripts}
-        keybindings={[]}
+        environmentId={EnvironmentId.make("environment-1")}
         {...(input.startingScriptIds ? { startingScriptIds: input.startingScriptIds } : {})}
         {...(input.runningScriptIds ? { runningScriptIds: input.runningScriptIds } : {})}
         onRunScript={vi.fn()}

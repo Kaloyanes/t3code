@@ -1,3 +1,4 @@
+import { isElectron } from "../env";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type {
@@ -214,7 +215,15 @@ function browserStorage(): Storage | undefined {
 }
 
 function getShortcutContext() {
-  return { terminalFocus: isTerminalFocused(), terminalOpen: false };
+  return {
+    terminalFocus: isTerminalFocused(),
+    terminalOpen: false,
+    previewFocus: false,
+    previewOpen: false,
+    modelPickerOpen: false,
+    isWeb: !isElectron,
+    isDesktop: isElectron,
+  };
 }
 
 export const Route = createFileRoute("/_chat/issues")({
@@ -1311,7 +1320,6 @@ function IssuesRouteView() {
       threadPanelOpen={false}
       threadPanelPresentation="inline"
       threadPanelShortcutLabel={null}
-      threadPanelHasAttention={false}
       onToggleThreadPanel={() => undefined}
       rightPanelAvailable={rightPanelAvailable}
       rightPanelOpen={rightPanelState.isOpen}
@@ -1389,6 +1397,8 @@ function IssuesRouteView() {
           <RightPanelTabs
             mode="inline"
             open={rightPanelState.isOpen}
+            keybindings={keybindings}
+            getShortcutContext={getShortcutContext}
             widthStorageKey="t3code:work-item-panel-width"
             defaultWidth={typeof window === "undefined" ? 640 : Math.floor(window.innerWidth / 2)}
             surfaces={renderedRightPanelSurfaces}
