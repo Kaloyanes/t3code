@@ -29,6 +29,7 @@ import { resolveThreadRouteTarget } from "../../threadRoutes";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { providerClients } from "../settings/providerDriverMeta";
 import { Button } from "../ui/button";
+import { AnimatedNumber } from "../ui/changing-state";
 import { Collapsible, CollapsiblePanel } from "../ui/collapsible";
 import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { cn } from "../../lib/utils";
@@ -159,7 +160,6 @@ export function SidebarUsageCard() {
     lastConnectionKey.current = connectionKey;
   }, [connectionKey, expanded]);
 
-  const percentLabel = remaining === null ? "Unknown" : `${remaining}%`;
   return (
     <Collapsible open={expanded} className="flex flex-col">
       <CollapsiblePanel>
@@ -186,7 +186,9 @@ export function SidebarUsageCard() {
                         <div className="flex justify-between gap-2 text-2xs text-muted-foreground">
                           <span>{window.label}</span>
                           {window.columns.length > 1 ? (
-                            <span className="tabular-nums">{window.remainingPercent}% left</span>
+                            <span className="tabular-nums">
+                              <AnimatedNumber value={window.remainingPercent} />% left
+                            </span>
                           ) : null}
                         </div>
                         <PoolBar pool={window} color={barColor(pool.driver)} now={now} compact />
@@ -233,7 +235,13 @@ export function SidebarUsageCard() {
         onClick={() => setExpanded((value) => !value)}
         accessory={
           <span className="shrink-0 tabular-nums text-sidebar-muted-foreground">
-            {percentLabel}
+            {remaining === null ? (
+              "Unknown"
+            ) : (
+              <>
+                <AnimatedNumber value={remaining} />%
+              </>
+            )}
           </span>
         }
       >

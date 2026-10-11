@@ -62,6 +62,7 @@ import {
   THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
 } from "./chat/threadDetailsPanelStyles";
+import { AnimatedText, AnimatedIcon, useAnimatedLayout } from "./ui/changing-state";
 
 export type { NewProjectScriptInput, ProjectScriptActionResult };
 
@@ -224,6 +225,12 @@ export default function ProjectScriptsControl({
         : primaryScriptIsStarting
           ? `Starting ${primaryScript.name}`
           : `Run ${primaryScript.name}`;
+  const primaryScriptState = primaryScriptIsRunning
+    ? "running"
+    : primaryScriptIsStarting
+      ? "starting"
+      : "idle";
+  const animatedGroupRef = useAnimatedLayout<HTMLDivElement>();
 
   const scriptItems = (
     <>
@@ -346,7 +353,7 @@ export default function ProjectScriptsControl({
           aria-label="Project scripts"
           {...(isPanel
             ? { className: THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS, ref: panelAnchorRef }
-            : {})}
+            : { ref: animatedGroupRef })}
         >
           <Tooltip>
             <TooltipTrigger
@@ -368,19 +375,24 @@ export default function ProjectScriptsControl({
                 />
               }
             >
-              <ScriptStateIcon
-                icon={primaryScript.icon}
-                running={primaryScriptIsRunning}
-                starting={primaryScriptIsStarting}
-                {...(isPanel ? { className: THREAD_DETAILS_PANEL_ICON_CLASS } : {})}
-              />
+              <AnimatedIcon
+                stateKey={`${primaryScript.id}:${primaryScriptState}`}
+                className="shrink-0"
+              >
+                <ScriptStateIcon
+                  icon={primaryScript.icon}
+                  running={primaryScriptIsRunning}
+                  starting={primaryScriptIsStarting}
+                  {...(isPanel ? { className: THREAD_DETAILS_PANEL_ICON_CLASS } : {})}
+                />
+              </AnimatedIcon>
               <span
                 className={cn(
                   "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5",
                   isPanel && cn("not-sr-only ml-0 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS),
                 )}
               >
-                {primaryScript.name}
+                <AnimatedText value={primaryScript.name} />
               </span>
             </TooltipTrigger>
             <TooltipPopup side="top">

@@ -1,6 +1,7 @@
 import { proposedPlanTitle, stripDisplayedPlanMarkdown } from "@t3tools/shared/proposedPlanText";
 import { memo, useCallback, useState, useId } from "react";
 import { useFindRevealRef } from "./markdownFindContext";
+import { AnimatedText } from "../ui/changing-state";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -179,7 +180,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
           </MenuTrigger>
           <MenuPopup align="end">
             <MenuItem onClick={handleCopyPlan}>
-              {isCopied ? "Copied!" : "Copy to clipboard"}
+              <AnimatedText value={isCopied ? "Copied!" : "Copy to clipboard"} />
             </MenuItem>
             <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
             <MenuItem

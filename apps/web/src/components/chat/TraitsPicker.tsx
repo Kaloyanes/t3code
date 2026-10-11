@@ -1,3 +1,4 @@
+import { AnimatedText } from "../ui/changing-state";
 import {
   type ModelSelection,
   type ProviderDriverKind,
@@ -666,14 +667,16 @@ export const TraitsPicker = memo(function TraitsPicker({
             >
               <ComposerControlIcon icon={BrainIcon} size={size} />
               <span data-composer-control-label className="min-w-0 truncate">
-                {triggerLabel}
+                <AnimatedText value={triggerLabel} />
               </span>
               <ComposerControlChevron size={size} />
             </span>
           ) : (
             <>
               <ComposerControlIcon icon={BrainIcon} size={size} />
-              <span data-composer-control-label>{triggerLabel}</span>
+              <span data-composer-control-label>
+                <AnimatedText value={triggerLabel} />
+              </span>
               <ComposerControlChevron size={size} />
             </>
           )}

@@ -7,6 +7,10 @@ const stageArtworkState = vi.hoisted(() => ({
   variant: null as "nightly" | "dev" | null,
 }));
 
+vi.mock("../../uiAnimations", () => ({
+  useUiAnimationSettings: () => ({ active: false, durationMs: 150 }),
+}));
+
 vi.mock("~/hooks/useSettings", () => ({
   useEnvironmentIdentificationMode: () => stageArtworkState.mode,
   useClientSettings: () => "queue",
