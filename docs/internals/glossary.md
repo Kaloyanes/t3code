@@ -55,6 +55,15 @@ Terms whose meaning matters across T3 Code. Architecture and lifecycle constrain
 | Checkpoint baseline | The workspace state captured before the work being compared.                                                 |
 | Turn diff           | The workspace changes attributed to one turn.                                                                |
 
+## Usage and limits
+
+| Term                     | Meaning                                                                                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Subscription allowance   | A provider account's remaining permitted usage within a limit window, such as a session or week.                                                              |
+| Limit pool               | Subscription accounts grouped by provider across environments. The same account counts once even when several environments report it.                         |
+| Usage pace               | The comparison between a subscription allowance's remaining share and the time left before its window resets. Even spending leaves the same share of each.    |
+| Estimated response speed | An approximate token rate derived from response text arriving in the client. It excludes hidden reasoning and is not a measurement of model generation speed. |
+
 ## Pull requests
 
 | Term                 | Meaning                                                                                                                                                                                  |

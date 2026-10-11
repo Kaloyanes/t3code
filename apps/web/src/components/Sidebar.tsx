@@ -1,3 +1,4 @@
+import { SidebarUsageCard } from "./usage/SidebarUsageCard";
 import type { IssueWorktreeDeleteDecision } from "@t3tools/contracts";
 import { issueEnvironment } from "../state/issues";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
@@ -6907,6 +6908,7 @@ export default function Sidebar() {
               </DndContext>
             </TooltipProvider>
           ) : null}
+          {!isSearchingThreads ? <SidebarUsageCard /> : null}
           {!isSearchingThreads &&
           visibleDraftSessionCount === 0 &&
           pinnedThreads.length +

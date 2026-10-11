@@ -77,11 +77,10 @@ export function PaceIcon({ pace }: { readonly pace: LimitPace }) {
 
 /**
  * One window as a full-width bar from the moment it opened to its reset.
- * The fill is the share of quota spent; the hairline is how far into the
- * window the clock is, which is also where even spending would have put the
- * fill. Hover for the exact figures and reset time.
+ * The fill is the share of quota remaining; the hairline is the share of
+ * time remaining, where even spending would put the fill. Hover for the exact figures and reset time.
  */
-function WindowBar({
+export function UsageWindowBar({
   color,
   window,
   now,
@@ -186,7 +185,7 @@ export function LimitWindows({
                 {remainingPercent(window)}% left
               </span>
             </span>
-            <WindowBar color={color} window={window} now={now} />
+            <UsageWindowBar color={color} window={window} now={now} />
             <span className="flex items-center gap-2 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
               {pace ? <PaceIcon pace={pace} /> : null}
               <span className="ms-auto shrink-0">{resetsIn ?? ""}</span>

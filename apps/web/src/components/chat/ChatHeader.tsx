@@ -1,7 +1,6 @@
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
-  type ProviderInstanceId,
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -38,13 +37,10 @@ import {
   WorkspaceBreadcrumbText,
 } from "../WorkspaceBreadcrumb";
 import { cn } from "~/lib/utils";
-import { HeaderUsageLimitsPopover } from "./HeaderUsageLimitsPopover";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
   activeThreadId: ThreadId;
-  /** The composer's provider; the header shows its account usage. */
-  activeProviderInstanceId: ProviderInstanceId | null;
   activeThreadTitle: string;
   /** Drafts have no server thread yet, so the title carries no action menu. */
   isServerThread: boolean;
@@ -78,7 +74,6 @@ const TITLE_MENU_OPEN_DELAY_MS = 500;
 export const ChatHeader = memo(function ChatHeader({
   activeThreadEnvironmentId,
   activeThreadId,
-  activeProviderInstanceId,
   activeThreadTitle,
   isServerThread,
   activeProject,
@@ -360,10 +355,6 @@ export const ChatHeader = memo(function ChatHeader({
           )}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
-      <HeaderUsageLimitsPopover
-        activeEnvironmentId={activeThreadEnvironmentId}
-        activeProviderInstanceId={activeProviderInstanceId}
-      />
     </div>
   );
 });

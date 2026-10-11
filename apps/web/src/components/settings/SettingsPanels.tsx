@@ -2620,7 +2620,7 @@ export function GeneralSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("usage-monitor")}
-          description="Choose whether the header usage pill shows the lowest percentage or the shortest window, such as 5 hours instead of 1 week."
+          description="Choose whether the collapsed sidebar usage card shows the lowest percentage or the shortest window, such as 5 hours instead of 1 week."
           resetAction={
             settings.usageMonitorMode !== DEFAULT_UNIFIED_SETTINGS.usageMonitorMode ? (
               <SettingResetButton

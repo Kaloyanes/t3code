@@ -1,3 +1,6 @@
+import { useEnvironmentPresentation } from "../../state/presentation";
+import { useOutputSpeed } from "./useOutputSpeed";
+import type { OutputObservation, OutputSpeed } from "./outputSpeed";
 import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { MarkdownFindContext, useFindRevealRef } from "./markdownFindContext";
@@ -177,7 +180,7 @@ import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { McpAppFrame } from "./McpAppFrame";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
-import { useProject, useThreadShell } from "../../state/entities";
+import { useProject, useThreadShell, useThreadStatus } from "../../state/entities";
 import {
   CHAT_TIMELINE_ANCHOR_OFFSET,
   readTimelinePosition,
@@ -379,6 +382,10 @@ interface TimelineRowActivityState {
    */
   backgroundWorktreeSetup: WorktreeSetupSnapshot | null;
 }
+
+const OutputSpeedContext = createContext<ReadonlyMap<MessageId, OutputSpeed>>(new Map());
+
+const EMPTY_OUTPUT_OBSERVATIONS: readonly OutputObservation[] = [];
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
@@ -917,7 +924,16 @@ const ConversationTimeline = memo(function ConversationTimeline({
     supportsConversationRollback,
     worktreeSetup,
   ]);
-  const rows = useStableRows(rawRows, listIdentityKey);
+  const { rows, observations } = useStableRows(rawRows, listIdentityKey);
+  const { presentation: outputEnvironment } = useEnvironmentPresentation(activeThreadEnvironmentId);
+  const outputConnectionPhase = outputEnvironment?.connection.phase;
+  const outputThreadStatus = useThreadStatus(citationThreadRef);
+  const outputSpeeds = useOutputSpeed(
+    `${listIdentityKey}:${outputConnectionPhase}:${outputThreadStatus}`,
+    outputConnectionPhase === "connected" && outputThreadStatus === "live"
+      ? observations
+      : EMPTY_OUTPUT_OBSERVATIONS,
+  );
   // Run status/timestamps churn on every stream event; the shared row context
   // must not change with them or every timeline row re-renders per event.
   const runs = useStableHandoffRuns(runsProp);
@@ -1563,84 +1579,86 @@ const ConversationTimeline = memo(function ConversationTimeline({
 
   return (
     <MarkdownFindContext value={findActive}>
-      <TimelineRowCtx value={sharedState}>
-        <TimelineRowActivityCtx value={activityState}>
-          <TooltipScrollDismissArea
-            ref={setTimelineViewportElement}
-            className="relative h-full min-h-0"
-            data-assistant-citation-viewport="true"
-          >
-            {onCiteAssistantText && citationThreadRef ? (
-              <AssistantSelectionToolbar
-                viewport={timelineViewportElement}
-                threadRef={citationThreadRef}
-                onCite={onCiteAssistantText}
+      <OutputSpeedContext value={outputSpeeds}>
+        <TimelineRowCtx value={sharedState}>
+          <TimelineRowActivityCtx value={activityState}>
+            <TooltipScrollDismissArea
+              ref={setTimelineViewportElement}
+              className="relative h-full min-h-0"
+              data-assistant-citation-viewport="true"
+            >
+              {onCiteAssistantText && citationThreadRef ? (
+                <AssistantSelectionToolbar
+                  viewport={timelineViewportElement}
+                  threadRef={citationThreadRef}
+                  onCite={onCiteAssistantText}
+                />
+              ) : null}
+              <LegendList<MessagesTimelineRow>
+                ref={setTimelineList}
+                data={rows}
+                extraData={`${listIdentityKey}:${rows.length}`}
+                keyExtractor={keyExtractor}
+                getItemType={getItemType}
+                renderItem={renderItem}
+                estimatedItemSize={90}
+                initialScrollAtEnd={
+                  !findActive && citationRequest === null && rememberedPosition?.atEnd !== false
+                }
+                // Legend needs a data refresh to mount new pins without a scroll event.
+                dataVersion={readyCitationRequest?.key ?? listIdentityKey}
+                {...(alwaysRender ? { alwaysRender } : {})}
+                onLoad={handleListLoad}
+                {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
+                contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
+                maintainScrollAtEnd={
+                  citationPositioning ||
+                  (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
+                  anchoredEndSpace ||
+                  !liveFollowEnabled ||
+                  fullscreenAppRowId !== null ||
+                  disclosureToggleSettling
+                    ? false
+                    : isWorking && !prefersReducedMotion && settlingListIdentity === null
+                      ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
+                      : TIMELINE_MAINTAIN_SCROLL_AT_END
+                }
+                maintainVisibleContentPosition={
+                  findActive ||
+                  citationPositioning ||
+                  (restoringThreadPosition && rememberedPosition?.atEnd === false)
+                    ? false
+                    : maintainVisibleContentPosition
+                }
+                maintainScrollAtEndThreshold={1}
+                onScroll={handleScroll}
+                onItemSizeChanged={reportContentOverflow}
+                className={cn(
+                  "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
+                  topFadeEnabled && "topbar-scroll-fade",
+                )}
+                ListHeaderComponent={listHeader}
+                ListFooterComponent={timelineListFooter}
               />
-            ) : null}
-            <LegendList<MessagesTimelineRow>
-              ref={setTimelineList}
-              data={rows}
-              extraData={`${listIdentityKey}:${rows.length}`}
-              keyExtractor={keyExtractor}
-              getItemType={getItemType}
-              renderItem={renderItem}
-              estimatedItemSize={90}
-              initialScrollAtEnd={
-                !findActive && citationRequest === null && rememberedPosition?.atEnd !== false
-              }
-              // Legend needs a data refresh to mount new pins without a scroll event.
-              dataVersion={readyCitationRequest?.key ?? listIdentityKey}
-              {...(alwaysRender ? { alwaysRender } : {})}
-              onLoad={handleListLoad}
-              {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
-              contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
-              maintainScrollAtEnd={
-                citationPositioning ||
-                (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
-                anchoredEndSpace ||
-                !liveFollowEnabled ||
-                fullscreenAppRowId !== null ||
-                disclosureToggleSettling
-                  ? false
-                  : isWorking && !prefersReducedMotion && settlingListIdentity === null
-                    ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
-                    : TIMELINE_MAINTAIN_SCROLL_AT_END
-              }
-              maintainVisibleContentPosition={
-                findActive ||
-                citationPositioning ||
-                (restoringThreadPosition && rememberedPosition?.atEnd === false)
-                  ? false
-                  : maintainVisibleContentPosition
-              }
-              maintainScrollAtEndThreshold={1}
-              onScroll={handleScroll}
-              onItemSizeChanged={reportContentOverflow}
-              className={cn(
-                "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
-                topFadeEnabled && "topbar-scroll-fade",
-              )}
-              ListHeaderComponent={listHeader}
-              ListFooterComponent={timelineListFooter}
-            />
-            <TimelineMinimap
-              items={minimapItems}
-              hasPersistentGutter={minimapHasPersistentGutter}
-              hitStripWidth={minimapHitStripWidth}
-              currentIndex={minimapCurrentIndex}
-              stripMap={minimapStripMap}
-              onSelect={(item) => {
-                onManualNavigation();
-                void listRef.current?.scrollToIndex({
-                  index: item.rowIndex,
-                  animated: true,
-                  viewOffset: 24,
-                });
-              }}
-            />
-          </TooltipScrollDismissArea>
-        </TimelineRowActivityCtx>
-      </TimelineRowCtx>
+              <TimelineMinimap
+                items={minimapItems}
+                hasPersistentGutter={minimapHasPersistentGutter}
+                hitStripWidth={minimapHitStripWidth}
+                currentIndex={minimapCurrentIndex}
+                stripMap={minimapStripMap}
+                onSelect={(item) => {
+                  onManualNavigation();
+                  void listRef.current?.scrollToIndex({
+                    index: item.rowIndex,
+                    animated: true,
+                    viewOffset: 24,
+                  });
+                }}
+              />
+            </TooltipScrollDismissArea>
+          </TimelineRowActivityCtx>
+        </TimelineRowCtx>
+      </OutputSpeedContext>
     </MarkdownFindContext>
   );
 });
@@ -2742,6 +2760,24 @@ function AttemptFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "at
   );
 }
 
+function EstimatedOutputSpeed({ messageId }: { readonly messageId: MessageId }) {
+  const speed = use(OutputSpeedContext).get(messageId);
+  if (speed?.kind !== "estimate") return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<span className="text-2xs text-muted-foreground tabular-nums" tabIndex={0} />}
+      >
+        ≈ {speed.tokensPerSecond} tok/s
+      </TooltipTrigger>
+      <TooltipPopup side="top">
+        Estimated visible text arrival speed, using about four characters per token. Includes
+        delivery delays and buffering. Excludes hidden reasoning.
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
@@ -2749,7 +2785,10 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
   return (
     <>
       <div className="relative min-w-0 px-1 py-0.5">
-        <MessageAuthorHeading>T3 Code</MessageAuthorHeading>
+        <div className="flex items-center gap-2">
+          <MessageAuthorHeading>T3 Code</MessageAuthorHeading>
+          {row.message.streaming ? <EstimatedOutputSpeed messageId={row.message.id} /> : null}
+        </div>
         <div data-thread-find-text="true">
           <AssistantCitationSource
             messageId={row.message.id}
@@ -4907,7 +4946,7 @@ function useStableHandoffRuns(
 
 /** Returns a structurally-shared copy of `rows`: for each row whose content
  *  hasn't changed since last call, the previous object reference is reused. */
-function useStableRows(rows: MessagesTimelineRow[], identity: string): MessagesTimelineRow[] {
+function useStableRows(rows: MessagesTimelineRow[], identity: string) {
   const prevState = useRef<StableMessagesTimelineRowsState>({
     byId: new Map<string, MessagesTimelineRow>(),
     result: [],
@@ -4920,9 +4959,14 @@ function useStableRows(rows: MessagesTimelineRow[], identity: string): MessagesT
         ? prevState.current
         : { byId: new Map<string, MessagesTimelineRow>(), result: [] };
     prevIdentity.current = identity;
-    const nextState = computeStableMessagesTimelineRows(rows, previous);
+    const observations: OutputObservation[] = [];
+    const nextState = computeStableMessagesTimelineRows(rows, previous, (row) => {
+      if (row.kind === "message" && row.message.role === "assistant" && row.message.streaming) {
+        observations.push({ messageId: row.message.id, textLength: row.message.text.length });
+      }
+    });
     prevState.current = nextState;
-    return nextState.result;
+    return { rows: nextState.result, observations };
   }, [identity, rows]);
 }
 

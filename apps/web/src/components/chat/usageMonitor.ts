@@ -21,7 +21,7 @@ function compareWindowDuration(
   return WINDOW_KIND_ORDER[left.kind] - WINDOW_KIND_ORDER[right.kind];
 }
 
-/** Picks the value shown by the compact usage monitor in the chat header. */
+/** Picks the value shown by the compact usage monitor in the sidebar. */
 export function usageMonitorRemainingPercent(
   windows: readonly ServerProviderUsageWindow[],
   mode: UsageMonitorMode,

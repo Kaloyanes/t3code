@@ -2147,6 +2147,7 @@ export function deriveMessagesTimelineRowsWithState(
 export function computeStableMessagesTimelineRows(
   rows: MessagesTimelineRow[],
   previous: StableMessagesTimelineRowsState,
+  observeRow?: (row: MessagesTimelineRow) => void,
 ): StableMessagesTimelineRowsState {
   const next = new Map<string, MessagesTimelineRow>();
   let anyChanged = rows.length !== previous.byId.size;
@@ -2155,6 +2156,7 @@ export function computeStableMessagesTimelineRows(
     const prevRow = previous.byId.get(row.id);
     const nextRow = prevRow && isRowUnchanged(prevRow, row) ? prevRow : row;
     next.set(row.id, nextRow);
+    observeRow?.(nextRow);
     if (!anyChanged && previous.result[index] !== nextRow) {
       anyChanged = true;
     }
