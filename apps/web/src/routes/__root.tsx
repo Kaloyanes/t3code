@@ -57,7 +57,8 @@ import { cn } from "../lib/utils";
 import { applyAppearanceFontVariables } from "~/appearanceFonts";
 import { applyAppearanceContrast } from "~/appearanceContrast";
 import { useClientSettings } from "../hooks/useSettings";
-import { useUiAnimationSettings } from "../uiAnimations";
+import { useMediaQuery } from "../hooks/useMediaQuery";
+import { publishUiAnimationSettings, uiAnimationsActive } from "../uiAnimations";
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKeyFromPath,
@@ -294,9 +295,12 @@ function ContrastAppearanceSync() {
 }
 
 function UiAnimationSync() {
-  const { active, durationMs } = useUiAnimationSettings();
+  const durationMs = useClientSettings((settings) => settings.uiAnimationDurationMs);
+  const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const active = uiAnimationsActive(durationMs, prefersReducedMotion);
 
   useEffect(() => {
+    publishUiAnimationSettings({ active, durationMs });
     const root = document.documentElement;
     root.style.setProperty("--ui-animation-duration", `${active ? durationMs : 0}ms`);
     root.dataset.uiAnimations = active ? "on" : "off";
