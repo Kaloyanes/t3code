@@ -1,5 +1,7 @@
 import { motion } from "motion/react";
 import autoAnimate from "@formkit/auto-animate";
+import { RollingNumber } from "@kitlangton/rolling-number/react";
+import "@kitlangton/rolling-number/styles.css";
 import {
   memo,
   useCallback,
@@ -143,6 +145,29 @@ export const AnimatedIcon = memo(function AnimatedIcon({
         <span className="changing-icon-content">{children}</span>
       )}
     </span>
+  );
+});
+
+/** Rolls changed digits in place; settles immediately when interface animations are off. */
+export const AnimatedNumber = memo(function AnimatedNumber({
+  value,
+  format,
+  className,
+}: {
+  readonly value: number;
+  readonly format?: Intl.NumberFormatOptions;
+  readonly className?: string;
+}) {
+  const { active, durationMs } = useUiAnimationSettings();
+  return (
+    <RollingNumber
+      value={value}
+      {...(format ? { format } : {})}
+      // Digits travel farther than a fading label, so they get a little more time.
+      duration={active ? durationMs * 2 : 0}
+      animated={active}
+      className={className}
+    />
   );
 });
 
