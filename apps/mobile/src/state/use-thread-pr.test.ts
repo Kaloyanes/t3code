@@ -1,5 +1,6 @@
 import {
   ProjectId,
+  SourceControlProviderKind,
   type ThreadPullRequestLink,
   type VcsStatusResult,
   type WorktreePullRequestLink,
@@ -33,7 +34,7 @@ describe("presentThreadPr", () => {
   it("uses merge-request terminology for GitLab", () => {
     expect(
       presentThreadPr(pullRequest, {
-        kind: "gitlab",
+        kind: SourceControlProviderKind.make("gitlab"),
         name: "GitLab",
         baseUrl: "https://gitlab.com",
       }),

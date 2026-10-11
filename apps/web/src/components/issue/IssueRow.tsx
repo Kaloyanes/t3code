@@ -1,3 +1,4 @@
+import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import type { ContextMenuItem } from "@t3tools/contracts";
 import { GitBranchIcon, MessageSquareIcon, MilestoneIcon } from "lucide-react";
 import { memo, type MouseEvent } from "react";
@@ -101,7 +102,11 @@ function IssueRowImpl({
     const items: ContextMenuItem<IssueRowMenuAction>[] = [
       { id: "work", label: "Work on issue", icon: "git-branch" },
       ...(linkedWork ? [{ id: "open-thread" as const, label: "Open linked thread" }] : []),
-      { id: "open-external", label: openOnHostLabel(entry.provider), separatorBefore: true },
+      {
+        id: "open-external",
+        label: openOnHostLabel(sourceControlClients.get(entry.provider)),
+        separatorBefore: true,
+      },
       { id: "copy-link", label: "Copy link", icon: "copy" },
     ];
     const action = await api.contextMenu
@@ -176,7 +181,7 @@ function IssueRowImpl({
                 event.stopPropagation();
                 void showPullRequestLinkContextMenu({
                   url: entry.url,
-                  openLabel: openOnHostLabel(entry.provider),
+                  openLabel: openOnHostLabel(sourceControlClients.get(entry.provider)),
                   position: { x: event.clientX, y: event.clientY },
                 });
               }}

@@ -1,5 +1,5 @@
 import type { OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
@@ -17,7 +17,7 @@ import { ServerSettingsService } from "./serverSettings.ts";
 const CAFFEINATE = "/usr/bin/caffeinate";
 
 export const supportsKeepAwake = Effect.gen(function* () {
-  if ((yield* HostProcessPlatform) !== "darwin") return false;
+  if ((yield* HostProcess.Platform) !== "darwin") return false;
   const fs = yield* FileSystem.FileSystem;
   return yield* fs.exists(CAFFEINATE).pipe(Effect.orElseSucceed(() => false));
 });

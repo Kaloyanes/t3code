@@ -1,12 +1,17 @@
 import * as NodeUtil from "node:util";
 import * as Effect from "effect/Effect";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import { ProcessRunner } from "../processRunner.ts";
 import { sanitizeAcpStderrExcerpt } from "@t3tools/provider-acp/server/stderr";
 
-export function sanitizeComposerBashText(text: string): string {
+export function sanitizeComposerBashText(
+  text: string,
+  homeDirectory: string,
+  environment: NodeJS.ProcessEnv,
+): string {
   let sanitized = NodeUtil.stripVTControlCharacters(text);
-  for (const [name, value] of Object.entries(process.env)) {
+  for (const [name, value] of Object.entries(environment)) {
     if (
       /(?:TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY|CREDENTIAL)/i.test(name) &&
       value &&
@@ -15,7 +20,7 @@ export function sanitizeComposerBashText(text: string): string {
       sanitized = sanitized.replaceAll(value, "[redacted]");
     }
   }
-  return sanitizeAcpStderrExcerpt(sanitized);
+  return sanitizeAcpStderrExcerpt(sanitized, homeDirectory, environment);
 }
 
 export const runComposerBashCommand = Effect.fnUntraced(function* (input: {
@@ -25,6 +30,9 @@ export const runComposerBashCommand = Effect.fnUntraced(function* (input: {
   if (!input.text.startsWith("!")) return null;
   const command = input.text.slice(1).trim();
   const runner = yield* ProcessRunner;
+  const homeDirectory = yield* HostProcess.HomeDirectory;
+  const environment = yield* HostProcess.Environment;
+  const sanitize = (text: string) => sanitizeComposerBashText(text, homeDirectory, environment);
   const result = !command
     ? { failed: true, detail: "Enter a Bash command after !." }
     : !input.cwd
@@ -44,8 +52,8 @@ export const runComposerBashCommand = Effect.fnUntraced(function* (input: {
           })
           .pipe(
             Effect.map((output) => {
-              const stdout = sanitizeComposerBashText(output.stdout);
-              const stderr = sanitizeComposerBashText(output.stderr);
+              const stdout = sanitize(output.stdout);
+              const stderr = sanitize(output.stderr);
               return {
                 failed: output.timedOut || output.code !== 0,
                 detail: output.timedOut
@@ -68,8 +76,8 @@ export const runComposerBashCommand = Effect.fnUntraced(function* (input: {
               }),
             ),
           );
-  const safeCommand = sanitizeComposerBashText(command);
-  const detail = sanitizeComposerBashText(result.detail);
+  const safeCommand = sanitize(command);
+  const detail = sanitize(result.detail);
   return {
     command: safeCommand,
     failed: result.failed,

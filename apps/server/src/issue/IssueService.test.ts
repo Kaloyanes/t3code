@@ -14,7 +14,7 @@ import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectWorktreeLinks from "../project/ProjectWorktreeLinks.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import * as GitHubApi from "../sourceControl/GitHubApi.ts";
+import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as WorktreeRunManager from "../worktreeRun/Manager.ts";
 import * as IssueService from "./IssueService.ts";

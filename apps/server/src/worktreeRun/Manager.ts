@@ -10,7 +10,7 @@ import type {
   WorktreeRunWriteInput,
 } from "@t3tools/contracts";
 import { WorktreeRunError } from "@t3tools/contracts";
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -18,7 +18,7 @@ import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
 import * as NodePath from "node:path";
 
-import * as PtyAdapter from "../terminal/PtyAdapter.ts";
+import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
 
 interface StartSpec {
   readonly input: WorktreeRunStartInput;
@@ -69,8 +69,8 @@ export class WorktreeRunManager extends Context.Service<
 
 const make = Effect.gen(function* () {
   const pty = yield* PtyAdapter.PtyAdapter;
-  const platform = yield* HostProcessPlatform;
-  const processEnvironment = yield* HostProcessEnvironment;
+  const platform = yield* HostProcess.Platform;
+  const processEnvironment = yield* HostProcess.Environment;
   const lock = yield* Semaphore.make(1);
   const sessions = new Map<string, Session>();
   const attachListeners = new Set<{

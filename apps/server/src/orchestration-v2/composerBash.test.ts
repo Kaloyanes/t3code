@@ -1,6 +1,6 @@
 import * as NodeOS from "node:os";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { describe, expect, it, vi } from "@effect/vitest";
+import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
@@ -41,12 +41,11 @@ describe("composer Bash commands", () => {
   );
 
   it("redacts secret environment values", () => {
-    vi.stubEnv("T3_TEST_SECRET", "example-private-value");
-    try {
-      expect(sanitizeComposerBashText("value=example-private-value")).toBe("value=[redacted]");
-    } finally {
-      vi.unstubAllEnvs();
-    }
+    expect(
+      sanitizeComposerBashText("value=example-private-value", "/home/tester", {
+        T3_TEST_SECRET: "example-private-value",
+      }),
+    ).toBe("value=[redacted]");
   });
 
   it.effect("does not execute without a thread workspace", () =>

@@ -9,6 +9,7 @@ import type {
   IssueRelatedIssue,
   ScopedThreadRef,
 } from "@t3tools/contracts";
+import { SourceControlProviderKind } from "@t3tools/contracts";
 import {
   ArrowDownUpIcon,
   CornerLeftUpIcon,
@@ -575,7 +576,10 @@ function IssueCommentCard({
       className="group rounded-lg border border-border/60 bg-background [contain-intrinsic-block-size:160px] [content-visibility:auto]"
     >
       <div className="flex flex-wrap items-start gap-2 rounded-t-lg bg-muted/25 px-3 py-2.5">
-        <CommentIdentity comment={comment} detail={issue} />
+        <CommentIdentity
+          comment={comment}
+          detail={{ provider: SourceControlProviderKind.make(issue.provider), url: issue.url }}
+        />
         {canManage ? (
           <span className="flex shrink-0 opacity-0 transition-opacity pointer-coarse:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 motion-reduce:transition-none">
             <Button

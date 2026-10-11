@@ -239,6 +239,7 @@ function FormField({
 }
 
 function AutomationEditor({
+  environmentId,
   form,
   projects,
   instanceEntries,
@@ -254,6 +255,7 @@ function AutomationEditor({
   onSubmit,
   onNew,
 }: {
+  readonly environmentId: EnvironmentId;
   readonly form: AutomationFormState;
   readonly projects: ReadonlyArray<{ readonly id: ProjectId; readonly title: string }>;
   readonly instanceEntries: Parameters<typeof ProviderModelPicker>[0]["instanceEntries"];
@@ -399,6 +401,7 @@ function AutomationEditor({
         <FormField label="Model and effort">
           <div className="flex min-w-0 flex-wrap gap-2">
             <ProviderModelPicker
+              environmentId={environmentId}
               activeInstanceId={ProviderInstanceId.make(form.modelInstance)}
               model={form.model}
               lockedProvider={null}
@@ -517,7 +520,13 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
     environmentSettings,
     form.projectId ? ProjectId.make(form.projectId) : null,
   ).settings;
-  const effectiveSettings = { ...environmentSettings, ...projectSettings };
+  const effectiveSettings = {
+    ...environmentSettings,
+    ...projectSettings,
+    // Project settings carry unresolved model preferences; keep the environment's resolved ones.
+    favorites: environmentSettings.favorites,
+    providerModelPreferences: environmentSettings.providerModelPreferences,
+  };
   const providers = environment?.serverConfig?.providers ?? [];
   const instanceEntries = sortProviderInstanceEntries(
     applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), projectSettings),
@@ -901,6 +910,7 @@ function AutomationEnvironmentPanel({ environmentId }: { readonly environmentId:
         )}
         {editing || creating || selected === null ? (
           <AutomationEditor
+            environmentId={environmentId}
             form={form}
             projects={projects}
             instanceEntries={instanceEntries}

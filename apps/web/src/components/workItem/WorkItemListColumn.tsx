@@ -205,6 +205,8 @@ export interface WorkItemListColumnProps {
   rightPanelControl: ReactNode;
   titlebarControls: ReactNode;
   rightPanelOpen: boolean;
+  /** The panel beside the list is maximized, so the list gives up its width. */
+  maximizedAway?: boolean;
   listBody: ReactNode;
   scrollRef: RefObject<HTMLDivElement | null>;
 }
@@ -231,6 +233,7 @@ export function WorkItemListColumn({
   rightPanelControl,
   titlebarControls,
   rightPanelOpen,
+  maximizedAway = false,
   listBody,
   scrollRef,
 }: WorkItemListColumnProps) {
@@ -292,7 +295,12 @@ export function WorkItemListColumn({
   return (
     // Painted flat like the chat column: the inset underneath carries the chrome grain, and a
     // content surface that lets it show reads as a different background than every thread.
-    <div className="@container/work-list flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+    <div
+      className={cn(
+        "@container/work-list flex min-h-0 min-w-0 flex-col overflow-x-hidden bg-background",
+        maximizedAway ? "w-0 flex-none" : "flex-1",
+      )}
+    >
       {/* A closed right panel leaves this column full-width, so the shared header
           reserves native window controls and hosts the controls strip itself: on
           desktop the header is a drag-region, and only a no-drag descendant wins

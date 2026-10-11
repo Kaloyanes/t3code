@@ -103,12 +103,12 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectWorktreeLinks from "../project/ProjectWorktreeLinks.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import * as GitHubApi from "../sourceControl/GitHubApi.ts";
+import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import {
   findAuthenticatedGitHubAccount,
   parseGitHubAuthStatus,
-} from "../sourceControl/gitHubAuthStatus.ts";
+} from "@t3tools/source-control-github/server/gitHubAuthStatus";
 
 const GRAPHQL_ROW_FIELDS = `
   number title url state stateReason createdAt updatedAt closedAt
