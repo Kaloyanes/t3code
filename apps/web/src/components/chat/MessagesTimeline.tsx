@@ -181,7 +181,7 @@ import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { McpAppFrame } from "./McpAppFrame";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
-import { useProject, useThreadShell, useThreadStatus } from "../../state/entities";
+import { useProject, useThreadShell } from "../../state/entities";
 import {
   CHAT_TIMELINE_ANCHOR_OFFSET,
   readTimelinePosition,
@@ -462,6 +462,13 @@ interface MessagesTimelineProps {
     sourceAnchor: AssistantCitationSourceAnchor,
   ) => boolean;
   isWorking: boolean;
+  /**
+   * The thread's server data is live, so output speed can be measured. The
+   * owner reads this through a ref that waits for the server thread; reading
+   * it here from the route would request a draft's thread before it exists,
+   * and that miss stops the thread from ever syncing.
+   */
+  threadLive?: boolean;
   /** The live work belongs to a runless root turn (a provider-native subagent). */
   runlessWorkActive?: boolean;
   activeTurnInProgress: boolean;
@@ -576,6 +583,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   citationHistoryLoading = false,
   onCiteAssistantText,
   isWorking,
+  threadLive = false,
   runlessWorkActive = false,
   activeTurnInProgress,
   activeTurnStartedAt = null,
@@ -953,12 +961,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const { rows, observations } = useStableRows(rawRows, listIdentityKey);
   const { presentation: outputEnvironment } = useEnvironmentPresentation(activeThreadEnvironmentId);
   const outputConnectionPhase = outputEnvironment?.connection.phase;
-  const outputThreadStatus = useThreadStatus(citationThreadRef);
   const outputSpeeds = useOutputSpeed(
-    `${listIdentityKey}:${outputConnectionPhase}:${outputThreadStatus}`,
-    outputConnectionPhase === "connected" && outputThreadStatus === "live"
-      ? observations
-      : EMPTY_OUTPUT_OBSERVATIONS,
+    `${listIdentityKey}:${outputConnectionPhase}:${threadLive}`,
+    outputConnectionPhase === "connected" && threadLive ? observations : EMPTY_OUTPUT_OBSERVATIONS,
   );
   // Run status/timestamps churn on every stream event; the shared row context
   // must not change with them or every timeline row re-renders per event.

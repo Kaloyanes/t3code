@@ -212,36 +212,35 @@ export function SidebarUsageCard() {
               {notice}
             </p>
           ))}
-          <div className="flex items-center gap-2">
-            <p role="status" className="flex-1 text-2xs text-warning-foreground">
-              {refreshFailure ? "Could not refresh all usage limits." : null}
-            </p>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              aria-label="Refresh usage limits"
-              disabled={refreshing}
-              onClick={() => void refresh(false)}
-            >
-              <RefreshCwIcon className={cn("size-3", refreshing && "animate-spin")} />
-            </Button>
-          </div>
         </div>
       </CollapsiblePanel>
-      <CollapsibleSectionHeader
-        expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}
-        accessory={
-          <span className="shrink-0 tabular-nums text-sidebar-muted-foreground">
-            {percentLabel}
-          </span>
-        }
-      >
-        Usage
-      </CollapsibleSectionHeader>
-      {!expanded && refreshFailure ? (
+      <div className="mx-0.5 flex items-center gap-1">
+        <div className="min-w-0 flex-1">
+          <CollapsibleSectionHeader
+            expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+            accessory={
+              <span className="shrink-0 tabular-nums text-sidebar-muted-foreground">
+                {percentLabel}
+              </span>
+            }
+          >
+            Usage
+          </CollapsibleSectionHeader>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label="Refresh usage limits"
+          disabled={refreshing}
+          onClick={() => void refresh(false)}
+        >
+          <RefreshCwIcon className={cn("size-3", refreshing && "animate-spin")} />
+        </Button>
+      </div>
+      {refreshFailure ? (
         <p role="status" className="px-2 pb-1 text-2xs text-warning-foreground">
-          Could not refresh usage limits.
+          Could not refresh all usage limits.
         </p>
       ) : null}
     </Collapsible>

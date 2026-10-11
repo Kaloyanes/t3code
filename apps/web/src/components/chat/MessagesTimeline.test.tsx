@@ -256,6 +256,9 @@ function stubDomGlobals() {
       classList,
       offsetHeight: 0,
     },
+    hidden: false,
+    addEventListener: () => {},
+    removeEventListener: () => {},
   });
 }
 

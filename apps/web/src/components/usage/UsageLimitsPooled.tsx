@@ -6,6 +6,7 @@ import {
   collectLimitPools,
   cursorUsageWindowDetails,
   displayLimitWindows,
+  elapsedShare,
   formatResetsIn,
   type LimitAccount,
   type LimitPool,
@@ -157,6 +158,7 @@ function SegmentPopover({
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
   const remaining = remainingPercent(window);
   const resetsIn = formatResetsIn(window, now);
+  const elapsed = elapsedShare(window, now);
   const where =
     account.environments.length > 0
       ? account.environments.map((environment) => environment.label).join(", ")
@@ -190,6 +192,9 @@ function SegmentPopover({
       </div>
       <div className="flex flex-col gap-1 border-t border-border/60 pt-2.5">
         <Row label="Left">{remaining}%</Row>
+        {elapsed !== null ? (
+          <Row label="Even pace">{Math.round((1 - elapsed) * 100)}% left (the line)</Row>
+        ) : null}
         {window.resetsAt ? (
           <Row label="Resets">
             {formatUpcomingTimestamp(window.resetsAt, timestampFormat, now)}
@@ -251,6 +256,9 @@ function PoolSegment({
   const barColor = usageLimitBarColor(color, remaining);
   const resetsIn = formatResetsIn(window, now);
   const credits = account.limits.resetCredits?.availableCount ?? 0;
+  const elapsed = elapsedShare(window, now);
+  // The fill is quota left, so the even-spending mark sits at the share of time left.
+  const timeLeft = elapsed === null ? null : Math.round((1 - elapsed) * 100);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -282,6 +290,14 @@ function PoolSegment({
               width: `${100 - remaining}%`,
               backgroundImage: `repeating-linear-gradient(135deg, ${barColor} 0 1px, transparent 1px 5px)`,
             }}
+          />
+        ) : null}
+        {/* Above the countdown plate: early in a window the mark sits at the right edge. */}
+        {timeLeft !== null ? (
+          <span
+            aria-hidden
+            className="absolute inset-y-0 z-10 w-0.5 -translate-x-1/2 bg-foreground/50"
+            style={{ left: `${timeLeft}%` }}
           />
         ) : null}
         {labelled ? null : (

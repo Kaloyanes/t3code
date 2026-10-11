@@ -11752,6 +11752,7 @@ export default function ChatView(props: ChatViewProps) {
                     }
                   : {})}
                 isWorking={!paintOnlyDisplayedTimeline && isWorking}
+                threadLive={!paintOnlyDisplayedTimeline && threadStatus === "live"}
                 runlessWorkActive={runlessWorkStartedAt !== null}
                 activeTurnInProgress={
                   !paintOnlyDisplayedTimeline && (isWorking || !latestRunSettled)
