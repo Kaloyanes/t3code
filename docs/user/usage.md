@@ -92,10 +92,10 @@ Claude resets are not available when the server runs on macOS, where Claude keep
 Keychain. On narrow screens, numbered rows below
 the bar show each account's quota, countdown, and credits. Tap a row to open its details.
 
-On web and desktop, the sidebar **Usage remaining** card shows these pools across connected
-environments. Collapse it to see the current composer account's remaining percentage. Choose the
-lowest percentage or shortest window in **Settings → General → Usage monitor**. Open **Usage**
-from the card for account details and reset actions.
+On web and desktop, the **Usage** section at the bottom of the sidebar shows the current composer
+account's remaining percentage. Expand it to see these pools across connected environments. Choose
+the lowest percentage or shortest window in **Settings → General → Usage monitor**. Open the Usage
+page for account details and reset actions.
 
 The same account signed in on more than one environment, or reported by a hub as well, counts once.
 Filter with the environment dropdown to see what a single machine has.

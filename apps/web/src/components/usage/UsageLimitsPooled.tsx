@@ -233,6 +233,7 @@ function PoolSegment({
   now,
   index,
   showAccountName,
+  labelled,
 }: {
   readonly account: LimitAccount;
   readonly window: LimitPoolMember["window"];
@@ -242,6 +243,8 @@ function PoolSegment({
   /** 1-based position in the bar, shown on the strip and its legend row to tie them together. */
   readonly index: number;
   readonly showAccountName: boolean;
+  /** Always carry the label in the segment, with no legend row, whatever the container width. */
+  readonly labelled: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const remaining = remainingPercent(window);
@@ -257,7 +260,10 @@ function PoolSegment({
             type="button"
             style={{ gridColumn: index, gridRow: 1 }}
             aria-label={`${account.displayName ?? (account.email ? accountInitials(account.email) : account.driver)}: ${remaining}% left${resetsIn ? `, ${resetsIn}` : ""}${credits ? `, ${credits} reset ${credits === 1 ? "credit" : "credits"} banked` : ""}`}
-            className="relative h-5 min-w-0 cursor-pointer overflow-hidden rounded-md bg-muted text-start outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[popup-open]:ring-1 data-[popup-open]:ring-inset data-[popup-open]:ring-border @2xl/pool:h-8"
+            className={cn(
+              "relative min-w-0 cursor-pointer overflow-hidden rounded-md bg-muted text-start outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[popup-open]:ring-1 data-[popup-open]:ring-inset data-[popup-open]:ring-border",
+              labelled ? "h-7" : "h-5 @2xl/pool:h-8",
+            )}
           />
         }
       >
@@ -278,13 +284,20 @@ function PoolSegment({
             }}
           />
         ) : null}
-        <span
-          aria-hidden
-          className="absolute inset-0 flex items-center justify-center text-3xs leading-none font-semibold text-foreground/80 tabular-nums @2xl/pool:hidden"
+        {labelled ? null : (
+          <span
+            aria-hidden
+            className="absolute inset-0 flex items-center justify-center text-3xs leading-none font-semibold text-foreground/80 tabular-nums @2xl/pool:hidden"
+          >
+            {index}
+          </span>
+        )}
+        <div
+          className={cn(
+            "relative h-full min-w-0 items-center gap-1.5 px-2 text-xs",
+            labelled ? "flex" : "hidden @2xl/pool:flex",
+          )}
         >
-          {index}
-        </span>
-        <div className="relative hidden h-full min-w-0 items-center gap-1.5 px-2 text-xs @2xl/pool:flex">
           {showAccountName ? (
             <AccountName
               account={account}
@@ -311,7 +324,9 @@ function PoolSegment({
           </span>
         </div>
       </PopoverTrigger>
-      <LegendRow account={account} window={window} color={barColor} now={now} index={index} />
+      {labelled ? null : (
+        <LegendRow account={account} window={window} color={barColor} now={now} index={index} />
+      )}
       {account.redeem ? (
         <RedeemableSegmentPopup
           account={account}
@@ -454,14 +469,17 @@ function RedeemableSegmentPopup({
  * and a legend below lists the accounts in the same order; both open the
  * same popover.
  */
-function PoolBar({
+export function PoolBar({
   pool,
   color,
   now,
+  compact = false,
 }: {
   readonly pool: LimitPoolWindow;
   readonly color: string;
   readonly now: number;
+  /** Narrow surfaces such as the sidebar: a lone account keeps its label inside the bar. */
+  readonly compact?: boolean;
 }) {
   const restores = new Map(pool.resets.map((reset) => [reset.member.account.key, reset]));
   return (
@@ -481,6 +499,7 @@ function PoolBar({
               now={now}
               index={position + 1}
               showAccountName={pool.columns.length > 1}
+              labelled={compact && pool.columns.length === 1}
             />
           ) : null,
         )}

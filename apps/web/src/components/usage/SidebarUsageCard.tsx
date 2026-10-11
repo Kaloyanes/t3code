@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { Link, useParams } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { refreshUsageLimits } from "@t3tools/client-runtime/state/usage";
@@ -8,11 +8,10 @@ import {
   collectLimitNotices,
   collectLimitPools,
   displayLimitWindows,
-  formatResetsIn,
 } from "@t3tools/shared/usageLimits";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as Schema from "effect/Schema";
-import { ChevronDownIcon, ChevronRightIcon, RefreshCwIcon } from "lucide-react";
+import { RefreshCwIcon } from "lucide-react";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
@@ -29,9 +28,12 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { resolveThreadRouteTarget } from "../../threadRoutes";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { providerClients } from "../settings/providerDriverMeta";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Button } from "../ui/button";
-import { barColor, UsageWindowBar } from "./UsageLimits";
+import { Collapsible, CollapsiblePanel } from "../ui/collapsible";
+import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
+import { cn } from "../../lib/utils";
+import { barColor } from "./UsageLimits";
+import { PoolBar } from "./UsageLimitsPooled";
 import {
   activeAccountRemaining,
   sidebarComposerProvider,
@@ -88,7 +90,7 @@ export function SidebarUsageCard() {
   const accounts = useMemo(() => collectLimitAccounts(connected), [connected]);
   const [expanded, setExpanded] = useLocalStorage(
     "t3code:sidebar-usage-expanded",
-    true,
+    false,
     Schema.Boolean,
   );
   const [now, setNow] = useState(Date.now);
@@ -157,44 +159,11 @@ export function SidebarUsageCard() {
     lastConnectionKey.current = connectionKey;
   }, [connectionKey, expanded]);
 
+  const percentLabel = remaining === null ? "Unknown" : `${remaining}%`;
   return (
-    <section className="mx-2 my-3 rounded-lg border border-sidebar-border px-2.5 py-2 text-sidebar-foreground">
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((value) => !value)}
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          {expanded ? (
-            <ChevronDownIcon className="size-3.5" />
-          ) : (
-            <ChevronRightIcon className="size-3.5" />
-          )}
-          <span className="flex-1">Usage remaining</span>
-          {!expanded ? (
-            <span className="tabular-nums text-muted-foreground">
-              {remaining === null ? "Unknown" : `${remaining}%`}
-            </span>
-          ) : null}
-        </button>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Refresh usage limits"
-          disabled={refreshing}
-          onClick={() => void refresh(false)}
-        >
-          <RefreshCwIcon className="size-3" />
-        </Button>
-      </div>
-      {!expanded && refreshFailure ? (
-        <p role="status" className="mt-1 text-2xs text-warning-foreground">
-          Could not refresh usage limits.
-        </p>
-      ) : null}
-      {expanded ? (
-        <div className="mt-2 space-y-3">
+    <Collapsible open={expanded} className="flex flex-col">
+      <CollapsiblePanel>
+        <div className="max-h-[45vh] space-y-3 overflow-y-auto px-2 pt-1 pb-2">
           {pools.length === 0 ? (
             <p className="text-2xs text-muted-foreground">
               No connected provider reports subscription limits.
@@ -207,59 +176,25 @@ export function SidebarUsageCard() {
                 </h3>
                 <div className="mt-1 space-y-2">
                   {displayLimitWindows(pool).map((window) => {
-                    const nextReset = window.resets[0];
+                    // The bar already shows a lone account's countdown; pooled bars need the refill.
+                    const nextRefill =
+                      window.columns.length > 1
+                        ? window.resets.find((reset) => reset.restoresPercent > 0)
+                        : undefined;
                     return (
-                      <div key={window.id}>
+                      <div key={window.id} className="space-y-1">
                         <div className="flex justify-between gap-2 text-2xs text-muted-foreground">
                           <span>{window.label}</span>
-                          <span className="tabular-nums">{window.remainingPercent}%</span>
+                          {window.columns.length > 1 ? (
+                            <span className="tabular-nums">{window.remainingPercent}% left</span>
+                          ) : null}
                         </div>
-                        <div
-                          className="grid gap-1"
-                          style={{
-                            gridTemplateColumns: `repeat(${window.columns.length}, minmax(0, 1fr))`,
-                          }}
-                        >
-                          {window.columns.map((column, index) => (
-                            <div key={column.account.key} className="min-w-0">
-                              {pool.accounts.length > 1 ? (
-                                <Tooltip>
-                                  <TooltipTrigger
-                                    render={
-                                      <div
-                                        className="truncate text-3xs text-muted-foreground"
-                                        tabIndex={0}
-                                      />
-                                    }
-                                  >
-                                    {column.account.displayName ?? `Account ${index + 1}`}
-                                  </TooltipTrigger>
-                                  <TooltipPopup side="top">
-                                    {column.account.displayName ?? `Account ${index + 1}`} ·{" "}
-                                    {column.account.environments
-                                      .map((environment) => environment.label)
-                                      .join(", ") || column.account.sourceLabel}
-                                  </TooltipPopup>
-                                </Tooltip>
-                              ) : null}
-                              {column.window ? (
-                                <UsageWindowBar
-                                  color={barColor(pool.driver)}
-                                  window={column.window}
-                                  now={now}
-                                />
-                              ) : (
-                                <div className="h-6" aria-label="Window not reported" />
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                        {nextReset ? (
-                          <p className="text-3xs text-muted-foreground">
-                            {formatResetsIn(nextReset.member.window, now)} · +
-                            {Math.round(nextReset.restoresPercent)}%{" "}
+                        <PoolBar pool={window} color={barColor(pool.driver)} now={now} compact />
+                        {nextRefill ? (
+                          <p className="text-3xs text-muted-foreground tabular-nums">
+                            ↻ +{Math.round(nextRefill.restoresPercent)}%{" "}
                             {formatUpcomingTimestamp(
-                              new Date(nextReset.at).toISOString(),
+                              new Date(nextRefill.at).toISOString(),
                               timestampFormat,
                               now,
                             )}
@@ -272,24 +207,43 @@ export function SidebarUsageCard() {
               </section>
             ))
           )}
-          {refreshFailure ? (
-            <p role="status" className="text-2xs text-warning-foreground">
-              Could not refresh all usage limits.
-            </p>
-          ) : null}
           {notices.map((notice) => (
             <p key={notice} className="break-words text-2xs text-warning-foreground">
               {notice}
             </p>
           ))}
+          <div className="flex items-center gap-2">
+            <p role="status" className="flex-1 text-2xs text-warning-foreground">
+              {refreshFailure ? "Could not refresh all usage limits." : null}
+            </p>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Refresh usage limits"
+              disabled={refreshing}
+              onClick={() => void refresh(false)}
+            >
+              <RefreshCwIcon className={cn("size-3", refreshing && "animate-spin")} />
+            </Button>
+          </div>
         </div>
-      ) : null}
-      <Link
-        to="/usage"
-        className="mt-2 block rounded text-2xs text-muted-foreground hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      </CollapsiblePanel>
+      <CollapsibleSectionHeader
+        expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+        accessory={
+          <span className="shrink-0 tabular-nums text-sidebar-muted-foreground">
+            {percentLabel}
+          </span>
+        }
       >
-        Open Usage
-      </Link>
-    </section>
+        Usage
+      </CollapsibleSectionHeader>
+      {!expanded && refreshFailure ? (
+        <p role="status" className="px-2 pb-1 text-2xs text-warning-foreground">
+          Could not refresh usage limits.
+        </p>
+      ) : null}
+    </Collapsible>
   );
 }
