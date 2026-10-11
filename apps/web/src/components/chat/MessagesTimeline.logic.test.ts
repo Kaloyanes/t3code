@@ -44,6 +44,7 @@ import {
   workEntryDisplayLabel,
   workEntryReadOutput,
   workEntryIsVisibleInGroup,
+  createTimelineRowEntrance,
 } from "./MessagesTimeline.logic";
 import type { WorkLogEntry } from "../../session-logic";
 
@@ -5353,5 +5354,38 @@ describe("shouldCollapseUserMessage", () => {
 
     expect(text.length).toBeGreaterThan(600);
     expect(shouldCollapseUserMessage(text)).toBe(false);
+  });
+});
+
+describe("createTimelineRowEntrance", () => {
+  const rows = (...ids: string[]) => ids.map((id) => ({ id }));
+
+  it("does not animate rows present when a list first renders", () => {
+    const entrance = createTimelineRowEntrance();
+    entrance.update("thread-a", rows("a", "b"));
+    expect(entrance.shouldEnter("a")).toBe(false);
+    expect(entrance.shouldEnter("b")).toBe(false);
+  });
+
+  it("animates a live row once", () => {
+    const entrance = createTimelineRowEntrance();
+    entrance.update("thread-a", rows("a"));
+    entrance.update("thread-a", rows("a", "b"));
+    expect(entrance.shouldEnter("b")).toBe(true);
+    entrance.markEntered("b");
+    entrance.update("thread-a", rows("a", "b", "c"));
+    expect(entrance.shouldEnter("b")).toBe(false);
+    expect(entrance.shouldEnter("c")).toBe(true);
+  });
+
+  it("does not animate bulk loads or rows from a newly opened thread", () => {
+    const entrance = createTimelineRowEntrance();
+    entrance.update("thread-a", rows());
+    entrance.update("thread-a", rows("a", "b", "c", "d"));
+    expect(entrance.shouldEnter("a")).toBe(false);
+    entrance.update("thread-b", rows("x"));
+    entrance.update("thread-b", rows("x", "y"));
+    expect(entrance.shouldEnter("x")).toBe(false);
+    expect(entrance.shouldEnter("y")).toBe(true);
   });
 });

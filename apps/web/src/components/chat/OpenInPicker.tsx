@@ -1,5 +1,5 @@
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
-import { AnimatedIcon } from "../ui/changing-state";
+import { AnimatedIcon, AnimatedText } from "../ui/changing-state";
 import {
   AuthOrchestrationOperateScope,
   buildRemoteOpenUrl,
@@ -428,7 +428,7 @@ export const OpenInPicker = memo(function OpenInPicker({
             isPanel && cn("not-sr-only ml-0 min-w-0 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS),
           )}
         >
-          {primaryLabel}
+          <AnimatedText value={primaryLabel} />
         </span>
       </ThreadDetailsControl>
       {isPanel ? (

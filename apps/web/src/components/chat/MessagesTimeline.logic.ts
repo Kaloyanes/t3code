@@ -648,6 +648,45 @@ type MessagesTimelineRowContent =
       mcpApp: McpAppReference;
     };
 
+/** More rows than this in one update is a history load or page, not live arrival. */
+const TIMELINE_ROW_ENTRANCE_MAX_BATCH = 3;
+
+/**
+ * Tracks which timeline rows arrived live so each animates in once. Rows present when a
+ * list identity first renders, and rows from bulk loads, never animate. `update` is
+ * idempotent per rows array, so it is safe to call during render.
+ */
+export function createTimelineRowEntrance() {
+  let identity: string | null = null;
+  let lastRows: ReadonlyArray<{ readonly id: string }> | null = null;
+  let known = new Set<string>();
+  let pending = new Set<string>();
+  return {
+    update(listIdentity: string, rows: ReadonlyArray<{ readonly id: string }>) {
+      if (listIdentity === identity && rows === lastRows) return;
+      lastRows = rows;
+      if (listIdentity !== identity) {
+        identity = listIdentity;
+        known = new Set(rows.map((row) => row.id));
+        pending = new Set();
+        return;
+      }
+      const added = rows.filter((row) => !known.has(row.id));
+      for (const row of added) {
+        known.add(row.id);
+        if (added.length <= TIMELINE_ROW_ENTRANCE_MAX_BATCH) pending.add(row.id);
+      }
+    },
+    shouldEnter: (rowId: string) => pending.has(rowId),
+    /** Call after the entering row commits, so a later remount from scrolling stays still. */
+    markEntered: (rowId: string) => {
+      pending.delete(rowId);
+    },
+  };
+}
+
+export type TimelineRowEntrance = ReturnType<typeof createTimelineRowEntrance>;
+
 export interface StableMessagesTimelineRowsState {
   byId: Map<string, MessagesTimelineRow>;
   result: MessagesTimelineRow[];
