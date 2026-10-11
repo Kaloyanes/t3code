@@ -1,5 +1,7 @@
 import { InfoIcon } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { motion } from "motion/react";
+import { usePanelAnimationSettings } from "../../panelAnimations";
 
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -56,6 +58,11 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
   const pendingFocusRef = useRef<"peek" | "notice" | null>(null);
   const expandedItemsId = useId();
   const [requestedExitingItemId, setExitingItemId] = useState<string | null>(null);
+  const { active: animationsActive, durationMs } = usePanelAnimationSettings();
+  const transition = {
+    duration: animationsActive ? durationMs / 1000 : 0,
+    ease: "easeOut" as const,
+  };
   const dismissTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exitingItemId =
     requestedExitingItemId !== null && items.some((item) => item.id === requestedExitingItemId)
@@ -168,26 +175,29 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
               className={cn(stackExpanded && "pointer-events-none invisible opacity-0")}
             />
           ) : null}
-          <div
+          <motion.div
             id={expandedItemsId}
             ref={expandedItemsRef}
             role="group"
             aria-label="Other notices"
             tabIndex={-1}
             data-composer-banner-stack-expanded-items="true"
-            className={cn(
-              "grid transition-[grid-template-rows] duration-150 ease-out focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
-              stackExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-            )}
+            initial={false}
+            animate={{ gridTemplateRows: stackExpanded ? "1fr" : "0fr" }}
+            transition={transition}
+            inert={!stackExpanded}
+            aria-hidden={!stackExpanded}
+            className="grid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
           >
             <div className="min-h-0 overflow-hidden">
-              <div
-                className={cn(
-                  "transform-gpu space-y-2 pb-2 transition-[opacity,transform] duration-150 ease-out will-change-[opacity,transform]",
-                  stackExpanded
-                    ? "pointer-events-auto visible translate-y-0 opacity-100"
-                    : "pointer-events-none invisible translate-y-1 opacity-0",
-                )}
+              <motion.div
+                initial={false}
+                animate={{
+                  opacity: stackExpanded ? 1 : 0,
+                  y: stackExpanded || !animationsActive ? 0 : 4,
+                }}
+                transition={transition}
+                className="space-y-2 pb-2"
               >
                 {stackedItems.map((item) => (
                   <div
@@ -207,9 +217,9 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
                     />
                   </div>
                 ))}
-              </div>
+              </motion.div>
             </div>
-          </div>
+          </motion.div>
         </div>
       ) : null}
       {attachedAbove}

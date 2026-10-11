@@ -1,3 +1,4 @@
+import { AnimatedText } from "../ui/changing-state";
 import {
   isModifierPairShortcut,
   type DesktopCaptureConfigApplied,
@@ -320,7 +321,7 @@ export function CaptureShortcutConfig({
               if (state.shortcutBinding) copyToClipboard(state.shortcutBinding);
             }}
           >
-            {isCopied ? "Copied" : "Copy shortcut"}
+            <AnimatedText value={isCopied ? "Copied" : "Copy shortcut"} />
           </Button>
           <p>
             Turn capture off in T3 Code to stop it. Remove the shortcut from {desktop} to free up

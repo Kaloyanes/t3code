@@ -226,6 +226,8 @@ import {
   workEntryReadOutput,
   workEntryIsVisibleInGroup,
   worktreeSetupAgentStarted,
+  createTimelineRowEntrance,
+  type TimelineRowEntrance,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
   TIMELINE_MINIMAP_MIN_ITEMS,
@@ -315,6 +317,7 @@ import {
 
 interface TimelineRowSharedState {
   citationRequest: AssistantCitationTarget | null;
+  rowEntrance: TimelineRowEntrance;
   listRef: React.RefObject<LegendListRef | null>;
   timestampFormat: TimestampFormat;
   routeThreadKey: string;
@@ -959,6 +962,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     worktreeSetup,
   ]);
   const { rows, observations } = useStableRows(rawRows, listIdentityKey);
+  const [rowEntrance] = useState(createTimelineRowEntrance);
+  rowEntrance.update(listIdentityKey, rows);
   const { presentation: outputEnvironment } = useEnvironmentPresentation(activeThreadEnvironmentId);
   const outputConnectionPhase = outputEnvironment?.connection.phase;
   const outputSpeeds = useOutputSpeed(
@@ -1352,6 +1357,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
       citationRequest: readyCitationRequest,
+      rowEntrance,
       listRef,
       timestampFormat,
       routeThreadKey,
@@ -1391,6 +1397,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     }),
     [
       readyCitationRequest,
+      rowEntrance,
       listRef,
       timestampFormat,
       routeThreadKey,
@@ -2061,6 +2068,11 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
     row.kind === "work-live" ||
     row.kind === "work-toggle" ||
     row.kind === "thinking";
+  const { rowEntrance } = use(TimelineRowCtx);
+  const [entering] = useState(() => row.kind === "message" && rowEntrance.shouldEnter(row.id));
+  useEffect(() => {
+    if (entering) rowEntrance.markEntered(row.id);
+  }, [entering, rowEntrance, row.id]);
   const isExpandedToolGroupHeader =
     (row.kind === "work-toggle" || row.kind === "work-live" || row.kind === "thinking") &&
     row.expanded === true;
@@ -2088,6 +2100,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
           row.kind === "assistant-meta"
           ? "group/assistant"
           : null,
+        entering && "timeline-row-enter",
       )}
       data-timeline-row-id={row.id}
       data-timeline-row-kind={row.kind}

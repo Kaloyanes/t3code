@@ -57,6 +57,8 @@ import { cn } from "../lib/utils";
 import { applyAppearanceFontVariables } from "~/appearanceFonts";
 import { applyAppearanceContrast } from "~/appearanceContrast";
 import { useClientSettings } from "../hooks/useSettings";
+import { useMediaQuery } from "../hooks/useMediaQuery";
+import { publishUiAnimationSettings, uiAnimationsActive } from "../uiAnimations";
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKeyFromPath,
@@ -224,6 +226,7 @@ function RootRouteView() {
         <FontAppearanceSync />
         <ProviderAuthCallbackCoordinator />
         <ChatGptWelcomeCoordinator />
+        <UiAnimationSync />
         <FirstRunGate
           enabled={primaryEnvironmentAuthenticated}
           hostedStatic={authGateState.status === "hosted-static"}
@@ -287,6 +290,25 @@ function ContrastAppearanceSync() {
   useEffect(() => {
     applyAppearanceContrast(document.documentElement, appearanceContrast);
   }, [appearanceContrast]);
+
+  return null;
+}
+
+function UiAnimationSync() {
+  const durationMs = useClientSettings((settings) => settings.uiAnimationDurationMs);
+  const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const active = uiAnimationsActive(durationMs, prefersReducedMotion);
+
+  useEffect(() => {
+    publishUiAnimationSettings({ active, durationMs });
+    const root = document.documentElement;
+    root.style.setProperty("--ui-animation-duration", `${active ? durationMs : 0}ms`);
+    root.dataset.uiAnimations = active ? "on" : "off";
+    return () => {
+      root.style.removeProperty("--ui-animation-duration");
+      delete root.dataset.uiAnimations;
+    };
+  }, [active, durationMs]);
 
   return null;
 }

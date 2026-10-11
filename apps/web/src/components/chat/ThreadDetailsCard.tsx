@@ -12,6 +12,7 @@ import {
   resolveThreadDetailsCardLayout,
 } from "./threadDetailsCardLayout";
 import { observeResize } from "../../lib/observeResize";
+import { usePanelNavigationSuppression } from "../../panelAnimations";
 
 /** One card owns its placement and folds content only when that content cannot fit. */
 export function ThreadDetailsCard({
@@ -52,6 +53,10 @@ export function ThreadDetailsCard({
   );
   const popoverOpen = useRightPanelStore((state) =>
     selectThreadPanelOpen(state.threadPanelVisibilityByThreadKey, threadRef, "popover"),
+  );
+  // A thread restored with its card open shows it at once; opening it later animates.
+  const enterSuppressed = usePanelNavigationSuppression(
+    `${threadRef.environmentId}:${threadRef.threadId}`,
   );
   const [contentElement, setContentElement] = useState<HTMLDivElement | null>(null);
   const measurementKey = `${threadRef.environmentId}:${threadRef.threadId}:${preferredPlacement?.width ?? "popup"}`;
@@ -164,6 +169,7 @@ export function ThreadDetailsCard({
             // otherwise overlap the card mid-slide.
             className={cn(
               "absolute z-20",
+              !enterSuppressed && "thread-details-card-enter",
               topInset > 0 &&
                 "transition-[top] duration-150 ease-out motion-reduce:transition-none",
             )}

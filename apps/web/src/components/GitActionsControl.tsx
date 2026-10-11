@@ -1,4 +1,5 @@
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
+import { AnimatedNumber, AnimatedText, AnimatedIcon } from "./ui/changing-state";
 import { useAtomValue } from "@effect/atom-react";
 import {
   AuthOrchestrationOperateScope,
@@ -320,18 +321,30 @@ function GitQuickActionIcon({
   className?: string;
   SourceControlIcon: ReturnType<typeof getSourceControlPresentation>["Icon"];
 }) {
-  if (quickAction.kind === "open_publish") return <CloudUploadIcon className={className} />;
-  if (quickAction.kind === "run_pull") return <CloudDownloadIcon className={className} />;
-  if (quickAction.kind === "run_action") {
-    if (quickAction.action === "commit") return <GitCommitIcon className={className} />;
-    if (quickAction.action === "push" || quickAction.action === "commit_push") {
-      return <CloudUploadIcon className={className} />;
+  const iconKind = (() => {
+    if (quickAction.kind === "open_publish") return "upload";
+    if (quickAction.kind === "run_pull") return "download";
+    if (quickAction.kind === "run_action") {
+      if (quickAction.action === "commit") return "commit";
+      if (quickAction.action === "push" || quickAction.action === "commit_push") return "upload";
+      return "source";
     }
-    return <SourceControlIcon className={className} />;
-  }
-  if (quickAction.label === "Commit") return <GitCommitIcon className={className} />;
-  if (quickAction.label === "Push") return <CloudUploadIcon className={className} />;
-  return <InfoIcon className={className} />;
+    if (quickAction.label === "Commit") return "commit";
+    if (quickAction.label === "Push") return "upload";
+    return "info";
+  })();
+  const Icon = {
+    source: SourceControlIcon,
+    upload: CloudUploadIcon,
+    download: CloudDownloadIcon,
+    commit: GitCommitIcon,
+    info: InfoIcon,
+  }[iconKind];
+  return (
+    <AnimatedIcon stateKey={iconKind} className={className}>
+      <Icon className={className} />
+    </AnimatedIcon>
+  );
 }
 
 function GitActionElapsedTime({
@@ -1708,7 +1721,7 @@ export default function GitActionsControl({
           >
             <GitBranchPlusIcon className="size-4" />
             <MenuItemLabel>
-              {initAction.isPending ? "Initializing..." : "Initialize Git"}
+              <AnimatedText value={initAction.isPending ? "Initializing..." : "Initialize Git"} />
             </MenuItemLabel>
           </MenuItem>
         ) : (
@@ -1724,7 +1737,9 @@ export default function GitActionsControl({
                 quickAction={quickAction}
                 SourceControlIcon={SourceControlIcon}
               />
-              <MenuItemLabel>{quickAction.label}</MenuItemLabel>
+              <MenuItemLabel>
+                <AnimatedText value={quickAction.label} />
+              </MenuItemLabel>
             </MenuItem>
             {quickActionDisabledReason && (
               <p className="max-w-64 px-2 py-1.5 text-xs text-warning">
@@ -1755,7 +1770,7 @@ export default function GitActionsControl({
         >
           <GitBranchPlusIcon className="size-3.5" aria-hidden />
           <span className={cn("ml-0.5", isPanel && THREAD_DETAILS_PANEL_LABEL_CLASS)}>
-            {initAction.isPending ? "Initializing..." : "Initialize Git"}
+            <AnimatedText value={initAction.isPending ? "Initializing..." : "Initialize Git"} />
           </span>
         </ThreadDetailsControl>
       ) : compact && !gitActionProgress && !visibleInlineSuccess ? null : (
@@ -1815,7 +1830,7 @@ export default function GitActionsControl({
                     isPanel && cn("not-sr-only ml-0 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS),
                   )}
                 >
-                  {quickAction.label}
+                  <AnimatedText value={quickAction.label} />
                 </span>
               </PopoverTrigger>
               <PopoverPopup tooltipStyle side="bottom" align="start">
@@ -1842,7 +1857,7 @@ export default function GitActionsControl({
                   isPanel && cn("not-sr-only ml-0 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS),
                 )}
               >
-                {quickAction.label}
+                <AnimatedText value={quickAction.label} />
               </span>
             </ThreadDetailsControl>
           )}
@@ -1911,9 +1926,11 @@ export default function GitActionsControl({
           <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
           <span className={cn("flex-1 text-left", THREAD_DETAILS_PANEL_LABEL_CLASS)}>Changes</span>
           <span className="flex items-center gap-1 font-mono text-2xs tabular-nums">
-            <span className="text-success">+{formatDiffCount(changesTotals?.insertions ?? 0)}</span>
+            <span className="text-success">
+              +<AnimatedNumber value={changesTotals?.insertions ?? 0} />
+            </span>
             <span className="text-destructive">
-              -{formatDiffCount(changesTotals?.deletions ?? 0)}
+              -<AnimatedNumber value={changesTotals?.deletions ?? 0} />
             </span>
           </span>
         </ThreadDetailsControl>

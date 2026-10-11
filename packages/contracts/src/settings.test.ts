@@ -677,6 +677,22 @@ describe("ClientSettings panel animations", () => {
   });
 });
 
+describe("ClientSettings UI animations", () => {
+  it("defaults to 150 ms", () => {
+    expect(decodeClientSettings({}).uiAnimationDurationMs).toBe(150);
+  });
+
+  it.each([0, 400])("accepts a UI animation duration: %s", (value) => {
+    expect(decodeClientSettingsPatch({ uiAnimationDurationMs: value })).toEqual({
+      uiAnimationDurationMs: value,
+    });
+  });
+
+  it.each([-1, 401, 150.5])("rejects an invalid UI animation duration: %s", (value) => {
+    expect(() => decodeClientSettingsPatch({ uiAnimationDurationMs: value })).toThrow();
+  });
+});
+
 describe("ClientSettings environment identification", () => {
   it("defaults to artwork and accepts each presentation mode", () => {
     expect(decodeClientSettings({}).environmentIdentificationMode).toBe("artwork");
