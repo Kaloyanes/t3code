@@ -71,6 +71,8 @@ export function reviewCommentContextLabel(comment: ReviewCommentPresentation): s
   if (isPullRequestSummaryContext(comment) && pullRequestNumber !== null) {
     return `#${pullRequestNumber}`;
   }
+  const issueNumber = issueContextNumber(comment);
+  if (issueNumber !== null) return `#${issueNumber}`;
   const diffRange = /^([+-])(\d+)(?: to \1(\d+))?$/u.exec(comment.rangeLabel);
   const rangeLabel = diffRange
     ? `L${diffRange[2]}${diffRange[3] ? ` to L${diffRange[3]}` : ""}${diffRange[1] === "-" ? " (before)" : ""}`
@@ -91,6 +93,12 @@ function pullRequestContextNumber(comment: ReviewCommentPresentation): number | 
   if (comment.pullRequest !== undefined) return comment.pullRequest.number;
   const legacyNumber = /^PR #(\d+)$/u.exec(comment.filePath)?.[1];
   return legacyNumber === undefined ? null : Number(legacyNumber);
+}
+
+/** The issue number of a reference picked from the composer's `#` menu, or null. */
+export function issueContextNumber(comment: ReviewCommentPresentation): number | null {
+  const match = /^issue:(\d+)$/u.exec(comment.sectionId);
+  return match === null || comment.diff.trim().length > 0 ? null : Number(match[1]);
 }
 
 export type PullRequestContextDisplayState = "open" | "draft" | "merged" | "closed";

@@ -55,8 +55,27 @@ export function estimateOutput(sampler: OutputSampler, now: number): OutputSpeed
     return { kind: "unavailable" };
   return {
     kind: "estimate",
-    tokensPerSecond: Math.round(
-      (last.textLength - first.textLength) / 4 / ((last.at - first.at) / 1000),
-    ),
+    tokensPerSecond: (last.textLength - first.textLength) / 4 / ((last.at - first.at) / 1000),
   };
+}
+
+const FINISHED_MIN_DURATION_MS = 1500;
+
+/**
+ * Uses the saved message timestamps, which can cover the whole turn for imported history.
+ * Replies delivered in one piece have no streaming window to measure.
+ */
+export function estimateFinishedOutput(message: {
+  readonly text: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}): number | null {
+  const durationMs = Date.parse(message.updatedAt) - Date.parse(message.createdAt);
+  if (!Number.isFinite(durationMs) || durationMs < FINISHED_MIN_DURATION_MS) return null;
+  const tokensPerSecond = message.text.length / 4 / (durationMs / 1000);
+  return tokensPerSecond > 0 ? tokensPerSecond : null;
+}
+
+export function formatOutputSpeed(tokensPerSecond: number): string {
+  return tokensPerSecond < 1 ? "<1" : String(Math.round(tokensPerSecond));
 }

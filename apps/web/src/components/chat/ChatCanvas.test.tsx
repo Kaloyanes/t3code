@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import { ChatCanvas } from "./ChatCanvas";
 import { useChatCanvas } from "./ChatCanvasContext";
+import { publishUiAnimationSettings } from "../../uiAnimations";
 
 const resize = vi.hoisted(() => ({ callbacks: new Set<() => void>() }));
 vi.mock("../../lib/observeResize", () => ({
@@ -71,6 +72,7 @@ afterEach(async () => {
   await act(() => root.unmount());
   container.remove();
   resize.callbacks.clear();
+  publishUiAnimationSettings({ active: false, durationMs: 0 });
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -116,4 +118,69 @@ it("remeasures the open bar when its font size changes without resizing the canv
   });
   expect(canvas?.detailsCardTopInset).toBe(72);
   expect(canvas?.layout.frame?.y).toBe(84);
+});
+
+async function renderAnimatedLane() {
+  const frames: FrameRequestCallback[] = [];
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => frames.push(callback));
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+  publishUiAnimationSettings({ active: true, durationMs: 150 });
+  await act(() =>
+    root.render(
+      <ChatCanvas composerOverlayElement={null} navigationKey="thread-one">
+        <div data-chat-composer-stack="true" />
+        <Preview x={1548} />
+      </ChatCanvas>,
+    ),
+  );
+  await act(() => {
+    for (const frame of frames.splice(0)) frame(0);
+  });
+  await act(() => {
+    for (const frame of frames.splice(0)) frame(16);
+  });
+  const element = container.querySelector<HTMLElement>("[data-chat-composer-stack]");
+  if (!element) throw new Error("Composer did not mount");
+  const cancel = vi.fn();
+  const animate = vi.fn(() => ({ finished: new Promise<void>(() => {}), cancel }));
+  Object.defineProperty(element, "animate", { value: animate });
+  return { element, animate, cancel };
+}
+
+it("keeps the composer at its previous position when details move the chat lane", async () => {
+  const { animate } = await renderAnimatedLane();
+  await act(() => canvas?.reportDetailsCard({ left: 1200, right: 1480, bottom: 300 }));
+  expect(canvas?.layout.chat.left).toBe(432);
+  expect(animate).toHaveBeenCalledWith(
+    [{ transform: "translateX(100px)" }, { transform: "translateX(0px)" }],
+    expect.objectContaining({ duration: 150 }),
+  );
+});
+
+it("reverses from the current visual position when details close mid-animation", async () => {
+  const { element, animate, cancel } = await renderAnimatedLane();
+  await act(() => canvas?.reportDetailsCard({ left: 1200, right: 1480, bottom: 300 }));
+  const probeStyles = document.createElement("div").style;
+  probeStyles.paddingLeft = "48px";
+  probeStyles.width = "736px";
+  probeStyles.minWidth = "640px";
+  element.style.transform = "matrix(1, 0, 0, 1, 45, 0)";
+  vi.mocked(window.getComputedStyle).mockImplementation((subject) =>
+    subject === element ? element.style : probeStyles,
+  );
+  vi.stubGlobal(
+    "DOMMatrixReadOnly",
+    class {
+      readonly m41: number;
+      constructor(transform: string) {
+        this.m41 = Number(transform.slice(7, -1).split(",")[4]);
+      }
+    },
+  );
+  await act(() => canvas?.reportDetailsCard(null));
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(animate).toHaveBeenLastCalledWith(
+    [{ transform: "translateX(-55px)" }, { transform: "translateX(0px)" }],
+    expect.objectContaining({ duration: 150 }),
+  );
 });

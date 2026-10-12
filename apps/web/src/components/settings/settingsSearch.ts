@@ -285,6 +285,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["wide full width column layout messages composer monitor"],
   },
   {
+    id: "output-speed",
+    title: "Output speed",
+    to: "/settings/appearance",
+    searchTerms: ["tokens per second tok/s streaming response speed completed reply average"],
+  },
+  {
     id: "panel-animations",
     title: "Panel animations",
     to: "/settings/appearance",

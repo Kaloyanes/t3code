@@ -3,7 +3,7 @@ import { ReadOnlySourcePreview } from "./files/AttachmentFilePreview";
 import type { PreviewAnnotationPayload, ThreadContextRecord } from "@t3tools/contracts";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import { videoMimeType } from "@t3tools/shared/video";
-import { MessageCircleIcon, MousePointerClickIcon } from "lucide-react";
+import { CircleDotIcon, MessageCircleIcon, MousePointerClickIcon } from "lucide-react";
 import { createContext, type MouseEvent, type ReactElement, type ReactNode, use } from "react";
 import type { EnvironmentId } from "@t3tools/contracts";
 
@@ -19,6 +19,7 @@ import {
   fileContextReference,
   imageContextReference,
   isPullRequestSummaryContext,
+  issueContextNumber,
   pullRequestContextDisplayState,
   pullRequestContextKindLabel,
   previewAnnotationContextId,
@@ -400,14 +401,35 @@ const composerContextPresentationRegistry = createContextPresentationRegistry<
             />
           );
         }
+        const isIssue = !isPullRequest && issueContextNumber(entry.record) !== null;
         return (
           <ContextChip
-            icon={isPullRequest ? <PullRequestGlyph.pullRequest /> : <MessageCircleIcon />}
+            icon={
+              isPullRequest ? (
+                <PullRequestGlyph.pullRequest />
+              ) : isIssue ? (
+                <CircleDotIcon />
+              ) : (
+                <MessageCircleIcon />
+              )
+            }
             label={reviewCommentContextLabel(entry.record)}
-            kindLabel={isPullRequest ? pullRequestContextKindLabel(entry.record) : "Review comment"}
+            kindLabel={
+              isPullRequest
+                ? pullRequestContextKindLabel(entry.record)
+                : isIssue
+                  ? "Issue"
+                  : "Review comment"
+            }
             details={<ComposerReviewCommentDetails comment={entry.record} />}
             detailsMode={definition.capabilities.details}
-            kind={isPullRequest ? PULL_REQUEST_CHIP_KINDS[pullRequestState] : "review-comment"}
+            kind={
+              isPullRequest
+                ? PULL_REQUEST_CHIP_KINDS[pullRequestState]
+                : isIssue
+                  ? "issue"
+                  : "review-comment"
+            }
           />
         );
       },

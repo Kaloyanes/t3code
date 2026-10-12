@@ -558,6 +558,9 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Diff colors"]
         : []),
       ...(settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? ["Chat width"] : []),
+      ...(settings.showOutputSpeed !== DEFAULT_UNIFIED_SETTINGS.showOutputSpeed
+        ? ["Output speed"]
+        : []),
       ...(settings.panelAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs
         ? ["Panel animations"]
         : []),
@@ -691,6 +694,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.appearanceContrast,
       settings.diffColorScheme,
       settings.chatWidth,
+      settings.showOutputSpeed,
       settings.enableAgentBrowserAccess,
       settings.confirmQuit,
       settings.confirmThreadArchive,
@@ -810,6 +814,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       appearanceContrast: DEFAULT_UNIFIED_SETTINGS.appearanceContrast,
       diffColorScheme: DEFAULT_UNIFIED_SETTINGS.diffColorScheme,
       chatWidth: DEFAULT_UNIFIED_SETTINGS.chatWidth,
+      showOutputSpeed: DEFAULT_UNIFIED_SETTINGS.showOutputSpeed,
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       notificationMode: DEFAULT_UNIFIED_SETTINGS.notificationMode,
       inAppNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled,
@@ -1521,6 +1526,28 @@ export function AppearanceSettingsPanel() {
                 </SelectPopup>
               </Select>
             </div>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("output-speed")}
+          description="Show estimated tokens per second while replies stream and a saved average after completion."
+          resetAction={
+            settings.showOutputSpeed !== DEFAULT_UNIFIED_SETTINGS.showOutputSpeed ? (
+              <SettingResetButton
+                label="output speed"
+                onClick={() =>
+                  updateSettings({ showOutputSpeed: DEFAULT_UNIFIED_SETTINGS.showOutputSpeed })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.showOutputSpeed}
+              onCheckedChange={(checked) => updateSettings({ showOutputSpeed: Boolean(checked) })}
+              aria-label="Show output speed for replies"
+            />
           }
         />
       </SettingsSection>

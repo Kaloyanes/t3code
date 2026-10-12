@@ -12,7 +12,8 @@ import {
   resolveThreadDetailsCardLayout,
 } from "./threadDetailsCardLayout";
 import { observeResize } from "../../lib/observeResize";
-import { usePanelNavigationSuppression } from "../../panelAnimations";
+import { usePanelNavigationSuppression, usePanelPresence } from "../../panelAnimations";
+import { useUiAnimationSettings } from "../../uiAnimations";
 
 /** One card owns its placement and folds content only when that content cannot fit. */
 export function ThreadDetailsCard({
@@ -57,6 +58,15 @@ export function ThreadDetailsCard({
   // A thread restored with its card open shows it at once; opening it later animates.
   const enterSuppressed = usePanelNavigationSuppression(
     `${threadRef.environmentId}:${threadRef.threadId}`,
+  );
+  const { active: animationsActive, durationMs } = useUiAnimationSettings();
+  const animated = animationsActive && !enterSuppressed;
+  const inlinePresence = usePanelPresence(
+    inlineOpen,
+    null,
+    animated,
+    `${threadRef.environmentId}:${threadRef.threadId}`,
+    durationMs,
   );
   const [contentElement, setContentElement] = useState<HTMLDivElement | null>(null);
   const measurementKey = `${threadRef.environmentId}:${threadRef.threadId}:${preferredPlacement?.width ?? "popup"}`;
@@ -161,18 +171,15 @@ export function ThreadDetailsCard({
       }}
     >
       {placement ? (
-        inlineOpen ? (
+        inlinePresence.present ? (
           <aside
             aria-label="Thread details"
+            aria-hidden={!inlineOpen || undefined}
+            inert={!inlineOpen}
             // Slides down to make room for the find bar, but returns in the same frame
             // the bar closes: a floating preview below moves up at once and would
             // otherwise overlap the card mid-slide.
-            className={cn(
-              "absolute z-20",
-              !enterSuppressed && "thread-details-card-enter",
-              topInset > 0 &&
-                "transition-[top] duration-150 ease-out motion-reduce:transition-none",
-            )}
+            className={cn("absolute z-20", animated && "thread-details-card-motion")}
             style={{
               // Anchored to the right edge like the find bar, so both follow a resizing
               // canvas in the same frame instead of waiting for its next measurement.
@@ -182,6 +189,8 @@ export function ThreadDetailsCard({
               maxHeight: height,
             }}
             data-density={density}
+            data-open={inlineOpen ? "true" : "false"}
+            data-find-open={topInset > 0 || undefined}
             data-thread-details-panel="inline"
           >
             {card}

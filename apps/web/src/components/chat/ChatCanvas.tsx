@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -11,6 +12,8 @@ import { ChatCanvasContext } from "./ChatCanvasContext";
 import { resolveChatCanvasLayout, type ChatCanvasPreview } from "./chatCanvasLayout";
 import type { PreviewMiniPlayerObstacles } from "../preview/previewMiniPlayerLayout";
 import { observeResize } from "../../lib/observeResize";
+import { usePanelNavigationSuppression } from "../../panelAnimations";
+import { useUiAnimationSettings } from "../../uiAnimations";
 
 /**
  * Owns the available conversation space. Cards only report where they sit; the
@@ -19,11 +22,13 @@ import { observeResize } from "../../lib/observeResize";
 export function ChatCanvas({
   composerOverlayElement,
   detailsCardTopInset = 0,
+  navigationKey = "",
   children,
   ...props
 }: Omit<ComponentProps<"div">, "className" | "style" | "ref"> & {
   composerOverlayElement: HTMLElement | null;
   detailsCardTopInset?: number;
+  navigationKey?: string;
 }) {
   const elementRef = useRef<HTMLDivElement | null>(null);
   const widthProbeRef = useRef<HTMLDivElement | null>(null);
@@ -144,6 +149,77 @@ export function ChatCanvas({
     detailsCardTopInset,
   ]);
   const { layout } = context;
+  const { active: animationsActive, durationMs } = useUiAnimationSettings();
+  const navigationSuppressed = usePanelNavigationSuppression(navigationKey);
+  const previousLaneRef = useRef<{
+    left: number;
+    cardOpen: boolean;
+    width: number;
+    navigationKey: string;
+  } | null>(null);
+  const laneAnimationsRef = useRef(new Map<HTMLElement, Animation>());
+  const cardOpen = detailsCard !== null;
+  useLayoutEffect(() => {
+    const previous = previousLaneRef.current;
+    previousLaneRef.current = {
+      left: layout.chat.left,
+      cardOpen,
+      width: measurements.width,
+      navigationKey,
+    };
+    const animations = laneAnimationsRef.current;
+    if (
+      !animationsActive ||
+      navigationSuppressed ||
+      previous?.navigationKey !== navigationKey ||
+      previous.width !== measurements.width
+    ) {
+      for (const animation of animations.values()) animation.cancel();
+      animations.clear();
+      return;
+    }
+    if (previous.cardOpen === cardOpen) return;
+    const shift = previous.left - layout.chat.left;
+    if (Math.abs(shift) < 0.5) return;
+    // Reflow once, then move the lane into place without resizing the virtual list every frame.
+    const subjects = elementRef.current?.querySelectorAll<HTMLElement>(
+      '[data-chat-composer-stack="true"], .messages-timeline-scroll, .chat-banner-lane, .chat-scroll-to-bottom',
+    );
+    for (const element of subjects ?? []) {
+      const interrupted = animations.get(element);
+      const transform = interrupted ? getComputedStyle(element).transform : "none";
+      const offset = transform === "none" ? 0 : new DOMMatrixReadOnly(transform).m41;
+      interrupted?.cancel();
+      const animation = element.animate(
+        [
+          { transform: `translateX(${String(shift + offset)}px)` },
+          { transform: "translateX(0px)" },
+        ],
+        { duration: durationMs, easing: "cubic-bezier(0.23, 1, 0.32, 1)" },
+      );
+      animations.set(element, animation);
+      void animation.finished
+        .catch(() => undefined)
+        .then(() => {
+          if (animations.get(element) === animation) animations.delete(element);
+        });
+    }
+  }, [
+    animationsActive,
+    navigationSuppressed,
+    navigationKey,
+    cardOpen,
+    layout.chat.left,
+    measurements.width,
+    durationMs,
+  ]);
+  useEffect(() => {
+    const animations = laneAnimationsRef.current;
+    return () => {
+      for (const animation of animations.values()) animation.cancel();
+      animations.clear();
+    };
+  }, []);
   return (
     <ChatCanvasContext value={context}>
       <div

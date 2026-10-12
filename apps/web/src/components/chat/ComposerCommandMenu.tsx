@@ -4,6 +4,8 @@ import {
   type ProviderSkillSourceKind,
 } from "@t3tools/client-runtime/providerSkills";
 import {
+  type IssueState,
+  type IssueStateReason,
   type ProjectEntry,
   type ProviderDriverKind,
   type PullRequestContextMetadata,
@@ -29,6 +31,11 @@ import { Command, CommandGroup, CommandItem, CommandList } from "../ui/command";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { ComposerBanner } from "./ComposerBanner";
 import { resolvePullRequestState } from "../pullRequest/pullRequestPresentation";
+import { resolveIssueState } from "../issue/IssueStateGlyph";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
+
+/** What the `#` menu lists; the toggle at its top switches between the two. */
+export type ComposerReferenceKind = "pull-request" | "issue";
 
 export type ComposerCommandItem =
   | {
@@ -71,6 +78,19 @@ export type ComposerCommandItem =
     }
   | {
       id: string;
+      type: "issue";
+      issue: {
+        number: number;
+        title: string;
+        url: string;
+        state: IssueState;
+        stateReason: IssueStateReason | undefined;
+      };
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
       type: "thread";
       thread: ScopedThreadRef;
       label: string;
@@ -83,6 +103,9 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   resolvedTheme: "light" | "dark";
   isLoading: boolean;
   triggerKind: ComposerTriggerKind | null;
+  /** Set when the `#` menu can switch to issues; absent, it lists pull requests only. */
+  referenceKind?: ComposerReferenceKind;
+  onReferenceKindChange?: (kind: ComposerReferenceKind) => void;
   emptyStateText?: string;
   activeItemId: string | null;
   onHighlightedItemChange: (itemId: string | null) => void;
@@ -113,10 +136,24 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
         className="flex min-h-0 w-full flex-col overflow-hidden pb-(--chat-composer-attachment-overlap) **:data-[slot=command-item]:rounded-lg **:data-[slot=scroll-area-scrollbar]:data-[orientation=vertical]:my-4"
         data-composer-command-drawer="true"
       >
+        {props.triggerKind === "pull-request" &&
+        props.referenceKind !== undefined &&
+        props.onReferenceKindChange ? (
+          <ReferenceKindToggle
+            value={props.referenceKind}
+            onValueChange={props.onReferenceKindChange}
+          />
+        ) : null}
         {props.items.length > 0 ? (
           <CommandList
             id={props.listId}
-            aria-label={props.triggerKind ? LISTBOX_LABEL_BY_TRIGGER[props.triggerKind] : undefined}
+            aria-label={
+              props.triggerKind === "pull-request" && props.referenceKind === "issue"
+                ? "Issues"
+                : props.triggerKind
+                  ? LISTBOX_LABEL_BY_TRIGGER[props.triggerKind]
+                  : undefined
+            }
             className="max-h-72 min-h-0 scroll-pb-6"
           >
             <CommandGroup>
@@ -141,7 +178,9 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
                 ? props.triggerKind === "skill"
                   ? "Searching workspace skills..."
                   : props.triggerKind === "pull-request"
-                    ? "Finding pull request..."
+                    ? props.referenceKind === "issue"
+                      ? "Finding issue..."
+                      : "Finding pull request..."
                     : "Searching workspace files..."
                 : (props.emptyStateText ??
                   (props.triggerKind === "skill"
@@ -171,7 +210,11 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
   const isSlashSkill =
     props.triggerKind === "slash-command" && props.item.type === "skill" ? props.item.skill : null;
   const pullRequestPresentation =
-    props.item.type === "pull-request" ? resolvePullRequestState(props.item.pullRequest) : null;
+    props.item.type === "pull-request"
+      ? resolvePullRequestState(props.item.pullRequest)
+      : props.item.type === "issue"
+        ? resolveIssueState(props.item.issue)
+        : null;
 
   return (
     <CommandItem
@@ -231,6 +274,30 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
     </CommandItem>
   );
 });
+
+function ReferenceKindToggle(props: {
+  value: ComposerReferenceKind;
+  onValueChange: (kind: ComposerReferenceKind) => void;
+}) {
+  return (
+    <div className="px-3 pt-2.5 pb-1">
+      <ToggleGroup
+        aria-label="Reference type"
+        variant="segmented"
+        value={[props.value]}
+        onValueChange={(value) => {
+          const next = value[0];
+          if (next === "pull-request" || next === "issue") props.onValueChange(next);
+        }}
+        // Keep focus in the composer so typing continues the `#` query.
+        onMouseDown={(event) => event.preventDefault()}
+      >
+        <Toggle value="pull-request">Pull requests</Toggle>
+        <Toggle value="issue">Issues</Toggle>
+      </ToggleGroup>
+    </div>
+  );
+}
 
 export function composerSuggestionOptionId(listId: string, itemId: string): string {
   // JSON escapes lone UTF-16 surrogates before URI encoding without losing identity.

@@ -11695,6 +11695,7 @@ export default function ChatView(props: ChatViewProps) {
             }}
             controlsRef={threadFindControlsRef}
             onOpenChange={setIsThreadFindActive}
+            navigationKey={activeThreadKey ?? ""}
             detailsCardTopInset={isThreadFindActive ? THREAD_FIND_BAR_RESERVED_HEIGHT : 0}
             composerOverlayElement={isDraftHeroState ? null : composerOverlayElement}
             data-chat-workspace-drop-target="true"
@@ -11874,6 +11875,7 @@ export default function ChatView(props: ChatViewProps) {
               ref={setComposerOverlayElement}
               inert={isRevertingCheckpoint}
               data-chat-composer-overlay="true"
+              data-composer-placement={isDraftHeroState ? "center" : "bottom"}
               className={
                 isDraftHeroState
                   ? "pointer-events-none absolute inset-0 z-20 flex items-center"
@@ -12088,6 +12090,9 @@ export default function ChatView(props: ChatViewProps) {
                               }
                               pullRequestRepository={
                                 supportsPullRequests ? activeProjectRepository : null
+                              }
+                              supportsIssues={
+                                serverConfig?.environment.capabilities.issues === true
                               }
                               restingControlsHost={restingComposerControlsHost}
                               restingControlsHaveLeadingContext={

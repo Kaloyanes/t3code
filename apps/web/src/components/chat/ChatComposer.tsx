@@ -27,6 +27,7 @@ import type {
   EnvironmentId,
   ModelSelection,
   ProjectId,
+  IssueListInput,
   PullRequestListInput,
   PreviewAnnotationPayload,
   ProviderApprovalDecision,
@@ -276,6 +277,7 @@ import {
   usePullRequestList,
   type EnvironmentQueryTarget,
 } from "~/state/pullRequests";
+import { issueEnvironment, useIssueList } from "~/state/issues";
 import { useEnvironmentQuery } from "~/state/query";
 import { useDebouncedValue } from "~/state/queries";
 import { ProviderModelPicker } from "./ProviderModelPicker";
@@ -283,6 +285,7 @@ import { resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import {
   type ComposerCommandItem,
   ComposerCommandMenu,
+  type ComposerReferenceKind,
   composerSuggestionOptionId,
 } from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
@@ -300,6 +303,8 @@ import {
 } from "./ComposerControl";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { buildPullRequestReferenceContext } from "../pullRequest/pullRequestDetail.logic";
+import { buildIssueReferenceContext } from "../issue/issueDetail.logic";
+import { issueEntriesForQuery } from "../issue/issue.logic";
 import {
   matchesPullRequestQuery,
   rankPullRequestMatches,
@@ -433,6 +438,7 @@ const COMPOSER_PULL_REQUEST_LIST_LIMIT = 99;
 const COMPOSER_PULL_REQUEST_RESULT_LIMIT = 12;
 const EMPTY_PULL_REQUEST_LIST_TARGETS: ReadonlyArray<EnvironmentQueryTarget<PullRequestListInput>> =
   [];
+const EMPTY_ISSUE_LIST_TARGETS: ReadonlyArray<EnvironmentQueryTarget<IssueListInput>> = [];
 
 const COMPOSER_SCROLL_COLLAPSE_THRESHOLD_PX = 24;
 const COMPOSER_SCROLL_GESTURE_RESET_MS = 120;
@@ -604,6 +610,7 @@ function useComposerRestingTransition(
       // of a ChatView re-render on every animation frame.
       const overlay = element.closest<HTMLElement>('[data-chat-composer-overlay="true"]');
       const overlayRect = overlay?.getBoundingClientRect();
+      const isCentered = overlay?.dataset.composerPlacement === "center";
       const overlayHeight = overlayRect?.height ?? null;
       if (overlayHeight !== null) {
         onOverlayHeightChange(overlayHeight);
@@ -651,8 +658,9 @@ function useComposerRestingTransition(
         // observer quiet for the tween; bottom alignment keeps the animating
         // surface glued to the overlay's stable bottom edge. The pin lasts
         // only for the tween so later attachment, thread, font, and viewport
-        // changes remain natural.
-        if (overlay && overlayHeight !== null) {
+        // changes remain natural. Empty chats keep their full-height, centered
+        // overlay while the surface grows inside it.
+        if (overlay && overlayHeight !== null && !isCentered) {
           overlay.style.height = `${String(overlayHeight)}px`;
           overlay.style.display = "flex";
           overlay.style.flexDirection = "column";
@@ -721,7 +729,9 @@ function useComposerRestingTransition(
 
         const animatedRect = element.getBoundingClientRect();
         const previousBottom =
-          overlayRect && previousContentOffsetsRef.current.surfaceBottomInset !== null
+          !isCentered &&
+          overlayRect &&
+          previousContentOffsetsRef.current.surfaceBottomInset !== null
             ? overlayRect.bottom - previousContentOffsetsRef.current.surfaceBottomInset
             : animatedRect.bottom;
         const bottomShift = previousBottom - animatedRect.bottom;
@@ -1170,6 +1180,7 @@ import { searchProviderSkills } from "../../providerSkillSearch";
 import { useDelayedStatus } from "../../hooks/useDelayedStatus";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { usePanelAnimationSettings } from "../../panelAnimations";
+import { useUiAnimationSettings } from "../../uiAnimations";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { readEnvironmentScope } from "../../state/session";
 import { serverEnvironment } from "../../state/server";
@@ -1669,6 +1680,8 @@ export interface ChatComposerProps {
   supportsPromptEnhancementSelection: boolean;
   pullRequestProjectId: ProjectId | null;
   pullRequestRepository: string | null;
+  /** Lets the `#` menu switch from pull requests to issues of the same repository. */
+  supportsIssues: boolean;
   restingControlsHost: HTMLDivElement | null;
   restingControlsHaveLeadingContext: boolean;
   onRestingControlsVisibilityChange: (visible: boolean) => void;
@@ -1817,6 +1830,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     supportsPromptEnhancementSelection,
     pullRequestProjectId,
     pullRequestRepository,
+    supportsIssues,
     restingControlsHost,
     restingControlsHaveLeadingContext,
     onRestingControlsVisibilityChange,
@@ -2513,6 +2527,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isLiteralPendingAnswer ? null : detectComposerTrigger(prompt, prompt.length),
   );
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
+  const [composerReferenceKindPreference, setComposerReferenceKind] =
+    useState<ComposerReferenceKind>("pull-request");
+  const composerReferenceKind = supportsIssues ? composerReferenceKindPreference : "pull-request";
   const composerSuggestionId = useId();
   const composerSuggestionListId = `${composerSuggestionId}-${encodeURIComponent(draftId ?? activeThreadId ?? "new")}-suggestions`;
   // Active ArrowUp recall. Cleared on edit and on thread switch.
@@ -2692,6 +2709,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const pullRequestListTargets = useMemo(
     () =>
       composerTriggerKind !== "pull-request" ||
+      composerReferenceKind !== "pull-request" ||
       pullRequestProjectId === null ||
       (pullRequestTextQuery !== null && settledPullRequestTextQuery === null)
         ? EMPTY_PULL_REQUEST_LIST_TARGETS
@@ -2709,6 +2727,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             },
           ],
     [
+      composerReferenceKind,
       composerTriggerKind,
       environmentId,
       pullRequestProjectId,
@@ -2717,6 +2736,36 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ],
   );
   const pullRequestLookup = usePullRequestList(pullRequestListTargets);
+  const issueListTargets = useMemo(
+    () =>
+      composerTriggerKind !== "pull-request" ||
+      composerReferenceKind !== "issue" ||
+      pullRequestProjectId === null ||
+      (pullRequestTextQuery !== null && settledPullRequestTextQuery === null)
+        ? EMPTY_ISSUE_LIST_TARGETS
+        : [
+            {
+              environmentId,
+              input: {
+                state: "all" as const,
+                projectId: pullRequestProjectId,
+                limit: COMPOSER_PULL_REQUEST_LIST_LIMIT,
+                ...(settledPullRequestTextQuery === null
+                  ? {}
+                  : { query: settledPullRequestTextQuery }),
+              },
+            },
+          ],
+    [
+      composerReferenceKind,
+      composerTriggerKind,
+      environmentId,
+      pullRequestProjectId,
+      pullRequestTextQuery,
+      settledPullRequestTextQuery,
+    ],
+  );
+  const issueLookup = useIssueList(issueListTargets);
   const pullRequestTriggerNumber = useMemo(() => {
     if (composerTrigger?.kind !== "pull-request" || composerTrigger.query.length === 0) {
       return null;
@@ -2735,8 +2784,33 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         entry.repository.trim().toLowerCase() === pullRequestRepository?.trim().toLowerCase() &&
         entry.number === settledPullRequestNumber,
     ) === true;
+  const recentHasExactIssue =
+    settledPullRequestNumber !== null &&
+    issueLookup.data?.entries.some(
+      (entry) =>
+        entry.projectId === pullRequestProjectId &&
+        entry.repository.trim().toLowerCase() === pullRequestRepository?.trim().toLowerCase() &&
+        entry.number === settledPullRequestNumber,
+    ) === true;
+  const exactIssueLookup = useEnvironmentQuery(
+    composerReferenceKind !== "issue" ||
+      settledPullRequestNumber === null ||
+      pullRequestProjectId === null ||
+      pullRequestRepository === null ||
+      recentHasExactIssue
+      ? null
+      : issueEnvironment.detail({
+          environmentId,
+          input: {
+            projectId: pullRequestProjectId,
+            repository: pullRequestRepository,
+            number: settledPullRequestNumber,
+          },
+        }),
+  );
   const exactPullRequestLookup = useEnvironmentQuery(
-    settledPullRequestNumber === null ||
+    composerReferenceKind !== "pull-request" ||
+      settledPullRequestNumber === null ||
       pullRequestProjectId === null ||
       pullRequestRepository === null ||
       recentHasExactPullRequest
@@ -2852,6 +2926,49 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (
       composerTrigger.kind === "pull-request" &&
+      composerReferenceKind === "issue" &&
+      pullRequestProjectId !== null &&
+      pullRequestRepository !== null
+    ) {
+      const exactIssue =
+        exactIssueLookup.data?.number === pullRequestTriggerNumber ? [exactIssueLookup.data] : [];
+      const searchesOnHost =
+        issueLookup.data?.providers.some((provider) => provider.searchesOnHost) === true;
+      const matches = /^\d*$/u.test(composerTrigger.query)
+        ? filterComposerPullRequestMatches({
+            entries: [...exactIssue, ...(issueLookup.data?.entries ?? [])],
+            projectId: pullRequestProjectId,
+            repository: pullRequestRepository,
+            query: composerTrigger.query,
+            limit: COMPOSER_PULL_REQUEST_RESULT_LIMIT,
+          })
+        : (searchesOnHost
+            ? (issueLookup.data?.entries ?? [])
+            : issueEntriesForQuery(issueLookup.data?.entries ?? [], composerTrigger.query)
+          )
+            .filter(
+              (entry) =>
+                entry.projectId === pullRequestProjectId &&
+                entry.repository.trim().toLowerCase() ===
+                  pullRequestRepository.trim().toLowerCase(),
+            )
+            .slice(0, COMPOSER_PULL_REQUEST_RESULT_LIMIT);
+      return matches.map((issue) => ({
+        id: `issue:${issue.projectId}:${issue.repository}:${issue.number}`,
+        type: "issue",
+        issue: {
+          number: issue.number,
+          title: issue.title,
+          url: issue.url,
+          state: issue.state,
+          stateReason: issue.stateReason ?? undefined,
+        },
+        label: `#${issue.number}`,
+        description: issue.title,
+      }));
+    }
+    if (
+      composerTrigger.kind === "pull-request" &&
       pullRequestProjectId !== null &&
       pullRequestRepository !== null
     ) {
@@ -2905,10 +3022,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [
     activeThreadId,
     compactSlashCommandAvailable,
+    composerReferenceKind,
     composerTrigger,
     environmentId,
     environmentThreadShells,
+    exactIssueLookup.data,
     exactPullRequestLookup.data,
+    issueLookup.data,
     planModeUiEnabled,
     pullRequestLookup.data,
     pullRequestProjectId,
@@ -2924,7 +3044,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const composerMenuOpen = Boolean(composerTrigger);
   const composerMenuSearchKey = composerTrigger
-    ? `${composerSuggestionListId}:${composerTrigger.kind}:${composerTrigger.query.trim().toLowerCase()}`
+    ? `${composerSuggestionListId}:${composerTrigger.kind}:${composerTrigger.kind === "pull-request" ? `${composerReferenceKind}:` : ""}${composerTrigger.query.trim().toLowerCase()}`
     : null;
   const activeComposerMenuItem = useMemo(() => {
     const activeItemId = resolveComposerMenuActiveItemId({
@@ -2996,13 +3116,28 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     (composerTriggerKind === "pull-request" &&
       pullRequestProjectId !== null &&
       pullRequestRepository !== null &&
-      (pullRequestLookup.isPending ||
+      ((composerReferenceKind === "issue"
+        ? issueLookup.isPending || exactIssueLookup.isPending
+        : pullRequestLookup.isPending || exactPullRequestLookup.isPending) ||
         pullRequestTextQuery !== debouncedPullRequestTextQuery ||
-        pullRequestTriggerNumber !== debouncedPullRequestNumber ||
-        exactPullRequestLookup.isPending));
+        pullRequestTriggerNumber !== debouncedPullRequestNumber));
   const composerMenuEmptyState = useMemo(() => {
     if (composerTriggerKind === "skill") {
       return "No skills found. Try / to browse provider commands.";
+    }
+    if (composerTriggerKind === "pull-request" && composerReferenceKind === "issue") {
+      if (pullRequestProjectId === null || pullRequestRepository === null) {
+        return "Issues are not available for this project.";
+      }
+      if (
+        issueLookup.error !== null ||
+        issueLookup.data?.errors.some((error) => error.projectId === pullRequestProjectId)
+      ) {
+        return "Issues could not be read for this project.";
+      }
+      return composerTrigger?.query
+        ? `No issue matches ${composerTrigger.query}.`
+        : "No issues found in this repository.";
     }
     if (composerTriggerKind === "pull-request") {
       if (pullRequestProjectId === null || pullRequestRepository === null) {
@@ -3022,8 +3157,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ? "No matching files or folders."
       : "No matching command.";
   }, [
+    composerReferenceKind,
     composerTrigger,
     composerTriggerKind,
+    issueLookup.data?.errors,
+    issueLookup.error,
     pullRequestLookup.data?.errors,
     pullRequestLookup.error,
     pullRequestProjectId,
@@ -4381,6 +4519,36 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }
         return;
       }
+      if (item.type === "issue") {
+        if (
+          trigger.kind !== "pull-request" ||
+          !composerMenuItemsRef.current.some((candidate) => candidate.id === item.id)
+        ) {
+          return;
+        }
+        const comment = buildIssueReferenceContext(item.issue);
+        const replacement = `${formatInlineContextReference(
+          reviewCommentContextReference(comment),
+        )} `;
+        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+          snapshot.value,
+          trigger.rangeEnd,
+          replacement,
+        );
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          replacementRangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+        );
+        if (applied) {
+          addComposerDraftReviewComment(composerDraftTarget, comment, {
+            appendReference: false,
+          });
+          setComposerHighlightedItemId(null);
+        }
+        return;
+      }
       if (item.type === "thread") {
         if (trigger.kind !== "path") return;
         const shell = readThreadShell(item.thread);
@@ -4426,6 +4594,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     },
     [composerMenuSearchKey],
   );
+
+  const onComposerReferenceKindChange = useCallback((kind: ComposerReferenceKind) => {
+    setComposerReferenceKind(kind);
+    setComposerHighlightedItemId(null);
+  }, []);
 
   const nudgeComposerMenuHighlight = useCallback(
     (key: "ArrowDown" | "ArrowUp") => {
@@ -5586,13 +5759,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ) : null;
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
+  const composerAnimationSettings = useUiAnimationSettings();
   const composerMainSurfaceRef = useComposerRestingTransition(
     composerControlsCollapsed,
     isComposerResting,
     restingComposerControlsRef,
     onComposerOverlayHeightChange,
-    panelAnimationsActive,
-    panelAnimationDurationMs,
+    composerAnimationSettings.active,
+    composerAnimationSettings.durationMs,
   );
   const canTrackComposerScrollGesture =
     routeKind === "server" && activeThreadId !== null && !isMobileViewport;
@@ -7349,6 +7523,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       resolvedTheme={resolvedTheme}
                       isLoading={isComposerMenuLoading}
                       triggerKind={composerTriggerKind}
+                      {...(supportsIssues
+                        ? {
+                            referenceKind: composerReferenceKind,
+                            onReferenceKindChange: onComposerReferenceKindChange,
+                          }
+                        : {})}
                       emptyStateText={composerMenuEmptyState}
                       activeItemId={activeComposerMenuItem?.id ?? null}
                       onHighlightedItemChange={onComposerMenuItemHighlighted}
@@ -7361,7 +7541,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 {composerSuggestionsVisible && composerMenuItems.length === 0
                   ? isComposerMenuLoading
                     ? composerTriggerKind === "pull-request"
-                      ? "Finding pull request..."
+                      ? composerReferenceKind === "issue"
+                        ? "Finding issue..."
+                        : "Finding pull request..."
                       : "Searching workspace files..."
                     : composerMenuEmptyState
                   : ""}
@@ -7443,6 +7625,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             animationSource={snapShotAnimationPending ? image.source : undefined}
                             className={cn(
                               "group/attachment shrink-0 snap-start bg-background",
+                              composerAnimationSettings.active &&
+                                image.source?.kind !== "snap-shot" &&
+                                "composer-attachment-arrival",
                               image.source?.kind === "snap-shot"
                                 ? SNAP_SHOT_ATTACHMENT_FRAME_CLASS
                                 : "relative h-16 w-16 overflow-hidden rounded-lg border border-border/80",

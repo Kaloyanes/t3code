@@ -14,6 +14,7 @@ import {
   removeInlineContextReference,
 } from "./composerContextReferences";
 import { describe, expect, it } from "vite-plus/test";
+import { buildIssueReferenceContext } from "~/components/issue/issueDetail.logic";
 
 import {
   asKnownContextRecord,
@@ -29,6 +30,7 @@ import {
   previewAnnotationFromRecord,
   resolveUserMessageContext,
   selectedMessageContextFragment,
+  issueContextNumber,
   reviewCommentContextLabel,
   reviewCommentContextRecord,
   reviewCommentFromRecord,
@@ -617,6 +619,22 @@ describe("composerContextRecords", () => {
     });
     expect(legacy.text).toBe("hi\n\n[T line 1](t3-context://v1/terminal/legacy_terminal_1)");
     expect(legacy.recordsById.get("legacy_terminal_1")?.kind).toBe("terminal");
+  });
+});
+
+describe("issue references", () => {
+  it("presents an issue picked from the # menu as its number, not a pull request", () => {
+    const issue = buildIssueReferenceContext({
+      number: 7,
+      title: "Composer  drops\nchips",
+      url: "https://github.com/pingdotgg/t3code/issues/7",
+    });
+
+    expect(issueContextNumber(issue)).toBe(7);
+    expect(isPullRequestSummaryContext(issue)).toBe(false);
+    expect(reviewCommentContextLabel(issue)).toBe("#7");
+    expect(issue.rangeLabel).toBe("Composer drops chips");
+    expect(reviewCommentContextRecord(issue).filePath).toBe("Issue #7");
   });
 });
 

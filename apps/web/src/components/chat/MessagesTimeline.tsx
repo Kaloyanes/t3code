@@ -1,6 +1,11 @@
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { useOutputSpeed } from "./useOutputSpeed";
-import type { OutputObservation, OutputSpeed } from "./outputSpeed";
+import {
+  estimateFinishedOutput,
+  formatOutputSpeed,
+  type OutputObservation,
+  type OutputSpeed,
+} from "./outputSpeed";
 import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { MarkdownFindContext, useFindRevealRef } from "./markdownFindContext";
@@ -133,6 +138,7 @@ import {
   ChevronRightIcon,
   ChevronUpIcon,
   CircleAlertIcon,
+  CircleDotIcon,
   DownloadIcon,
   EyeIcon,
   GitForkIcon,
@@ -255,6 +261,7 @@ import {
 import {
   asKnownContextRecord,
   isPullRequestSummaryContext,
+  issueContextNumber,
   pullRequestContextDisplayState,
   pullRequestContextKindLabel,
   resolveUserMessageContext,
@@ -2818,14 +2825,15 @@ function AttemptFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "at
 }
 
 function EstimatedOutputSpeed({ messageId }: { readonly messageId: MessageId }) {
+  const enabled = useClientSettings((settings) => settings.showOutputSpeed);
   const speed = use(OutputSpeedContext).get(messageId);
-  if (speed?.kind !== "estimate") return null;
+  if (!enabled || speed?.kind !== "estimate") return null;
   return (
     <Tooltip>
       <TooltipTrigger
         render={<span className="text-2xs text-muted-foreground tabular-nums" tabIndex={0} />}
       >
-        ≈ {speed.tokensPerSecond} tok/s
+        ≈ {formatOutputSpeed(speed.tokensPerSecond)} tok/s
       </TooltipTrigger>
       <TooltipPopup side="top">
         Estimated visible text arrival speed, using about four characters per token. Includes
@@ -2969,12 +2977,15 @@ function AssistantMessageMeta({
   alwaysVisible?: boolean;
 }) {
   const ctx = use(TimelineRowCtx);
+  const showOutputSpeed = useClientSettings((settings) => settings.showOutputSpeed);
+  const finishedOutputSpeed =
+    showOutputSpeed && !message.streaming ? estimateFinishedOutput(message) : null;
 
   return (
     <div
       className={cn(
         "flex items-center gap-2 text-xs tabular-nums transition-opacity duration-200",
-        alwaysVisible
+        alwaysVisible || finishedOutputSpeed !== null
           ? "opacity-100"
           : "opacity-0 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/assistant:opacity-100",
         className,
@@ -2994,16 +3005,38 @@ function AssistantMessageMeta({
         <AssistantForkButton projectedItem={projectedItem} />
       ) : null}
       {!message.streaming && (
-        <Tooltip>
-          <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
-            {formatDayAwareTimestamp(message.updatedAt, ctx.timestampFormat)}
-          </TooltipTrigger>
-          <TooltipPopup>
-            {formatChatTimestampTooltip(message.updatedAt, ctx.timestampFormat)}
-          </TooltipPopup>
-        </Tooltip>
+        <>
+          <Tooltip>
+            <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
+              {formatDayAwareTimestamp(message.updatedAt, ctx.timestampFormat)}
+            </TooltipTrigger>
+            <TooltipPopup>
+              {formatChatTimestampTooltip(message.updatedAt, ctx.timestampFormat)}
+            </TooltipPopup>
+          </Tooltip>
+          {finishedOutputSpeed !== null ? (
+            <FinishedOutputSpeed tokensPerSecond={finishedOutputSpeed} />
+          ) : null}
+        </>
       )}
     </div>
+  );
+}
+
+function FinishedOutputSpeed({ tokensPerSecond }: { readonly tokensPerSecond: number }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<span className="text-muted-foreground text-xs tabular-nums" tabIndex={0} />}
+      >
+        ≈ {formatOutputSpeed(tokensPerSecond)} tok/s
+      </TooltipTrigger>
+      <TooltipPopup side="top">
+        Estimated average from the saved reply timestamps, using about four characters per token.
+        Timing may include tool work, reasoning, and delivery delays. Hidden reasoning tokens are
+        excluded.
+      </TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -4719,7 +4752,12 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
         }
         const isPullRequest = isPullRequestSummaryContext(record);
         const label = reviewCommentContextLabel(record);
-        const kindLabel = isPullRequest ? pullRequestContextKindLabel(record) : "Review comment";
+        const isIssue = !isPullRequest && issueContextNumber(record) !== null;
+        const kindLabel = isPullRequest
+          ? pullRequestContextKindLabel(record)
+          : isIssue
+            ? "Issue"
+            : "Review comment";
         const pullRequestState = pullRequestContextDisplayState(record) ?? "unknown";
         if (isPullRequest && record.pullRequest !== undefined) {
           return (
@@ -4733,9 +4771,23 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
         return (
           <UserMessageContextPopover
             copyMarkdown={context.copyMarkdown}
-            accessibleLabel={`${kindLabel}, ${label}${record.pullRequest ? `, ${record.pullRequest.title}` : ""}`}
-            kind={isPullRequest ? PULL_REQUEST_CHIP_KINDS[pullRequestState] : "review-comment"}
-            icon={isPullRequest ? <PullRequestGlyph.pullRequest /> : <MessageCircleIcon />}
+            accessibleLabel={`${kindLabel}, ${label}${record.pullRequest ? `, ${record.pullRequest.title}` : isIssue ? `, ${record.rangeLabel}` : ""}`}
+            kind={
+              isPullRequest
+                ? PULL_REQUEST_CHIP_KINDS[pullRequestState]
+                : isIssue
+                  ? "issue"
+                  : "review-comment"
+            }
+            icon={
+              isPullRequest ? (
+                <PullRequestGlyph.pullRequest />
+              ) : isIssue ? (
+                <CircleDotIcon />
+              ) : (
+                <MessageCircleIcon />
+              )
+            }
             label={label}
           >
             <UserMessageReviewCommentCard
