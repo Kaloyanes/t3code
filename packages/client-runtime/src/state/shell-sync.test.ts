@@ -7,6 +7,7 @@ import {
   type ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import { vi } from "vite-plus/test";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -18,6 +19,7 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as TestClock from "effect/testing/TestClock";
+import * as Tracer from "effect/Tracer";
 
 import {
   AVAILABLE_CONNECTION_STATE,
@@ -832,13 +834,24 @@ describe("environment shell synchronization", () => {
     "does not verify a replacement session with a buffered snapshot from its predecessor",
     () =>
       Effect.gen(function* () {
+        const consumerStarted = yield* Deferred.make<void>();
+        let observeConsumer = false;
+        // Effect.fn starts its span before acquiring the snapshot lock.
+        const tracer = Tracer.make({
+          span: (options) => {
+            if (observeConsumer && options.name === "EnvironmentShellState.applyItems") {
+              Deferred.doneUnsafe(consumerStarted, Exit.succeed(undefined));
+            }
+            return new Tracer.NativeSpan(options);
+          },
+        });
         const links =
           yield* Deferred.make<ReadonlyMap<ThreadId, ReadonlyArray<ThreadPullRequestLink>>>();
         const h = yield* makeFamilyHarness({
           cached: Option.none(),
           initialVersion: "1.0.0",
           snapshot: { ...FAMILY_SNAPSHOT, loadPullRequests: Deferred.await(links) },
-        });
+        }).pipe(Effect.withTracer(tracer));
         yield* Queue.take(h.subscribeInputs);
         yield* h.stateWhere((state) => state.status === "live");
         const configStarted = yield* Deferred.make<void>();
@@ -863,13 +876,23 @@ describe("environment shell synchronization", () => {
           ),
         );
         yield* Deferred.await(held);
+        // The fill reaches the state lock only after taking snapshotWriteLock.
+        const fillLocked = yield* Deferred.make<void>();
+        const withPermit = h.shellState.semaphore.withPermit.bind(h.shellState.semaphore);
+        using observeFill = vi
+          .spyOn(h.shellState.semaphore, "withPermit")
+          .mockImplementation(<A, E, R>(effect: Effect.Effect<A, E, R>) =>
+            Deferred.succeed(fillLocked, undefined).pipe(Effect.andThen(withPermit(effect))),
+          );
         yield* Deferred.succeed(links, new Map());
-        yield* TestClock.adjust("1 millis");
+        yield* Deferred.await(fillLocked);
+        observeFill.mockRestore();
+        observeConsumer = true;
         yield* Queue.offer(events, {
           kind: "snapshot",
           snapshot: { ...FAMILY_SNAPSHOT, snapshotSequence: 99 },
         });
-        yield* TestClock.adjust("1 millis");
+        yield* Deferred.await(consumerStarted);
         yield* SubscriptionRef.set(h.sessions, Option.some(next));
         yield* Deferred.await(configStarted);
         yield* Deferred.succeed(release, undefined);
