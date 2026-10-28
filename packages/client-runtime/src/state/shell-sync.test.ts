@@ -132,14 +132,17 @@ const FAMILY_SNAPSHOT: OrchestrationV2ShellSnapshot = {
 const makeFamilyHarness = Effect.fn("test.makeFamilyHarness")(function* (input: {
   readonly cached: Option.Option<DeferredShellSnapshot>;
   readonly initialVersion: string;
+  readonly snapshot?: DeferredShellSnapshot;
 }) {
   const subscribeInputs = yield* Queue.unbounded<unknown>();
   const saved = yield* Queue.unbounded<{ readonly verifiedServerVersion?: string }>();
   const httpLoads = yield* Ref.make(0);
-  const familySession = (serverVersion: string): RpcSession.RpcSession => {
-    const events = Stream.make<ReadonlyArray<OrchestrationV2ShellStreamItem>>({
+  const familySession = (
+    serverVersion: string,
+    events = Stream.make<ReadonlyArray<OrchestrationV2ShellStreamItem>>({
       kind: "synchronized",
-    }).pipe(Stream.concat(Stream.never));
+    }).pipe(Stream.concat(Stream.never)),
+  ): RpcSession.RpcSession => {
     const client = {
       [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: (subscribeInput: unknown) =>
         Stream.unwrap(Queue.offer(subscribeInputs, subscribeInput).pipe(Effect.as(events))),
@@ -181,7 +184,9 @@ const makeFamilyHarness = Effect.fn("test.makeFamilyHarness")(function* (input: 
   });
   const snapshotLoader = ShellSnapshotLoader.ShellSnapshotLoader.of({
     load: () =>
-      Ref.update(httpLoads, (count) => count + 1).pipe(Effect.as(Option.some(FAMILY_SNAPSHOT))),
+      Ref.update(httpLoads, (count) => count + 1).pipe(
+        Effect.as(Option.some(input.snapshot ?? FAMILY_SNAPSHOT)),
+      ),
   });
   const shellState = yield* makeEnvironmentShellState().pipe(
     Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
@@ -194,7 +199,7 @@ const makeFamilyHarness = Effect.fn("test.makeFamilyHarness")(function* (input: 
       Stream.runHead,
       Effect.map(Option.getOrThrow),
     );
-  return { sessions, familySession, subscribeInputs, saved, httpLoads, stateWhere };
+  return { sessions, familySession, subscribeInputs, saved, httpLoads, stateWhere, shellState };
 });
 
 describe("environment shell synchronization", () => {
@@ -821,6 +826,61 @@ describe("environment shell synchronization", () => {
       yield* Queue.take(h.subscribeInputs);
       expect(yield* Ref.get(h.httpLoads)).toBe(2);
     }),
+  );
+
+  it.effect(
+    "does not verify a replacement session with a buffered snapshot from its predecessor",
+    () =>
+      Effect.gen(function* () {
+        const links =
+          yield* Deferred.make<ReadonlyMap<ThreadId, ReadonlyArray<ThreadPullRequestLink>>>();
+        const h = yield* makeFamilyHarness({
+          cached: Option.none(),
+          initialVersion: "1.0.0",
+          snapshot: { ...FAMILY_SNAPSHOT, loadPullRequests: Deferred.await(links) },
+        });
+        yield* Queue.take(h.subscribeInputs);
+        yield* h.stateWhere((state) => state.status === "live");
+        const configStarted = yield* Deferred.make<void>();
+        const configGate = yield* Deferred.make<void>();
+        const replacement = h.familySession("2.0.0");
+        const next = {
+          ...replacement,
+          initialConfig: Deferred.succeed(configStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(configGate)),
+            Effect.andThen(replacement.initialConfig),
+          ),
+        };
+        const events = yield* Queue.unbounded<OrchestrationV2ShellStreamItem>();
+        const old = h.familySession("1.0.0", Stream.fromQueue(events));
+        yield* SubscriptionRef.set(h.sessions, Option.some(old));
+        yield* Queue.take(h.subscribeInputs);
+        const held = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const writer = yield* Effect.forkChild(
+          h.shellState.semaphore.withPermit(
+            Deferred.succeed(held, undefined).pipe(Effect.andThen(Deferred.await(release))),
+          ),
+        );
+        yield* Deferred.await(held);
+        yield* Deferred.succeed(links, new Map());
+        yield* TestClock.adjust("1 millis");
+        yield* Queue.offer(events, {
+          kind: "snapshot",
+          snapshot: { ...FAMILY_SNAPSHOT, snapshotSequence: 99 },
+        });
+        yield* TestClock.adjust("1 millis");
+        yield* SubscriptionRef.set(h.sessions, Option.some(next));
+        yield* Deferred.await(configStarted);
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(writer);
+        yield* h.stateWhere((state) =>
+          Option.exists(state.snapshot, (snapshot) => snapshot.snapshotSequence === 99),
+        );
+        yield* Deferred.succeed(configGate, undefined);
+        expect(yield* Queue.take(h.subscribeInputs)).toMatchObject({ afterSequence: 1 });
+        expect(yield* Ref.get(h.httpLoads)).toBe(2);
+      }),
   );
 
   it.effect("resumes the cached snapshot on a cold start of the build that verified it", () =>
