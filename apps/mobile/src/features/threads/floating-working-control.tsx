@@ -70,6 +70,11 @@ export const FLOATING_WORKING_CONTROL_COVERAGE = CONTROL_OVERLAY_OFFSET + CONTRO
 export function FloatingWorkingControl(props: {
   readonly colorScheme: "light" | "dark";
   readonly status: FloatingWorkingStatus | null;
+  readonly progress: {
+    readonly fraction: number;
+    readonly accessibilityLabel: string;
+    readonly onPress: () => void;
+  } | null;
   readonly devicePreview: { readonly count: number; readonly onPress: () => void } | null;
   readonly browserPreview: { readonly count: number; readonly onPress: () => void } | null;
   readonly showScrollToEnd: boolean;
@@ -99,6 +104,7 @@ export function FloatingWorkingControl(props: {
     Math.min(overlayWidth, windowWidth) -
       CONTROL_HEIGHT -
       32 -
+      (props.progress !== null ? 44 : 0) -
       (action !== null ? actionWidth : 0) -
       (hasQueue ? queueWidth : 0) -
       (hasAgents ? agentsWidth : 0) -
@@ -135,7 +141,7 @@ export function FloatingWorkingControl(props: {
     capsuleWidth.set(first ? width : withTiming(width, CONTROL_TIMING));
   };
   const hasStatus = props.status !== null;
-  const hasCapsule = hasStatus || hasQueue || hasAgents || hasPreview;
+  const hasCapsule = hasStatus || hasQueue || hasAgents || hasPreview || props.progress !== null;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- clears the Reanimated capsule width value and measured width when the status goes away
   useEffect(() => {
     if (!hasStatus) {
@@ -165,7 +171,12 @@ export function FloatingWorkingControl(props: {
     props.status?.kind === "progress" ||
     props.status?.kind === "background";
   const capsuleInteractive =
-    statusInteractive || action !== null || hasQueue || hasAgents || hasPreview;
+    statusInteractive ||
+    action !== null ||
+    hasQueue ||
+    hasAgents ||
+    hasPreview ||
+    props.progress !== null;
   const statusContent =
     props.status !== null ? (
       <View
@@ -196,6 +207,22 @@ export function FloatingWorkingControl(props: {
   const capsuleContent = (
     <View className="flex-row items-center">
       {statusContent}
+      {props.progress !== null ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={props.progress.accessibilityLabel}
+          accessibilityHint="Opens the task progress sheet"
+          onPress={props.progress.onPress}
+          className="h-11 w-11 items-center justify-center active:opacity-70"
+        >
+          {hasStatus ? <View className="absolute left-0 h-4 w-px bg-border" /> : null}
+          <ProgressRing
+            fraction={props.progress.fraction}
+            size={16}
+            colorClassName="accent-foreground-muted"
+          />
+        </Pressable>
+      ) : null}
       {action !== null ? (
         <View
           onLayout={(event) => setActionWidth(settleWidth(event.nativeEvent.layout.width))}

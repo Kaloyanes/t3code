@@ -1428,6 +1428,14 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                   <FloatingWorkingControl
                     colorScheme={isDarkMode ? "dark" : "light"}
                     status={floatingStatus}
+                    progress={
+                      threadProgress?.state === "stopped" &&
+                      progressStatus?.kind === "progress" &&
+                      floatingStatus !== null &&
+                      floatingStatus.kind !== "progress"
+                        ? progressStatus
+                        : null
+                    }
                     lift={floatingControlLift}
                     devicePreview={
                       devicePreviews.length > 0
