@@ -9,7 +9,7 @@ import * as Ref from "effect/Ref";
 interface RefreshState<A> {
   readonly value: Option.Option<A>;
   readonly computedAtNanos: bigint;
-  readonly refreshing: boolean;
+  readonly pending: Deferred.Deferred<A> | undefined;
 }
 
 /**
@@ -24,48 +24,50 @@ export const makeBackgroundRefreshed = Effect.fnUntraced(function* <A>(
 ) {
   const scope = yield* Effect.scope;
   const maxAgeNanos = Duration.toNanosUnsafe(maxAge);
-  const first = yield* Deferred.make<A>();
   const state = yield* Ref.make<RefreshState<A>>({
     value: Option.none(),
     computedAtNanos: 0n,
-    refreshing: false,
+    pending: undefined,
   });
 
-  const startRefresh = Ref.modify(state, (current) =>
-    current.refreshing
-      ? ([false, current] as const)
-      : ([true, { ...current, refreshing: true }] as const),
-  ).pipe(
-    Effect.flatMap((start) =>
-      start
-        ? compute.pipe(
-            Effect.flatMap((value) =>
-              Clock.monotonicTimeNanos.pipe(
-                Effect.flatMap((computedAtNanos) =>
-                  Ref.set(state, { value: Option.some(value), computedAtNanos, refreshing: false }),
-                ),
-                Effect.andThen(Deferred.succeed(first, value)),
-              ),
-            ),
-            Effect.onExit((exit) =>
-              Exit.isSuccess(exit)
-                ? Effect.void
-                : Ref.update(state, (current) => ({ ...current, refreshing: false })),
-            ),
-            Effect.forkIn(scope),
-            Effect.asVoid,
-          )
-        : Effect.void,
-    ),
-  );
+  const startRefresh = Effect.gen(function* () {
+    const pending = yield* Deferred.make<A>();
+    const selected = yield* Ref.modify(state, (current) =>
+      current.pending === undefined
+        ? ([pending, { ...current, pending }] as const)
+        : ([current.pending, current] as const),
+    );
+    if (selected === pending) {
+      yield* compute.pipe(
+        Effect.onExit((exit) =>
+          Effect.gen(function* () {
+            if (Exit.isSuccess(exit)) {
+              const computedAtNanos = yield* Clock.monotonicTimeNanos;
+              yield* Ref.set(state, {
+                value: Option.some(exit.value),
+                computedAtNanos,
+                pending: undefined,
+              });
+            } else {
+              yield* Ref.update(state, (current) => ({ ...current, pending: undefined }));
+            }
+            yield* Deferred.done(pending, exit);
+          }),
+        ),
+        Effect.exit,
+        Effect.interruptible,
+        Effect.forkIn(scope),
+      );
+    }
+    return selected;
+  }).pipe(Effect.uninterruptible);
 
   if (options?.warm === true) yield* startRefresh;
 
   return Effect.gen(function* () {
     const current = yield* Ref.get(state);
     if (Option.isNone(current.value)) {
-      yield* startRefresh;
-      return yield* Deferred.await(first);
+      return yield* Deferred.await(yield* startRefresh);
     }
     const now = yield* Clock.monotonicTimeNanos;
     if (now - current.computedAtNanos >= maxAgeNanos) {

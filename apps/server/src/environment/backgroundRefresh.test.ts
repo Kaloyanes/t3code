@@ -52,6 +52,25 @@ describe("makeBackgroundRefreshed", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("releases first readers after a defect and lets later reads retry", () =>
+    Effect.gen(function* () {
+      const computes = yield* Ref.make(0);
+      const read = yield* makeBackgroundRefreshed(
+        Effect.gen(function* () {
+          const attempt = yield* Ref.updateAndGet(computes, (n) => n + 1);
+          if (attempt === 1) return yield* Effect.die("probe failed");
+          return attempt;
+        }),
+        "30 seconds",
+      );
+      const reader = yield* Effect.forkChild(Effect.exit(read));
+      yield* TestClock.adjust("1 millis");
+      const result = reader.pollUnsafe();
+      expect(result).toMatchObject({ _tag: "Success", value: { _tag: "Failure" } });
+      expect(yield* read).toBe(2);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("warm computes before the first read", () =>
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>();
