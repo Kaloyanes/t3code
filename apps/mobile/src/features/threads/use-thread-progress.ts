@@ -9,7 +9,6 @@ import type { OrchestrationV2PlanStep, ScopedThreadRef } from "@t3tools/contract
 
 import { useQuietThreadStructure } from "../../state/use-thread-detail";
 
-/** The latest run's task list while the run is live; null when there is nothing to show. */
 export function useThreadProgress(input: {
   readonly threadRef: ScopedThreadRef | null;
   readonly thread: Pick<EnvironmentThreadShell, "latestRun" | "runtime">;
@@ -21,16 +20,16 @@ export function useThreadProgress(input: {
     structure === null ? null : structure.projection,
     input.thread.latestRun?.runId ?? null,
   );
-  if (steps === null || isLatestRunSettled(input.thread.latestRun, input.thread.runtime)) {
+  if (steps === null) {
     return null;
   }
   const { completed, total } = summarizeTodoSteps(steps);
   const state = resolveTodoRunState({
-    settled: false,
+    settled: isLatestRunSettled(input.thread.latestRun, input.thread.runtime),
     completed,
     total,
     pendingApprovals: input.hasPendingApproval ? 1 : 0,
     pendingUserInputs: input.hasPendingUserInput ? 1 : 0,
   });
-  return { steps, state };
+  return state === "done" ? null : { steps, state };
 }

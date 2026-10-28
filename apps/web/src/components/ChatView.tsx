@@ -3445,7 +3445,9 @@ export default function ChatView(props: ChatViewProps) {
                               }
                               isPreparingWorktree={isPreparingWorktree && !sendQueuesBehindSetup}
                               bannerItems={composerBannerItems}
-                              todoSteps={latestRunSettled ? null : todoSteps}
+                              todoSteps={
+                                latestRunSettled && todoState !== "stopped" ? null : todoSteps
+                              }
                               todoState={todoState}
                               resumeCompactionTokens={resumeCompactionTokens}
                               keepFullHistory={keepFullHistory}

@@ -628,7 +628,8 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
     if (threadProgress === null || contentPresentationKind !== "ready") return null;
     const progress = presentThreadProgress(threadProgress.steps, threadProgress.state);
     const blocked = progress.note !== null;
-    if (props.activeWorkStartedAt === null && !blocked) return null;
+    if (props.activeWorkStartedAt === null && !blocked && threadProgress.state !== "stopped")
+      return null;
     return {
       kind: "progress",
       startedAt: props.activeWorkStartedAt,
