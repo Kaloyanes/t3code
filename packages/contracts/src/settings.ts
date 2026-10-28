@@ -293,6 +293,9 @@ export {
   BrowserRecordingFrameRate,
   DEFAULT_BROWSER_RECORDING_FRAME_RATE,
 } from "./preview.ts";
+export const DeviceView = Schema.Literals(["3d", "flat"]);
+export type DeviceView = typeof DeviceView.Type;
+const DEFAULT_DEVICE_VIEW: DeviceView = "3d";
 export const BrowserLinkTarget = Schema.Literals(["system", "app"]);
 export type BrowserLinkTarget = typeof BrowserLinkTarget.Type;
 export const DEFAULT_BROWSER_LINK_TARGET: BrowserLinkTarget = "system";
@@ -396,6 +399,9 @@ export const ClientSettingsSchema = Schema.Struct({
   browserAutoShowFloatingPreview: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW)),
   ),
+
+  // Remembers the last 3D or flat choice made in the device toolbar.
+  deviceView: DeviceView.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_DEVICE_VIEW))),
 
   browserProfiles: Schema.Array(BrowserProfile).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
@@ -1666,6 +1672,7 @@ export const ClientSettingsPatch = Schema.Struct({
   browserSearchEngine: Schema.optionalKey(BrowserSearchEngine),
   browserCustomSearchUrl: Schema.optionalKey(BrowserCustomSearchUrl),
   browserAutoShowFloatingPreview: Schema.optionalKey(Schema.Boolean),
+  deviceView: Schema.optionalKey(DeviceView),
   browserProfiles: Schema.optionalKey(Schema.Array(BrowserProfile)),
   browserDefaultProfileId: Schema.optionalKey(BrowserProfileId),
   confirmQuit: Schema.optionalKey(QuitConfirmationMode),
