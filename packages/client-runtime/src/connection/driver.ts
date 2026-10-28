@@ -225,13 +225,17 @@ export const make = Effect.gen(function* () {
     });
     yield* reportProgress({ stage: "preparing" });
     const checked = new Map<string, ExecutionEnvironmentDescriptor>();
+    let firstRouteAttempt = true;
     return yield* connectOverRoutes(
       entry,
       (route) => checkRoute(entry, route, checked),
       Effect.fnUntraced(function* (route) {
+        // Another route attempt may outlive the network where these probes answered.
+        const descriptors = firstRouteAttempt ? checked : new Map();
+        firstRouteAttempt = false;
         const prepared = yield* resolver
           .prepare(routeEntry(entry, route))
-          .pipe(Effect.provideService(CheckedEnvironmentDescriptors, checked));
+          .pipe(Effect.provideService(CheckedEnvironmentDescriptors, descriptors));
         yield* reportProgress({ stage: "opening", prepared });
         const session = yield* sessions.connect(prepared);
         yield* reportProgress({ stage: "synchronizing", prepared });

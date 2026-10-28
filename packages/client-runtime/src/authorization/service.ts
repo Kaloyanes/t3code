@@ -40,6 +40,7 @@ import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as HttpClient from "effect/http/HttpClient";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 
 import {
   DPOP_ACCESS_TOKEN_REFRESH_SKEW_MS,
@@ -143,6 +144,7 @@ export const make = Effect.gen(function* () {
       const descriptor =
         checked ??
         (yield* fetchDescriptor(input.httpBaseUrl, input.connectionMethod).pipe(
+          Effect.provideService(FetchHttpClient.RequestInit, { cache: "no-store" }),
           Effect.provideService(HttpClient.HttpClient, httpClient),
         ));
       if (descriptor.environmentId !== input.expectedEnvironmentId) {

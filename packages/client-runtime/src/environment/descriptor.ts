@@ -8,7 +8,7 @@ import { executeEnvironmentHttpRequest, makeEnvironmentHttpApiGroupClient } from
 const DEFAULT_REMOTE_REQUEST_TIMEOUT_MS = 10_000;
 
 /**
- * Descriptors a connection attempt's route checks fetched moments ago, by HTTP base URL.
+ * Descriptors fetched by route checks, reusable only before the first route attempt.
  * Verifying the same origin again before sending credentials would cost a round trip.
  */
 export class CheckedEnvironmentDescriptors extends Context.Reference<
