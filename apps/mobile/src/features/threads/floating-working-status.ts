@@ -3,6 +3,8 @@ import { msg } from "gt-react-native";
 
 import { m, type MessageResolver } from "../../i18n/messages";
 
+import type { ThreadProgressTone } from "./thread-progress-presentation";
+
 export interface FloatingStatusAction {
   readonly label: string;
   readonly accessibilityLabel: string;
@@ -11,6 +13,16 @@ export interface FloatingStatusAction {
 }
 
 export type FloatingWorkingStatus =
+  | {
+      readonly kind: "progress";
+      readonly title: string;
+      readonly count: string;
+      readonly waitingNote: string | null;
+      readonly fraction: number;
+      readonly tone: ThreadProgressTone;
+      readonly accessibilityLabel: string;
+      readonly onPress: () => void;
+    }
   | {
       readonly kind: "child-input";
       readonly label: string;

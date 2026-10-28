@@ -20,10 +20,12 @@ import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { ControlPill } from "../../components/ui/ControlPill";
+import { ProgressRing } from "../../components/ProgressRing";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { BrowserPreviewButton } from "../browser/browser-preview-button";
 import { DevicePreviewButton } from "../devices/device-preview-button";
 import type { FloatingStatusAction, FloatingWorkingStatus } from "./floating-working-status";
+import { THREAD_PROGRESS_TONE_CLASSES } from "./thread-progress-presentation";
 import { ShimmeringWorkContent } from "./thread-work-log";
 
 const CONTROL_HEIGHT = 38.5;
@@ -168,7 +170,8 @@ export function FloatingWorkingControl(props: {
   const statusInteractive =
     props.status?.kind === "connection" ||
     props.status?.kind === "extension" ||
-    props.status?.kind === "child-input";
+    props.status?.kind === "child-input" ||
+    props.status?.kind === "progress";
   const capsuleInteractive =
     statusInteractive ||
     extensionStatus !== null ||
@@ -190,7 +193,7 @@ export function FloatingWorkingControl(props: {
         >
           <FloatingStatusLabel
             key={
-              props.status.kind === "extension"
+              props.status.kind === "extension" || props.status.kind === "progress"
                 ? props.status.kind
                 : `${props.status.kind}:${props.status.label}`
             }
@@ -405,6 +408,44 @@ function FloatingStatusLabel(props: {
           {props.status.label}
         </Text>
         <SymbolView name="chevron.down" size={10} tintColorClassName="accent-foreground" />
+      </StatusLabelRow>
+    );
+  }
+  if (props.status.kind === "progress") {
+    return (
+      <StatusLabelRow
+        key="progress"
+        accessibilityLabel={props.status.accessibilityLabel}
+        accessibilityRole="button"
+        className="gap-2.5"
+        onLayout={props.onLayout}
+        onPress={props.status.onPress}
+      >
+        <ProgressRing
+          fraction={props.status.fraction}
+          size={18}
+          colorClassName={THREAD_PROGRESS_TONE_CLASSES[props.status.tone].accent}
+        />
+        <Text className="shrink font-t3-bold text-sm text-foreground" numberOfLines={1}>
+          {props.status.title}
+        </Text>
+        <View className="h-3.5 w-px bg-border" />
+        <Text
+          className="shrink-0 font-t3-medium text-xs text-foreground-muted"
+          numberOfLines={1}
+          style={{ fontVariant: ["tabular-nums"] }}
+        >
+          {props.status.waitingNote === null
+            ? props.status.count
+            : `${props.status.count} · ${props.status.waitingNote}`}
+        </Text>
+        <SymbolView
+          name="chevron.up"
+          size={11}
+          tintColorClassName="accent-icon-muted"
+          type="monochrome"
+          weight="semibold"
+        />
       </StatusLabelRow>
     );
   }

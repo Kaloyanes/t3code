@@ -151,6 +151,8 @@ function Panel({ fixture }: { fixture: ReturnType<typeof setup> }) {
         composerDraftTarget={threadRef}
         worktreePath={state.folder}
         isServerThread
+        todoSteps={null}
+        todoState="active"
         activeProjectName={state.workspaceRoot === SCRATCH_ROOT ? "No project" : "plain"}
         activeProjectScripts={undefined}
         preferredScriptId={null}

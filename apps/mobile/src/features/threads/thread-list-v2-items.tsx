@@ -91,6 +91,7 @@ import {
   type ThreadListV2Status,
 } from "./threadListV2";
 import { QueuedMessageIcon } from "./queued-message-icon";
+import { withProgressCount } from "./thread-progress-presentation";
 import { shouldRecedeThreadRow } from "./thread-row-emphasis";
 import { ThreadSearchMatchExcerpt } from "./thread-search-match";
 import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
@@ -881,7 +882,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       : workingLabel) ?? (isUnread ? DONE_STATUS_LABEL : undefined);
   const statusLabel = statusEntry && {
     ...statusEntry,
-    label: statusEntry.label === null ? null : m(statusEntry.label),
+    label: withProgressCount(
+      status,
+      statusEntry.label === null ? null : m(statusEntry.label),
+      thread.goal?.status === "active" ? null : thread.todoProgress,
+    ),
   };
   const recede = shouldRecedeThreadRow({ status, selected });
   const isRegeneratingTitle = thread.titleRegeneration != null;
@@ -1457,6 +1462,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               <Text
                 className={cn(
                   "text-xs font-t3-bold",
+                  thread.todoProgress &&
+                    (status === "working" || status === "input" || status === "approval") &&
+                    "tabular-nums",
                   selected ? selectedThreadRowColors.foregroundClassName : statusLabel.className,
                 )}
               >

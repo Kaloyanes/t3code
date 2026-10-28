@@ -165,8 +165,13 @@ import {
   deriveActiveWorkStartedAt,
   deriveCanInterruptRunningThread,
   findRevertCheckpoint,
-  isLatestRunSettled,
 } from "../session-logic";
+import {
+  findLatestTodoSteps,
+  isLatestRunSettled,
+  resolveTodoRunState,
+  summarizeTodoSteps,
+} from "@t3tools/client-runtime/state/todo-progress";
 import { type LegendListRef } from "@legendapp/list/react";
 import { useWorkspaceMutationRefresh } from "../hooks/useWorkspaceMutationRefresh";
 import { DEFAULT_INTERACTION_MODE, type ChatMessage } from "../types";
@@ -1441,6 +1446,13 @@ export default function ChatView(props: ChatViewProps) {
   );
   const onHeldRequestIdsChange = useStableCallback((requestIds: ReadonlySet<string>) => {
     setHeldApprovalRequestIds((current) => (shallow(current, requestIds) ? current : requestIds));
+  });
+  const todoSteps = findLatestTodoSteps(serverProjection, activeLatestRun?.runId ?? null);
+  const todoState = resolveTodoRunState({
+    ...(todoSteps ? summarizeTodoSteps(todoSteps) : { completed: 0, total: 0 }),
+    settled: latestRunSettled,
+    pendingApprovals: pendingApprovals.length,
+    pendingUserInputs: pendingUserInputs.length,
   });
   // Answering an approval or question on any client resumes quota spending, so include it in the key.
   const usageLimitsKey =
@@ -3760,6 +3772,8 @@ export default function ChatView(props: ChatViewProps) {
                                     ? EMPTY_COMPOSER_BANNER_ITEMS
                                     : composerBannerItems
                                 }
+                                todoSteps={latestRunSettled ? null : todoSteps}
+                                todoState={todoState}
                                 resumeCompactionTokens={resumeCompactionTokens}
                                 keepFullHistory={keepFullHistory}
                                 onToggleKeepFullHistory={toggleKeepFullHistoryStable}
@@ -3968,6 +3982,8 @@ export default function ChatView(props: ChatViewProps) {
                   projectId={activeThread.projectId}
                   worktreePath={activeThread.worktreePath}
                   isServerThread={isServerThread}
+                  todoSteps={todoSteps}
+                  todoState={todoState}
                   {...(draftId ? { draftId } : {})}
                   composerDraftTarget={composerDraftTarget}
                   activeProjectName={activeProject?.title}

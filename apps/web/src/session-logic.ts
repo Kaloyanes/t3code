@@ -37,6 +37,7 @@ import type {
   ThreadPendingUserInput,
 } from "@t3tools/client-runtime/state/thread-requests";
 import type { ThreadRunSummary, ThreadRuntimeSummary } from "@t3tools/client-runtime/state/shell";
+import { summarizeTodoSteps } from "@t3tools/client-runtime/state/todo-progress";
 import { threadRuntimeHasInterruptibleRun } from "@t3tools/client-runtime/state/thread-execution";
 import { turnItemIsWorkspacePreparation } from "@t3tools/client-runtime/state/turn-item-presentation";
 
@@ -195,22 +196,6 @@ export function workEntryIndicatesToolNeutralStatus(entry: WorkLogEntry): boolea
     !workEntryIndicatesToolFailure(entry) &&
     !workEntryIndicatesToolSuccess(entry)
   );
-}
-
-export function isLatestRunSettled(
-  latestRun: Pick<ThreadRunSummary, "runId" | "startedAt" | "completedAt" | "status"> | null,
-  runtime: Pick<ThreadRuntimeSummary, "status" | "activeRunId"> | null,
-): boolean {
-  if (latestRun === null) return false;
-  if (
-    latestRun.status === "preparing" ||
-    latestRun.status === "queued" ||
-    latestRun.status === "starting" ||
-    latestRun.status === "running" ||
-    latestRun.status === "waiting"
-  )
-    return false;
-  return runtime?.activeRunId !== latestRun.runId;
 }
 
 export function deriveActiveWorkStartedAt(
@@ -493,19 +478,12 @@ function projectedWorkEntry(
     }
     case "todo_list": {
       // Each todo update is a quiet row where the agent wrote it; it opens to every step.
-      const done = item.steps.filter((step) => step.status === "completed").length;
-      const current =
-        item.steps.find((step) => step.status === "running") ??
-        item.steps.find((step) => step.status === "pending");
+      const { completed, total, current } = summarizeTodoSteps(item.steps);
       return {
         ...common,
         label: current
-          ? resolve(msg("Tasks {done}/{total} · {current}"), {
-              done,
-              total: item.steps.length,
-              current: current.text,
-            })
-          : resolve(msg("Tasks {done}/{total}"), { done, total: item.steps.length }),
+          ? resolve(msg("Tasks {done}/{total} · {current}"), { done: completed, total, current })
+          : resolve(msg("Tasks {done}/{total}"), { done: completed, total }),
       };
     }
     case "approval_request":

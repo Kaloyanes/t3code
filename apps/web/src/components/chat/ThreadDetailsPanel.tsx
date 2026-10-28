@@ -1,4 +1,5 @@
 import type {
+  OrchestrationV2PlanStep,
   EditorId,
   EnvironmentId,
   ProjectId,
@@ -21,6 +22,7 @@ import ProjectScriptsControl, {
 } from "../ProjectScriptsControl";
 import { T, useGT } from "gt-react";
 import { useState, type ComponentProps } from "react";
+import type { TodoRunState } from "@t3tools/client-runtime/state/todo-progress";
 import { ThreadDetailsCard } from "./ThreadDetailsCard";
 import { OpenInPicker } from "./OpenInPicker";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
@@ -45,6 +47,7 @@ import {
   THREAD_DETAILS_PANEL_LABEL_CLASS,
 } from "./threadDetailsPanelStyles";
 import { Menu, MenuPopup } from "../ui/menu";
+import { ThreadProgressCard } from "./ThreadProgressCard";
 
 interface ThreadDetailsPanelProps extends Pick<
   ComponentProps<typeof ThreadDetailsCard>,
@@ -56,6 +59,8 @@ interface ThreadDetailsPanelProps extends Pick<
   projectId: ProjectId;
   worktreePath: string | null;
   isServerThread: boolean;
+  todoSteps: ReadonlyArray<OrchestrationV2PlanStep> | null;
+  todoState: TodoRunState;
   draftId?: DraftId;
   composerDraftTarget: ComposerThreadTarget;
   activeProjectName: string | undefined;
@@ -162,6 +167,13 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
         event.preventDefault();
         setMenuPosition({ x: event.clientX, y: event.clientY });
       }}
+      footer={
+        <ThreadProgressCard
+          threadRef={activeThreadRef}
+          steps={props.todoSteps}
+          state={props.todoState}
+        />
+      }
     >
       {(density) => {
         // Section flags follow the rows that will render, so no empty section steals the divider rule.
