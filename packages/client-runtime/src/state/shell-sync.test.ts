@@ -139,6 +139,7 @@ const makeFamilyHarness = Effect.fn("test.makeFamilyHarness")(function* (input: 
   const subscribeInputs = yield* Queue.unbounded<unknown>();
   const saved = yield* Queue.unbounded<{ readonly verifiedServerVersion?: string }>();
   const httpLoads = yield* Ref.make(0);
+  const serverSnapshot = yield* Ref.make(input.snapshot ?? FAMILY_SNAPSHOT);
   const familySession = (
     serverVersion: string,
     events = Stream.make<ReadonlyArray<OrchestrationV2ShellStreamItem>>({
@@ -187,7 +188,8 @@ const makeFamilyHarness = Effect.fn("test.makeFamilyHarness")(function* (input: 
   const snapshotLoader = ShellSnapshotLoader.ShellSnapshotLoader.of({
     load: () =>
       Ref.update(httpLoads, (count) => count + 1).pipe(
-        Effect.as(Option.some(input.snapshot ?? FAMILY_SNAPSHOT)),
+        Effect.andThen(Ref.get(serverSnapshot)),
+        Effect.asSome,
       ),
   });
   const shellState = yield* makeEnvironmentShellState().pipe(
@@ -201,7 +203,16 @@ const makeFamilyHarness = Effect.fn("test.makeFamilyHarness")(function* (input: 
       Stream.runHead,
       Effect.map(Option.getOrThrow),
     );
-  return { sessions, familySession, subscribeInputs, saved, httpLoads, stateWhere, shellState };
+  return {
+    sessions,
+    familySession,
+    subscribeInputs,
+    saved,
+    httpLoads,
+    stateWhere,
+    shellState,
+    serverSnapshot,
+  };
 });
 
 describe("environment shell synchronization", () => {
@@ -808,25 +819,32 @@ describe("environment shell synchronization", () => {
     }),
   );
 
-  it.effect("resumes a verified snapshot on a replacement session of the same server build", () =>
+  it.effect("reloads restored history on a replacement session even when the build matches", () =>
     Effect.gen(function* () {
       const h = yield* makeFamilyHarness({ cached: Option.none(), initialVersion: "1.0.0" });
 
       yield* Queue.take(h.subscribeInputs);
       const first = yield* h.stateWhere((state) => state.status === "live");
 
+      yield* SubscriptionRef.set(h.sessions, yield* SubscriptionRef.get(h.sessions));
+      yield* Queue.take(h.subscribeInputs);
+      expect(yield* Ref.get(h.httpLoads)).toBe(1);
+      yield* Ref.set(h.serverSnapshot, {
+        ...FAMILY_SNAPSHOT,
+        projects: [{ ...v2Project, title: "Restored history" }],
+      });
       yield* SubscriptionRef.set(h.sessions, Option.some(h.familySession("1.0.0")));
       expect(yield* Queue.take(h.subscribeInputs)).toMatchObject({ afterSequence: 1 });
-      // On-demand reads key on generation, so a verified resume must still advance it.
-      yield* h.stateWhere(
+      const reloaded = yield* h.stateWhere(
         (state) => state.status === "live" && state.generation > first.generation,
       );
-      expect(yield* Ref.get(h.httpLoads)).toBe(1);
+      expect(Option.getOrThrow(reloaded.snapshot).projects[0]?.title).toBe("Restored history");
+      expect(yield* Ref.get(h.httpLoads)).toBe(2);
 
       // A different build may shape rows differently, so it reloads the snapshot.
       yield* SubscriptionRef.set(h.sessions, Option.some(h.familySession("1.1.0")));
       yield* Queue.take(h.subscribeInputs);
-      expect(yield* Ref.get(h.httpLoads)).toBe(2);
+      expect(yield* Ref.get(h.httpLoads)).toBe(3);
     }),
   );
 
@@ -902,19 +920,25 @@ describe("environment shell synchronization", () => {
         );
         yield* Deferred.succeed(configGate, undefined);
         expect(yield* Queue.take(h.subscribeInputs)).toMatchObject({ afterSequence: 1 });
-        expect(yield* Ref.get(h.httpLoads)).toBe(2);
+        expect(yield* Ref.get(h.httpLoads)).toBe(3);
       }),
   );
 
-  it.effect("resumes the cached snapshot on a cold start of the build that verified it", () =>
+  it.effect("reloads cached history on a cold start even when the build matches", () =>
     Effect.gen(function* () {
-      const cached = { ...FAMILY_SNAPSHOT, verifiedServerVersion: "1.0.0" };
+      const cached = {
+        ...FAMILY_SNAPSHOT,
+        verifiedServerVersion: "1.0.0",
+        projects: [{ ...v2Project, title: "Stale cached history" }],
+      };
       const sameBuild = yield* makeFamilyHarness({
         cached: Option.some(cached),
         initialVersion: "1.0.0",
       });
       expect(yield* Queue.take(sameBuild.subscribeInputs)).toMatchObject({ afterSequence: 1 });
-      expect(yield* Ref.get(sameBuild.httpLoads)).toBe(0);
+      expect(yield* Ref.get(sameBuild.httpLoads)).toBe(1);
+      const reloaded = yield* sameBuild.stateWhere((state) => state.status === "live");
+      expect(Option.getOrThrow(reloaded.snapshot).projects[0]?.title).toBe(v2Project.title);
 
       const updatedBuild = yield* makeFamilyHarness({
         cached: Option.some(cached),
