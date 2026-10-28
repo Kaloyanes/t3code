@@ -34,10 +34,11 @@ const layerRuntime = Layer.merge(
   ManagedRelayLayer.layer(configuredRelayUrl()),
   Socket.layerWebSocketConstructorGlobal,
 ).pipe(
-  Layer.provideMerge(DevSpanLog.layer),
+  Layer.provideMerge(
+    DevSpanLog.layer.pipe(Layer.provideMerge(Tracing.layer.pipe(Layer.provide(layerHttpClient)))),
+  ),
   Layer.provideMerge(Dpop.layer),
   Layer.provideMerge(layerHttpClient),
-  Layer.provideMerge(Tracing.layer.pipe(Layer.provide(layerHttpClient))),
   Layer.provideMerge(Persistence.layer),
   // These layers read the keychain and the database while they build, and a
   // failed build is kept for the life of the process.
