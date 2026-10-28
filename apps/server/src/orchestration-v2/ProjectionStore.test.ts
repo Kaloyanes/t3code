@@ -404,6 +404,106 @@ it.effect("SQL shells flag only an active turn blocked solely on T3 thread waits
   }).pipe(Effect.provide(layerTest)),
 );
 
+it.effect("shells carry only the latest run's todo list progress", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const threadId = yield* addRolledBackRecoveryCandidate("thread-todo-progress");
+    const initial = yield* store.getThreadProjection(threadId);
+    const at = initial.updatedAt;
+    const previousCommand = initial.turnItems.find((item) => item.type === "command_execution")!;
+    const itemBase = {
+      ...previousCommand,
+      providerThreadId: previousCommand.providerThreadId ?? null,
+      providerTurnId: previousCommand.providerTurnId ?? null,
+      nativeItemRef: previousCommand.nativeItemRef ?? null,
+      parentItemId: previousCommand.parentItemId ?? null,
+    };
+    yield* store.apply({
+      id: EventId.make("event:todo-progress:previous-completed"),
+      type: "run.updated",
+      threadId,
+      occurredAt: at,
+      payload: { ...initial.runs[0]!, status: "completed", completedAt: at },
+    });
+    const run = {
+      ...initial.runs[0]!,
+      id: RunId.make("run:todo-progress:active"),
+      ordinal: 2,
+      status: "running" as const,
+      completedAt: null,
+    };
+    yield* store.apply({
+      id: EventId.make("event:todo-progress:active"),
+      type: "run.created",
+      threadId,
+      occurredAt: at,
+      payload: run,
+    });
+    let sequence = 0;
+    const writeTodoList = (
+      runId: RunId,
+      steps: ReadonlyArray<{
+        id: string;
+        text: string;
+        status: "pending" | "running" | "completed";
+      }>,
+    ) =>
+      store.apply({
+        id: EventId.make(`event:todo-progress:item:${sequence++}`),
+        type: "turn-item.updated",
+        threadId,
+        runId,
+        driver,
+        occurredAt: at,
+        payload: {
+          ...itemBase,
+          id: TurnItemId.make(`item:todo-progress:${runId}`),
+          runId,
+          type: "todo_list",
+          planId: PlanId.make(`plan:todo-progress:${runId}`),
+          status: "running",
+          steps,
+        },
+      });
+    const progressOf = Effect.fnUntraced(function* () {
+      const listed = (yield* store.getShellSnapshot()).threads.find((row) => row.id === threadId);
+      return [
+        listed?.todoProgress ?? null,
+        (yield* store.getThreadShell(threadId))?.todoProgress ?? null,
+        ProjectionStore.threadShellFromProjection(yield* store.getThreadProjection(threadId))
+          .todoProgress ?? null,
+      ];
+    });
+
+    yield* writeTodoList(initial.runs[0]!.id, [{ id: "old", text: "Old run", status: "running" }]);
+    assert.deepEqual(yield* progressOf(), [null, null, null]);
+
+    yield* writeTodoList(run.id, [
+      { id: "a", text: "Read the code", status: "completed" },
+      { id: "b", text: "Write the fix", status: "running" },
+      { id: "c", text: "Run the tests", status: "pending" },
+    ]);
+    const midway = { completed: 1, total: 3, current: "Write the fix" };
+    assert.deepEqual(yield* progressOf(), [midway, midway, midway]);
+
+    yield* writeTodoList(run.id, [
+      { id: "a", text: "Read the code", status: "completed" },
+      { id: "b", text: "Write the fix", status: "completed" },
+    ]);
+    const finished = { completed: 2, total: 2 };
+    assert.deepEqual(yield* progressOf(), [finished, finished, finished]);
+
+    yield* store.apply({
+      id: EventId.make("event:todo-progress:active-completed"),
+      type: "run.updated",
+      threadId,
+      occurredAt: at,
+      payload: { ...run, status: "completed", completedAt: at },
+    });
+    assert.deepEqual(yield* progressOf(), [null, null, null]);
+  }).pipe(Effect.provide(layerTest)),
+);
+
 it.effect("SQL shells use the latest subagent owner for duplicate provider-thread ids", () =>
   Effect.gen(function* () {
     const store = yield* ProjectionStore.ProjectionStoreV2;

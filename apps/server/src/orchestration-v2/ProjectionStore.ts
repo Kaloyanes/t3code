@@ -942,6 +942,7 @@ type ShellThreadRow = {
   readonly pending_request_payload_json: string | null;
   readonly pending_secret_request_payload_json: string | null;
   readonly pending_link_request_payload_json: string | null;
+  readonly latest_todo_list_payload_json: string | null;
   readonly latest_user_message_at: string | null;
   readonly latest_user_authored_message_at: string | null;
   readonly has_actionable_proposed_plan: number;
@@ -1517,6 +1518,11 @@ export function threadShellFromProjection(
       projection.providerThreads,
       projection.thread.activeProviderThreadId,
     ),
+    todoProgress: todoProgressForShell(
+      latestRun?.id ?? null,
+      latestRun?.status ?? "idle",
+      latestTodoListItem(projection.turnItems),
+    ),
     itemCount: activeLocalTurnItems(projection).length,
     visibleItemCount: projection.visibleTurnItems.length,
     createdAt: projection.thread.createdAt,
@@ -1567,6 +1573,36 @@ function activeProviderGoalForShell(
   return providerThreads.find((thread) => thread.id === activeProviderThreadId)?.goal ?? null;
 }
 
+function latestTodoListItem(
+  turnItems: ReadonlyArray<OrchestrationV2ThreadProjection["turnItems"][number]>,
+) {
+  for (let index = turnItems.length - 1; index >= 0; index -= 1) {
+    const item = turnItems[index];
+    if (item?.type === "todo_list") return item;
+  }
+  return null;
+}
+
+// Progress only matters while a run is in flight, and a list from an earlier run says nothing
+// about the run the row shows now. The shell SQL gates its todo subquery on the same statuses.
+function todoProgressForShell(
+  latestRunId: RunId | null,
+  latestRunStatus: OrchestrationV2ShellThreadStatus,
+  item: ReturnType<typeof latestTodoListItem>,
+): OrchestrationV2ThreadShell["todoProgress"] {
+  if (!isInFlightShellStatus(latestRunStatus)) return null;
+  if (item === null || latestRunId === null || item.runId !== latestRunId) return null;
+  if (item.steps.length === 0) return null;
+  const current =
+    item.steps.find((step) => step.status === "running") ??
+    item.steps.find((step) => step.status === "pending");
+  return {
+    completed: item.steps.filter((step) => step.status === "completed").length,
+    total: item.steps.length,
+    ...(current === undefined ? {} : { current: current.text }),
+  };
+}
+
 function isSilentRunForShell(
   run: OrchestrationV2ThreadProjection["runs"][number],
   projection: Pick<OrchestrationV2ThreadProjection, "messages" | "turnItems">,
@@ -1584,6 +1620,12 @@ function isSilentRunForShell(
 
 function isInterruptibleRunForShell(run: OrchestrationV2ThreadProjection["runs"][number]): boolean {
   return run.status === "preparing" || run.status === "starting" || run.status === "running";
+}
+
+function isInFlightShellStatus(status: OrchestrationV2ShellThreadStatus): boolean {
+  return (
+    status === "preparing" || status === "starting" || status === "running" || status === "waiting"
+  );
 }
 
 type ShellActivityRunStatus = "preparing" | "running" | "starting" | "waiting";
@@ -1619,6 +1661,7 @@ type ShellThreadState = {
   readonly pendingBackgroundTasks: OrchestrationV2ThreadShell["pendingBackgroundTasks"];
   readonly providerInstanceHistory: OrchestrationV2ThreadShell["providerInstanceHistory"];
   readonly goal: OrchestrationV2ThreadShell["goal"];
+  readonly todoProgress: OrchestrationV2ThreadShell["todoProgress"];
   readonly itemCount: number;
   readonly runlessItemCount: number;
   readonly updatedAt: OrchestrationV2ThreadProjection["updatedAt"];
@@ -1783,6 +1826,7 @@ function shellFromState(input: {
     pendingBackgroundTasks: input.state.pendingBackgroundTasks,
     providerInstanceHistory: input.state.providerInstanceHistory,
     goal: input.state.goal,
+    todoProgress: input.state.todoProgress,
     itemCount: input.state.itemCount,
     visibleItemCount: input.visibleItemCount,
     createdAt: input.state.thread.createdAt,
@@ -5854,6 +5898,14 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 ORDER BY link.updated_at DESC, link.turn_item_id DESC
                 LIMIT 1
               ) AS pending_link_request_payload_json,
+              CASE WHEN presented.status IN ('preparing', 'starting', 'running', 'waiting') THEN (
+                SELECT todo.payload_json
+                FROM orchestration_v2_projection_turn_items todo
+                  INDEXED BY orchestration_v2_projection_turn_items_todo_list_idx
+                WHERE todo.thread_id = t.thread_id AND todo.type = 'todo_list'
+                ORDER BY todo.updated_at DESC, todo.turn_item_id DESC
+                LIMIT 1
+              ) END AS latest_todo_list_payload_json,
               (
                 SELECT message.updated_at
                 FROM orchestration_v2_projection_messages message
@@ -6457,6 +6509,15 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           goal: activeProviderGoalForShell(
             providerThreadsByThreadId.get(thread.id) ?? [],
             thread.activeProviderThreadId,
+          ),
+          todoProgress: todoProgressForShell(
+            latestRunId,
+            latestRunStatus,
+            row.latest_todo_list_payload_json === null
+              ? null
+              : latestTodoListItem([
+                  yield* decodeTurnItemPayload(row.latest_todo_list_payload_json),
+                ]),
           ),
           itemCount: shellItemCountsByThreadId.get(thread.id)?.itemCount ?? 0,
           runlessItemCount: shellItemCountsByThreadId.get(thread.id)?.runlessItemCount ?? 0,

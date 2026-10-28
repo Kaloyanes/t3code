@@ -25,10 +25,12 @@ import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { ControlPill } from "../../components/ui/ControlPill";
+import { ProgressRing } from "../../components/ProgressRing";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { BrowserPreviewButton } from "../browser/browser-preview-button";
 import { DevicePreviewButton } from "../devices/device-preview-button";
 import type { FloatingWorkingStatus } from "./floating-working-status";
+import { THREAD_PROGRESS_TONE_CLASSES } from "./thread-progress-presentation";
 import { ShimmeringWorkContent } from "./thread-work-log";
 import { useVisibleSecondClock } from "./use-visible-second-clock";
 
@@ -160,6 +162,7 @@ export function FloatingWorkingControl(props: {
   const statusInteractive =
     props.status?.kind === "connection" ||
     props.status?.kind === "child-input" ||
+    props.status?.kind === "progress" ||
     props.status?.kind === "background";
   const capsuleInteractive =
     statusInteractive || action !== null || hasQueue || hasAgents || hasPreview;
@@ -177,7 +180,9 @@ export function FloatingWorkingControl(props: {
         >
           <FloatingStatusLabel
             key={
-              props.status.kind === "working" || props.status.kind === "compacting"
+              props.status.kind === "working" ||
+              props.status.kind === "compacting" ||
+              props.status.kind === "progress"
                 ? props.status.kind
                 : `${props.status.kind}:${props.status.label}`
             }
@@ -486,6 +491,40 @@ function FloatingStatusLabel(props: {
       </StatusLabelRow>
     );
   }
+  if (props.status.kind === "progress") {
+    return (
+      <StatusLabelRow
+        key="progress"
+        accessibilityLabel={props.status.accessibilityLabel}
+        accessibilityRole="button"
+        className="gap-2.5"
+        onLayout={props.onLayout}
+        onPress={props.status.onPress}
+      >
+        <ProgressRing
+          fraction={props.status.fraction}
+          size={18}
+          colorClassName={THREAD_PROGRESS_TONE_CLASSES[props.status.tone].accent}
+        />
+        <Text className="shrink font-t3-bold text-sm text-foreground" numberOfLines={1}>
+          {props.status.title}
+        </Text>
+        <View className="h-3.5 w-px bg-border" />
+        <ProgressMeta
+          count={props.status.count}
+          startedAt={props.status.startedAt}
+          waitingNote={props.status.waitingNote}
+        />
+        <SymbolView
+          name="chevron.up"
+          size={11}
+          tintColorClassName="accent-icon-muted"
+          type="monochrome"
+          weight="semibold"
+        />
+      </StatusLabelRow>
+    );
+  }
   if (props.status.kind === "preparing") {
     return (
       <StatusLabelRow
@@ -559,6 +598,26 @@ function WorkingDuration(props: {
     <StatusLabelRow onLayout={props.onLayout}>
       <WorkingTimer startedAt={props.startedAt} />
     </StatusLabelRow>
+  );
+}
+
+function ProgressMeta(props: {
+  readonly count: string;
+  readonly startedAt: string | null;
+  readonly waitingNote: string | null;
+}) {
+  const nowMs = useVisibleSecondClock(props.startedAt !== null && props.waitingNote === null);
+  const trailing =
+    props.waitingNote ??
+    (props.startedAt === null ? null : formatWorkingDuration(props.startedAt, nowMs));
+  return (
+    <SystemText
+      className="shrink-0 text-xs text-foreground-muted"
+      numberOfLines={1}
+      style={{ fontVariant: ["tabular-nums"], fontWeight: "500" }}
+    >
+      {trailing === null ? props.count : `${props.count} · ${trailing}`}
+    </SystemText>
   );
 }
 

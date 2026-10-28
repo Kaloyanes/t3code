@@ -105,6 +105,7 @@ import { ProjectFavicon, type ProjectFaviconProject } from "../ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "../ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "../chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
+import { ProgressRing } from "../chat/ProgressRing";
 import { getTriggerDisplayModelName } from "../chat/providerIconUtils";
 import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../providerInstances";
 import { useThreadRunningTerminalIds } from "../../state/terminalSessions";
@@ -526,7 +527,14 @@ const TOP_STATUS_ICONS = {
   woke: AlarmClockIcon,
 } as const;
 
-function TopStatusIcon(props: { icon: keyof typeof TOP_STATUS_ICONS; className: string }) {
+function TopStatusIcon(props: {
+  icon: keyof typeof TOP_STATUS_ICONS;
+  className: string;
+  progress?: number | undefined;
+}) {
+  if (props.progress !== undefined) {
+    return <ProgressRing fraction={props.progress} className={cn("shrink-0", props.className)} />;
+  }
   const Icon = TOP_STATUS_ICONS[props.icon];
   return <Icon aria-hidden className={cn("shrink-0", props.className)} />;
 }
@@ -720,10 +728,25 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     isActive: props.isActive,
     isSelected,
   });
+  const todoProgress =
+    status === "working" && thread.goal?.status !== "active" ? (thread.todoProgress ?? null) : null;
+  const blockedProgress =
+    (status === "input" || status === "approval") && thread.todoProgress
+      ? ` ${thread.todoProgress.completed}/${thread.todoProgress.total}`
+      : "";
   const topStatus =
     status === "working"
       ? {
-          label: thread.goal?.status === "active" ? "Goal" : "Working",
+          label:
+            thread.goal?.status === "active"
+              ? "Goal"
+              : todoProgress
+                ? `${todoProgress.completed}/${todoProgress.total}`
+                : "Working",
+          accessibleLabel: todoProgress
+            ? `Working, ${todoProgress.completed} of ${todoProgress.total} steps done`
+            : undefined,
+          progress: todoProgress ? todoProgress.completed / todoProgress.total : undefined,
           icon: "working" as const,
           className: "text-info-foreground",
         }
@@ -735,13 +758,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           }
         : status === "approval"
           ? {
-              label: "Approval",
+              label: `Approval${blockedProgress}`,
               icon: "approval" as const,
               className: "text-warning-foreground",
             }
           : status === "input"
             ? {
-                label: "Input",
+                label: `Input${blockedProgress}`,
                 icon: "input" as const,
                 className: "text-indigo-600 dark:text-indigo-300",
               }
@@ -777,6 +800,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         }
                       : null;
   const isWokeStatus = topStatus?.icon === "woke";
+  // The row being read swaps its branch line for the current step, so its height never changes.
+  const currentStepLine =
+    todoProgress?.current && props.isActive ? (
+      <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+        <span className="min-w-0 flex-1 truncate">{todoProgress.current}</span>
+      </div>
+    ) : null;
 
   const branchMismatch = resolveLocalCheckoutBranchMismatch({
     effectiveEnvMode: thread.worktreePath === null ? "local" : "worktree",
@@ -997,7 +1027,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
 
   const accessibility = resolveSidebarRowAccessibility({
     title: thread.title,
-    statusLabel: topStatus?.label ?? null,
+    statusLabel: topStatus?.accessibleLabel ?? topStatus?.label ?? null,
     projectDisplayName: props.projectDisplayName,
     isActive: props.isActive,
   });
@@ -1131,55 +1161,61 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     diff === null &&
     !isRemote &&
     runningTerminalIds.length === 0;
-  const metaLine = metaLineEmpty ? null : (
-    <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
-      {thread.branch ? (
-        <>
-          <ThreadWorktreeIndicator thread={thread} />
-          <span className="flex min-w-0 flex-1">
-            <MiddleTruncate value={thread.branch} showTitle={false} />
-          </span>
-        </>
-      ) : showsScratchMachine ? (
-        <>
-          <EnvironmentMachineIcon
+  const metaLine = metaLineEmpty
+    ? null
+    : (currentStepLine ?? (
+        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+          {thread.branch ? (
+            <>
+              <ThreadWorktreeIndicator thread={thread} />
+              <span className="flex min-w-0 flex-1">
+                <MiddleTruncate value={thread.branch} showTitle={false} />
+              </span>
+            </>
+          ) : showsScratchMachine ? (
+            <>
+              <EnvironmentMachineIcon
+                aria-hidden
+                kind={props.environmentMachine}
+                className="size-3 shrink-0"
+              />
+              <span className="min-w-0 flex-1 truncate">{props.scratchMachineLabel}</span>
+            </>
+          ) : (
+            <span className="flex-1" />
+          )}
+          {terminalStatusIcon}
+          {prBadge}
+          {diff ? (
+            <span className="shrink-0 font-mono">
+              <span className="text-diff-addition-foreground">
+                +{formatDiffCount(diff.insertions)}
+              </span>{" "}
+              <span className="text-diff-deletion-foreground">
+                −{formatDiffCount(diff.deletions)}
+              </span>
+            </span>
+          ) : null}
+          <span
             aria-hidden
-            kind={props.environmentMachine}
-            className="size-3 shrink-0"
-          />
-          <span className="min-w-0 flex-1 truncate">{props.scratchMachineLabel}</span>
-        </>
-      ) : (
-        <span className="flex-1" />
-      )}
-      {terminalStatusIcon}
-      {prBadge}
-      {diff ? (
-        <span className="shrink-0 font-mono">
-          <span className="text-diff-addition-foreground">+{formatDiffCount(diff.insertions)}</span>{" "}
-          <span className="text-diff-deletion-foreground">−{formatDiffCount(diff.deletions)}</span>
-        </span>
-      ) : null}
-      <span
-        aria-hidden
-        className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
-      >
-        {isRemote && !showsScratchMachine ? (
-          <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
-            <EnvironmentMachineIcon
-              aria-hidden
-              kind={props.environmentMachine}
-              className="size-3.5"
+            className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
+          >
+            {isRemote && !showsScratchMachine ? (
+              <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
+                <EnvironmentMachineIcon
+                  aria-hidden
+                  kind={props.environmentMachine}
+                  className="size-3.5"
+                />
+              </span>
+            ) : null}
+            <SidebarProviderStack
+              thread={thread}
+              providerEntryByInstanceId={props.providerEntryByInstanceId}
             />
           </span>
-        ) : null}
-        <SidebarProviderStack
-          thread={thread}
-          providerEntryByInstanceId={props.providerEntryByInstanceId}
-        />
-      </span>
-    </div>
-  );
+        </div>
+      ));
   const titleLineProviderStack = metaLineEmpty ? (
     <span aria-hidden className="inline-flex shrink-0">
       <SidebarProviderStack
@@ -1303,7 +1339,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                           topStatus.className,
                         )}
                       >
-                        <TopStatusIcon icon={topStatus.icon} className="size-3" />
+                        <TopStatusIcon
+                          icon={topStatus.icon}
+                          className="size-3"
+                          progress={topStatus.progress}
+                        />
                         {topStatus.label}
                       </span>
                     ) : (
@@ -1482,7 +1522,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                             topStatus.className,
                           )}
                         >
-                          <TopStatusIcon icon={topStatus.icon} className="size-4" />
+                          <TopStatusIcon
+                            icon={topStatus.icon}
+                            className="size-4"
+                            progress={topStatus.progress}
+                          />
                           {/* Not a live region: a collapsed sidebar is inert, so
                             BackgroundThreadAnnouncer and the open thread's
                             timeline speak status changes instead. */}
