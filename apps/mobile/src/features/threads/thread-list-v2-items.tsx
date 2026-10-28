@@ -74,6 +74,7 @@ import {
   type ThreadListV2Status,
 } from "./threadListV2";
 import { QueuedMessageIcon } from "./queued-message-icon";
+import { withProgressCount } from "./thread-progress-presentation";
 import { shouldRecedeThreadRow } from "./thread-row-emphasis";
 import { ThreadSearchMatchExcerpt } from "./thread-search-match";
 import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
@@ -689,9 +690,14 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const workingLabel = STATUS_LABEL_BY_STATUS[status];
   const showsWoke = status === "ready" && props.wokeAt !== null;
   const statusLabel =
-    (status === "working" && workingLabel !== undefined && thread.goal?.status === "active"
+    (workingLabel !== undefined && status === "working" && thread.goal?.status === "active"
       ? { ...workingLabel, label: "Goal" }
-      : workingLabel) ?? (isUnread ? DONE_STATUS_LABEL : undefined);
+      : workingLabel !== undefined
+        ? {
+            ...workingLabel,
+            label: withProgressCount(status, workingLabel.label, thread.todoProgress),
+          }
+        : undefined) ?? (isUnread ? DONE_STATUS_LABEL : undefined);
   const recede = shouldRecedeThreadRow({ status, selected });
   const timeLabel = props.timeLabel;
 
@@ -1120,7 +1126,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               <Text
                 className={cn(
                   "text-xs font-t3-bold",
-                  (status === "working" || status === "waiting") && "tabular-nums",
+                  (status === "working" ||
+                    status === "waiting" ||
+                    status === "input" ||
+                    status === "approval") &&
+                    "tabular-nums",
                   selected ? selectedThreadRowColors.foregroundClassName : statusLabel.className,
                 )}
               >

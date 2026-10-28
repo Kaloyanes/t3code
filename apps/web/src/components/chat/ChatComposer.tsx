@@ -18,6 +18,7 @@ import type {
   ChatFileAttachment,
   EnvironmentId,
   ModelSelection,
+  OrchestrationV2PlanStep,
   ProjectId,
   PreviewAnnotationPayload,
   ThreadContextRecord,
@@ -112,6 +113,7 @@ import type { ThreadSyncPhase } from "../../threadSync";
 import { ComposerBanner } from "./ComposerBanner";
 import { ComposerSurface } from "./ComposerSurface";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./ComposerBannerStack";
+import { ThreadProgressStrip } from "./ThreadProgressStrip";
 import {
   attachmentsToReleaseOnUploadCapabilityLoss,
   composerOtherFilesForPresentation,
@@ -255,6 +257,7 @@ import type {
   PendingApproval,
   PendingUserInput,
 } from "../../session-logic";
+import type { TodoRunState } from "@t3tools/client-runtime/state/todo-progress";
 import {
   resolveComposerDispatchMode,
   type ComposerDispatchMode,
@@ -388,6 +391,9 @@ export interface ChatComposerProps {
   isPreparingWorktree: boolean;
   isCompacting: boolean;
   bannerItems: readonly ComposerBannerStackItem[];
+  /** The agent's task list while its run is active. */
+  todoSteps: ReadonlyArray<OrchestrationV2PlanStep> | null;
+  todoState: TodoRunState;
   resumeCompactionTokens: number | null;
   keepFullHistory: boolean;
   onToggleKeepFullHistory: () => void;
@@ -3438,6 +3444,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : null}
       <ComposerBanner.Dock>
         <ComposerBanner.Column>
+          <ThreadProgressStrip
+            threadRef={routeThreadRef}
+            steps={props.todoSteps}
+            state={props.todoState}
+          />
           <ComposerBannerStack items={shelfItems} />
           {showComposerTopDrawer ? (
             <ComposerBanner.Attachment>

@@ -1296,6 +1296,15 @@ export const OrchestrationV2PlanStep = Schema.Struct({
 });
 export type OrchestrationV2PlanStep = typeof OrchestrationV2PlanStep.Type;
 
+/** The agent's latest task list boiled down to what a sidebar row shows. */
+export const OrchestrationV2TodoProgress = Schema.Struct({
+  completed: NonNegativeInt,
+  total: PositiveInt,
+  /** The step in progress, or the next pending one. Absent once every step is done. */
+  current: Schema.optional(TrimmedNonEmptyString),
+});
+export type OrchestrationV2TodoProgress = typeof OrchestrationV2TodoProgress.Type;
+
 export const OrchestrationV2UserInputQuestion = Schema.Struct({
   id: TrimmedNonEmptyString,
   header: TrimmedNonEmptyString,
@@ -2061,6 +2070,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   goal: Schema.optional(Schema.NullOr(OrchestrationV2ProviderGoal)),
+  /** The latest run's task list, when the agent wrote one. Absent from older servers. */
+  todoProgress: Schema.optional(Schema.NullOr(OrchestrationV2TodoProgress)),
   itemCount: NonNegativeInt,
   visibleItemCount: NonNegativeInt,
   createdAt: Schema.DateTimeUtc,

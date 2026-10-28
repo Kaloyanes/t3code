@@ -17,11 +17,14 @@ export function ThreadDetailsCard({
   threadRef,
   anchor,
   handle,
+  footer,
   children,
 }: {
   threadRef: ScopedThreadRef;
   anchor: RefObject<Element | null>;
   handle: ReturnType<typeof PopoverCreateHandle>;
+  /** A card under the details card, only while the card sits inline. */
+  footer?: ReactNode;
   children: (density: "full" | "compact" | "essential") => ReactNode;
 }) {
   const detailsArea = workspaceAreaProps("details", 3, "Thread details");
@@ -140,7 +143,7 @@ export function ThreadDetailsCard({
           data-workspace-focus-key={`details:${threadRef.environmentId}:${threadRef.threadId}`}
           // Skip the return transition to avoid overlapping the rising preview.
           className={cn(
-            "absolute z-20",
+            "absolute z-20 flex flex-col gap-2",
             topInset > 0 && "transition-[top] duration-150 ease-out motion-reduce:transition-none",
           )}
           style={{
@@ -153,6 +156,7 @@ export function ThreadDetailsCard({
           data-thread-details-panel="inline"
         >
           {card}
+          {footer}
         </aside>
       ) : null}
       {/* Rendered in both modes: base-ui keeps a popup that unmounts mid-open
