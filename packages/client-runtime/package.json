@@ -315,6 +315,10 @@
       "types": "./src/state/threadSort.ts",
       "default": "./src/state/threadSort.ts"
     },
+    "./state/todo-progress": {
+      "types": "./src/state/todoProgress.ts",
+      "default": "./src/state/todoProgress.ts"
+    },
     "./state/thread-inbox": {
       "types": "./src/state/threadInbox.ts",
       "default": "./src/state/threadInbox.ts"

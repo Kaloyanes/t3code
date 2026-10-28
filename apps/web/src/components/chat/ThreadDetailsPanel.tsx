@@ -1,4 +1,5 @@
 import type {
+  OrchestrationV2PlanStep,
   EditorId,
   EnvironmentId,
   ProjectId,
@@ -17,12 +18,14 @@ import ProjectScriptsControl, {
   type ProjectScriptActionResult,
 } from "../ProjectScriptsControl";
 import { memo, type ComponentProps } from "react";
+import type { TodoRunState } from "@t3tools/client-runtime/state/todo-progress";
 import { ThreadDetailsCard } from "./ThreadDetailsCard";
 import { OpenInPicker } from "./OpenInPicker";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 import { ThreadServersPanel } from "./ThreadServersPanel";
+import { ThreadProgressCard } from "./ThreadProgressCard";
 
 const GitActionsControl = memo(BaseGitActionsControl);
 
@@ -36,6 +39,8 @@ interface ThreadDetailsPanelProps extends Pick<
   projectId: ProjectId;
   worktreePath: string | null;
   isServerThread: boolean;
+  todoSteps: ReadonlyArray<OrchestrationV2PlanStep> | null;
+  todoState: TodoRunState;
   draftId?: DraftId;
   activeProjectName: string | undefined;
   activeProjectScripts: ReadonlyArray<ProjectScript> | undefined;
@@ -106,6 +111,13 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
       threadRef={{ environmentId: props.environmentId, threadId: props.threadId }}
       anchor={props.anchor}
       handle={props.handle}
+      footer={
+        <ThreadProgressCard
+          threadRef={activeThreadRef}
+          steps={props.todoSteps}
+          state={props.todoState}
+        />
+      }
     >
       {(density) => (
         <>

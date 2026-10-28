@@ -192,6 +192,9 @@ import { useThreadTurnSubagents } from "./ThreadAgentsSheet";
 import { ComposerQueuedEditBanner } from "./ComposerQueuedEdit";
 import { useThreadQueuedCount } from "./ThreadQueueControl";
 import { ThreadGuestShareBar } from "./ThreadGuestShareBar";
+import { ThreadProgressSheet } from "./ThreadProgressSheet";
+import { presentThreadProgress } from "./thread-progress-presentation";
+import { useThreadProgress } from "./use-thread-progress";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-live-follow";
 import { useOpenLinkedThread } from "./useOpenLinkedThread";
@@ -609,6 +612,34 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
   const pendingBackgroundWork = presentPendingBackgroundWork(
     props.selectedThread.pendingBackgroundTasks,
   );
+  const [progressSheetOpen, setProgressSheetOpen] = useState(false);
+  const openProgressSheet = () => {
+    Keyboard.dismiss();
+    setProgressSheetOpen(true);
+  };
+  const threadProgress = useThreadProgress({
+    threadRef: props.selectedThreadDetailRef,
+    thread: props.selectedThread,
+    hasPendingApproval: props.activePendingApproval !== null,
+    hasPendingUserInput: props.activePendingUserInput !== null,
+  });
+  const progressStatus = ((): FloatingWorkingStatus | null => {
+    if (threadProgress === null || contentPresentationKind !== "ready") return null;
+    const progress = presentThreadProgress(threadProgress.steps, threadProgress.state);
+    const blocked = progress.note !== null;
+    if (props.activeWorkStartedAt === null && !blocked) return null;
+    return {
+      kind: "progress",
+      startedAt: props.activeWorkStartedAt,
+      title: progress.title,
+      count: progress.count,
+      waitingNote: blocked ? "Waiting" : null,
+      fraction: progress.fraction,
+      tone: progress.tone,
+      accessibilityLabel: `${progress.title}, ${progress.description}. Shows every step`,
+      onPress: openProgressSheet,
+    };
+  })();
   const floatingStatus = ((): FloatingWorkingStatus | null => {
     const connectionStatus = connectionFloatingStatus({
       connectionError: props.connectionError,
@@ -650,6 +681,7 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
     if (props.isCompacting && contentPresentationKind === "ready") {
       return { kind: "compacting" };
     }
+    if (progressStatus !== null) return progressStatus;
     if (props.activeWorkStartedAt !== null && contentPresentationKind === "ready") {
       return { kind: "working", startedAt: props.activeWorkStartedAt };
     }
@@ -1383,6 +1415,14 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                 className="w-full"
               >
                 <View className="w-full self-center" style={{ maxWidth: contentMaxWidth }}>
+                  {threadProgress !== null ? (
+                    <ThreadProgressSheet
+                      open={progressSheetOpen}
+                      onClose={() => setProgressSheetOpen(false)}
+                      steps={threadProgress.steps}
+                      state={threadProgress.state}
+                    />
+                  ) : null}
                   <FloatingWorkingControl
                     colorScheme={isDarkMode ? "dark" : "light"}
                     status={floatingStatus}

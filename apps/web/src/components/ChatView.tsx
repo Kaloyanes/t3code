@@ -135,8 +135,13 @@ import {
   findLatestProposedPlan,
   findRevertCheckpoint,
   hasActionableProposedPlan,
-  isLatestRunSettled,
 } from "../session-logic";
+import {
+  findLatestTodoSteps,
+  isLatestRunSettled,
+  resolveTodoRunState,
+  summarizeTodoSteps,
+} from "@t3tools/client-runtime/state/todo-progress";
 import { type LegendListRef } from "@legendapp/list/react";
 import { useWorkspaceMutationRefresh } from "../hooks/useWorkspaceMutationRefresh";
 import { DEFAULT_INTERACTION_MODE, type ChatMessage } from "../types";
@@ -1323,6 +1328,13 @@ export default function ChatView(props: ChatViewProps) {
     }
     return findLatestProposedPlan(serverProjection, activeLatestRun?.runId ?? null);
   })();
+  const todoSteps = findLatestTodoSteps(serverProjection, activeLatestRun?.runId ?? null);
+  const todoState = resolveTodoRunState({
+    ...(todoSteps ? summarizeTodoSteps(todoSteps) : { completed: 0, total: 0 }),
+    settled: latestRunSettled,
+    pendingApprovals: pendingApprovals.length,
+    pendingUserInputs: pendingUserInputs.length,
+  });
   const showPlanFollowUpPrompt = shouldShowPlanFollowUpPrompt({
     pendingUserInputCount: pendingUserInputs.length,
     interactionMode,
@@ -3486,6 +3498,8 @@ export default function ChatView(props: ChatViewProps) {
                               }
                               isPreparingWorktree={isPreparingWorktree && !sendQueuesBehindSetup}
                               bannerItems={composerBannerItems}
+                              todoSteps={latestRunSettled ? null : todoSteps}
+                              todoState={todoState}
                               resumeCompactionTokens={resumeCompactionTokens}
                               keepFullHistory={keepFullHistory}
                               onToggleKeepFullHistory={toggleKeepFullHistoryStable}
@@ -3700,6 +3714,8 @@ export default function ChatView(props: ChatViewProps) {
               projectId={activeThread.projectId}
               worktreePath={activeThread.worktreePath}
               isServerThread={isServerThread}
+              todoSteps={todoSteps}
+              todoState={todoState}
               {...(draftId ? { draftId } : {})}
               activeProjectName={activeProject?.title}
               activeProjectScripts={activeProject ? activeProjectScripts : undefined}

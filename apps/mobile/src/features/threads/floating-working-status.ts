@@ -1,5 +1,7 @@
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 
+import type { ThreadProgressTone } from "./thread-progress-presentation";
+
 export interface FloatingStatusAction {
   readonly label: string;
   readonly accessibilityLabel: string;
@@ -9,6 +11,17 @@ export interface FloatingStatusAction {
 
 export type FloatingWorkingStatus =
   | { readonly kind: "working"; readonly startedAt: string }
+  | {
+      readonly kind: "progress";
+      readonly startedAt: string | null;
+      readonly title: string;
+      readonly count: string;
+      readonly waitingNote: string | null;
+      readonly fraction: number;
+      readonly tone: ThreadProgressTone;
+      readonly accessibilityLabel: string;
+      readonly onPress: () => void;
+    }
   | { readonly kind: "syncing"; readonly label: string }
   | { readonly kind: "compacting" }
   | {
