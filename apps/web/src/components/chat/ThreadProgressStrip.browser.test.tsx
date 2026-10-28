@@ -119,3 +119,19 @@ it("takes over when the details card is closed", async () => {
   await expect.element(screen.getByRole("region", { name: "Progress" })).not.toBeInTheDocument();
   await expect.element(screen.getByText("Write the fix")).toBeVisible();
 });
+
+it("opens progress from the strip when details use a popover", async () => {
+  const threadRef = setup();
+  await using screen = await render(
+    <>
+      <ThreadProgressCard threadRef={threadRef} steps={steps} state="active" />
+      <ThreadProgressStrip threadRef={threadRef} steps={steps} state="active" />
+    </>,
+    { router: false }, // no routing involved
+  );
+
+  await expect.element(screen.getByRole("region", { name: "Progress" })).not.toBeInTheDocument();
+  await screen.getByRole("button", { name: "Show progress in details" }).click();
+  await expect.element(screen.getByRole("region", { name: "Progress" })).toBeVisible();
+  await expect.element(screen.getByText("Run the tests")).toBeVisible();
+});

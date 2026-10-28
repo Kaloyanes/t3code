@@ -447,6 +447,7 @@ it.effect("shells carry only the latest run's todo list progress", () =>
         text: string;
         status: "pending" | "running" | "completed";
       }>,
+      updatedAt = at,
     ) =>
       store.apply({
         id: EventId.make(`event:todo-progress:item:${sequence++}`),
@@ -457,6 +458,7 @@ it.effect("shells carry only the latest run's todo list progress", () =>
         occurredAt: at,
         payload: {
           ...itemBase,
+          updatedAt,
           id: TurnItemId.make(`item:todo-progress:${runId}`),
           runId,
           type: "todo_list",
@@ -483,6 +485,11 @@ it.effect("shells carry only the latest run's todo list progress", () =>
       { id: "b", text: "Write the fix", status: "running" },
       { id: "c", text: "Run the tests", status: "pending" },
     ]);
+    yield* writeTodoList(
+      initial.runs[0]!.id,
+      [{ id: "old", text: "Late update from the old run", status: "running" }],
+      DateTime.add(at, { seconds: 1 }),
+    );
     const midway = { completed: 1, total: 3, current: "Write the fix" };
     assert.deepEqual(yield* progressOf(), [midway, midway, midway]);
 

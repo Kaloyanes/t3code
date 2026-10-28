@@ -21,19 +21,19 @@ export const useThreadProgressStore = create<ThreadProgressStore>()((set) => ({
     }),
 }));
 
-/**
- * The progress card hangs under the inline details card. In popover mode, or once the
- * details card or the progress card is closed, the strip above the composer takes over.
- */
 export function useThreadProgressCardVisible(threadRef: ScopedThreadRef): boolean {
   const inline = useChatCanvas()?.detailsCardPlacement != null;
   const detailsOpen = useRightPanelStore((state) =>
-    selectThreadPanelOpen(state.threadPanelVisibilityByThreadKey, threadRef, "inline"),
+    selectThreadPanelOpen(
+      state.threadPanelVisibilityByThreadKey,
+      threadRef,
+      inline ? "inline" : "popover",
+    ),
   );
   const closed = useThreadProgressStore(
     (state) => state.closedByThreadKey[scopedThreadKey(threadRef)] === true,
   );
-  return inline && detailsOpen && !closed;
+  return detailsOpen && !closed;
 }
 
 export function showThreadProgressInDetails(threadRef: ScopedThreadRef, inline: boolean) {

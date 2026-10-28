@@ -623,6 +623,7 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
     hasPendingApproval: props.activePendingApproval !== null,
     hasPendingUserInput: props.activePendingUserInput !== null,
   });
+  if (threadProgress === null && progressSheetOpen) setProgressSheetOpen(false);
   const progressStatus = ((): FloatingWorkingStatus | null => {
     if (threadProgress === null || contentPresentationKind !== "ready") return null;
     const progress = presentThreadProgress(threadProgress.steps, threadProgress.state);

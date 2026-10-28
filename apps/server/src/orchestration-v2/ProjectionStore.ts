@@ -5903,6 +5903,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 FROM orchestration_v2_projection_turn_items todo
                   INDEXED BY orchestration_v2_projection_turn_items_todo_list_idx
                 WHERE todo.thread_id = t.thread_id AND todo.type = 'todo_list'
+                  AND todo.run_id = presented.run_id
                 ORDER BY todo.updated_at DESC, todo.turn_item_id DESC
                 LIMIT 1
               ) END AS latest_todo_list_payload_json,

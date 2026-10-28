@@ -800,13 +800,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         }
                       : null;
   const isWokeStatus = topStatus?.icon === "woke";
-  // The row being read swaps its branch line for the current step, so its height never changes.
-  const currentStepLine =
-    todoProgress?.current && props.isActive ? (
-      <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
-        <span className="min-w-0 flex-1 truncate">{todoProgress.current}</span>
-      </div>
-    ) : null;
+  const currentStep = props.isActive ? todoProgress?.current : undefined;
 
   const branchMismatch = resolveLocalCheckoutBranchMismatch({
     effectiveEnvMode: thread.worktreePath === null ? "local" : "worktree",
@@ -1155,6 +1149,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const diff = latestRunDiff(thread);
   // Only the provider icon would remain, so the row drops the line instead of leaving it blank.
   const metaLineEmpty =
+    !currentStep &&
     !thread.branch &&
     !showsScratchMachine &&
     prBadge === null &&
@@ -1163,7 +1158,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     runningTerminalIds.length === 0;
   const metaLine = metaLineEmpty ? null : (
     <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
-      {thread.branch ? (
+      {currentStep ? (
+        <span className="min-w-0 flex-1 truncate">{currentStep}</span>
+      ) : thread.branch ? (
         <>
           <ThreadWorktreeIndicator thread={thread} />
           <span className="flex min-w-0 flex-1">
@@ -1405,7 +1402,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               )}
               {props.sweepAction !== null ? dragDestination : null}
             </div>
-            {multiline && !metaLineEmpty ? (currentStepLine ?? metaLine) : null}
+            {multiline ? metaLine : null}
             {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
           </TooltipTrigger>
           {detailsTooltip}
@@ -1609,7 +1606,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               ) : null}
               {titleLineProviderStack}
             </div>
-            {metaLineEmpty ? null : (currentStepLine ?? metaLine)}
+            {metaLine}
           </div>
           {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
         </TooltipTrigger>

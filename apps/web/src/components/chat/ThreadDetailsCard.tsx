@@ -181,8 +181,13 @@ export function ThreadDetailsCard({
         padding="none"
       >
         {mode === "popover" ? (
-          <div data-density={density} data-thread-details-panel="popover">
+          <div
+            className="flex flex-col gap-2"
+            data-density={density}
+            data-thread-details-panel="popover"
+          >
             {card}
+            {footer}
           </div>
         ) : null}
       </PopoverPopup>
