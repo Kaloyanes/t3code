@@ -8,6 +8,7 @@ import { layerRemoteHttpClient } from "@t3tools/client-runtime/rpc";
 import * as Dpop from "../features/cloud/dpop";
 import * as ManagedRelayLayer from "../features/cloud/managedRelayLayer";
 import { resolveCloudPublicConfig } from "../features/cloud/publicConfig";
+import * as DevSpanLog from "../features/observability/devSpanLog";
 import * as Tracing from "../features/observability/tracing";
 import * as Persistence from "../persistence/layer";
 import { disposeOnFoundationReplace, type FoundationHotModule } from "./foundation-fast-refresh";
@@ -33,6 +34,7 @@ const layerRuntime = Layer.merge(
   ManagedRelayLayer.layer(configuredRelayUrl()),
   Socket.layerWebSocketConstructorGlobal,
 ).pipe(
+  Layer.provideMerge(DevSpanLog.layer),
   Layer.provideMerge(Dpop.layer),
   Layer.provideMerge(layerHttpClient),
   Layer.provideMerge(Tracing.layer.pipe(Layer.provide(layerHttpClient))),

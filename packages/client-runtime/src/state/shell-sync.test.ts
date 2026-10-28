@@ -29,6 +29,7 @@ import * as Persistence from "../platform/persistence.ts";
 import * as RpcSession from "../rpc/session.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import { type EnvironmentShellState, makeEnvironmentShellState } from "./shell.ts";
+import type { DeferredShellSnapshot } from "./shellPullRequests.ts";
 import * as ShellSnapshotLoader from "./shellSnapshotHttp.ts";
 import { v2Project, v2ShellSnapshot, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
 
@@ -120,6 +121,80 @@ const makePersistenceHarness = Effect.fn("test.makeShellPersistenceHarness")(fun
   });
   yield* send({ kind: "snapshot", snapshot: LIVE_SHELL_SNAPSHOT }, () => true);
   return { state, send };
+});
+
+const FAMILY_SNAPSHOT: OrchestrationV2ShellSnapshot = {
+  ...LIVE_SHELL_SNAPSHOT,
+  olderSettled: { before: "2026-01-01T00:00:00.000Z", asOfSequence: 1, counts: [] },
+};
+
+/** A server that omits idle subagents and older settled threads, so cursors can resume. */
+const makeFamilyHarness = Effect.fn("test.makeFamilyHarness")(function* (input: {
+  readonly cached: Option.Option<DeferredShellSnapshot>;
+  readonly initialVersion: string;
+}) {
+  const subscribeInputs = yield* Queue.unbounded<unknown>();
+  const saved = yield* Queue.unbounded<{ readonly verifiedServerVersion?: string }>();
+  const httpLoads = yield* Ref.make(0);
+  const familySession = (serverVersion: string): RpcSession.RpcSession => {
+    const events = Stream.make<ReadonlyArray<OrchestrationV2ShellStreamItem>>({
+      kind: "synchronized",
+    }).pipe(Stream.concat(Stream.never));
+    const client = {
+      [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: (subscribeInput: unknown) =>
+        Stream.unwrap(Queue.offer(subscribeInputs, subscribeInput).pipe(Effect.as(events))),
+    } as unknown as WsRpcProtocolClient;
+    return {
+      ...session(client),
+      initialConfig: Effect.succeed({
+        shellResumeCompletionMarker: true,
+        shellThreadFamilies: true,
+        shellOlderSettled: true,
+        environment: { serverVersion },
+      } as never),
+    };
+  };
+  const sessions = yield* SubscriptionRef.make(Option.some(familySession(input.initialVersion)));
+  const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+    target: TARGET,
+    state: yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE),
+    session: sessions,
+    prepared: yield* SubscriptionRef.make(Option.some(PREPARED)),
+    connect: Effect.void,
+    disconnect: Effect.void,
+    retryNow: Effect.void,
+  } satisfies EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
+  const cache = Persistence.EnvironmentCacheStore.of({
+    loadShell: () => Effect.succeed(input.cached),
+    saveShell: (_environmentId, _snapshot, verifiedServerVersion) =>
+      Queue.offer(saved, verifiedServerVersion === undefined ? {} : { verifiedServerVersion }),
+    loadThread: () => Effect.succeedNone,
+    saveThread: () => Effect.void,
+    removeThread: () => Effect.void,
+    loadServerConfig: () => Effect.succeedNone,
+    saveServerConfig: () => Effect.void,
+    loadVcsRefs: () => Effect.succeedNone,
+    saveVcsRefs: () => Effect.void,
+    removeVcsRefs: () => Effect.void,
+    clearVcsRefs: () => Effect.void,
+    clear: () => Effect.void,
+  });
+  const snapshotLoader = ShellSnapshotLoader.ShellSnapshotLoader.of({
+    load: () =>
+      Ref.update(httpLoads, (count) => count + 1).pipe(Effect.as(Option.some(FAMILY_SNAPSHOT))),
+  });
+  const shellState = yield* makeEnvironmentShellState().pipe(
+    Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+    Effect.provideService(Persistence.EnvironmentCacheStore, cache),
+    Effect.provideService(ShellSnapshotLoader.ShellSnapshotLoader, snapshotLoader),
+  );
+  const stateWhere = (predicate: (state: EnvironmentShellState) => boolean) =>
+    SubscriptionRef.changes(shellState).pipe(
+      Stream.filter(predicate),
+      Stream.runHead,
+      Effect.map(Option.getOrThrow),
+    );
+  return { sessions, familySession, subscribeInputs, saved, httpLoads, stateWhere };
 });
 
 describe("environment shell synchronization", () => {
@@ -723,6 +798,53 @@ describe("environment shell synchronization", () => {
         yield* stateWhere((state) => state.generation > loaded.generation),
       );
       expect(reset.removedAt.size).toBe(0);
+    }),
+  );
+
+  it.effect("resumes a verified snapshot on a replacement session of the same server build", () =>
+    Effect.gen(function* () {
+      const h = yield* makeFamilyHarness({ cached: Option.none(), initialVersion: "1.0.0" });
+
+      yield* Queue.take(h.subscribeInputs);
+      const first = yield* h.stateWhere((state) => state.status === "live");
+
+      yield* SubscriptionRef.set(h.sessions, Option.some(h.familySession("1.0.0")));
+      expect(yield* Queue.take(h.subscribeInputs)).toMatchObject({ afterSequence: 1 });
+      // On-demand reads key on generation, so a verified resume must still advance it.
+      yield* h.stateWhere(
+        (state) => state.status === "live" && state.generation > first.generation,
+      );
+      expect(yield* Ref.get(h.httpLoads)).toBe(1);
+
+      // A different build may shape rows differently, so it reloads the snapshot.
+      yield* SubscriptionRef.set(h.sessions, Option.some(h.familySession("1.1.0")));
+      yield* Queue.take(h.subscribeInputs);
+      expect(yield* Ref.get(h.httpLoads)).toBe(2);
+    }),
+  );
+
+  it.effect("resumes the cached snapshot on a cold start of the build that verified it", () =>
+    Effect.gen(function* () {
+      const cached = { ...FAMILY_SNAPSHOT, verifiedServerVersion: "1.0.0" };
+      const sameBuild = yield* makeFamilyHarness({
+        cached: Option.some(cached),
+        initialVersion: "1.0.0",
+      });
+      expect(yield* Queue.take(sameBuild.subscribeInputs)).toMatchObject({ afterSequence: 1 });
+      expect(yield* Ref.get(sameBuild.httpLoads)).toBe(0);
+
+      const updatedBuild = yield* makeFamilyHarness({
+        cached: Option.some(cached),
+        initialVersion: "1.1.0",
+      });
+      yield* Queue.take(updatedBuild.subscribeInputs);
+      expect(yield* Ref.get(updatedBuild.httpLoads)).toBe(1);
+      // The reloaded snapshot is saved under the build that served it.
+      yield* updatedBuild.stateWhere((state) => state.status === "live");
+      yield* TestClock.adjust("10 seconds");
+      expect(yield* Queue.take(updatedBuild.saved)).toMatchObject({
+        verifiedServerVersion: "1.1.0",
+      });
     }),
   );
 

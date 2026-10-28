@@ -24,6 +24,7 @@ import * as ConnectionCredentialStore from "../connection/credentialStore.ts";
 import { BearerConnectionTarget } from "../connection/model.ts";
 import * as ConnectionProfileStore from "../connection/profileStore.ts";
 import * as ConnectionResolver from "../connection/resolver.ts";
+import { CheckedEnvironmentDescriptors } from "../environment/descriptor.ts";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
 const ENDPOINT = {
@@ -382,6 +383,51 @@ describe("RemoteEnvironmentAuthorization", () => {
           String(url).endsWith("/api/auth/websocket-ticket/rpc"),
         ),
       ).toHaveLength(2);
+    }),
+  );
+
+  it.effect("trusts the descriptor its route check just fetched, but not another machine's", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({ responses: [websocketTicket("checked-ticket")] });
+      const authorize = (environmentId: EnvironmentId) =>
+        Effect.gen(function* () {
+          const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+          return yield* remote.authorizeBearer({
+            expectedEnvironmentId: ENVIRONMENT_ID,
+            httpBaseUrl: ENDPOINT.httpBaseUrl,
+            wsBaseUrl: ENDPOINT.wsBaseUrl,
+            bearerToken: "bearer-token",
+            connectionMethod: "direct",
+          });
+        }).pipe(
+          Effect.provideService(
+            CheckedEnvironmentDescriptors,
+            new Map([
+              [
+                ENDPOINT.httpBaseUrl,
+                {
+                  ...DESCRIPTOR,
+                  platform: { os: "linux" as const, arch: "x64" as const },
+                  environmentId,
+                },
+              ],
+            ]),
+          ),
+          Effect.provide(harness.layer),
+          Effect.result,
+        );
+
+      expect(yield* authorize(ENVIRONMENT_ID)).toMatchObject({
+        _tag: "Success",
+        success: { socketUrl: expect.stringContaining("wsTicket=checked-ticket") },
+      });
+      expect(yield* authorize(EnvironmentId.make("someone-else"))).toMatchObject({
+        _tag: "Failure",
+        failure: { _tag: "ConnectionBlockedError", reason: "configuration" },
+      });
+      expect(harness.fetch.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+        "/api/auth/websocket-ticket/rpc",
+      ]);
     }),
   );
 
