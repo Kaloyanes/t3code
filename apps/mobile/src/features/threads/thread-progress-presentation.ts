@@ -30,7 +30,8 @@ export function presentThreadProgress(
     title: current ?? "All steps done",
     count,
     note,
-    description: note === null ? count : `${count} · ${note}`,
+    description:
+      state === "stopped" ? `${count} · Stopped` : note === null ? count : `${count} · ${note}`,
     tone: RING_TONE[state],
     summary: `${state === "stopped" ? "Stopped · " : ""}${completed} of ${total}`,
     segments:

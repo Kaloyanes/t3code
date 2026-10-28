@@ -27,7 +27,12 @@ describe("thread progress presentation", () => {
     expect(presentThreadProgress(steps, "approval").description).toBe(
       "1/3 · Waiting for your approval",
     );
-    expect(presentThreadProgress(steps, "stopped").summary).toBe("Stopped · 1 of 3");
+    expect(presentThreadProgress(steps, "stopped")).toMatchObject({
+      title: "Write the fix",
+      count: "1/3",
+      description: "1/3 · Stopped",
+      summary: "Stopped · 1 of 3",
+    });
     expect(
       presentThreadProgress(steps, "active").segments?.map((segment) => segment.status),
     ).toEqual(["completed", "running", "pending"]);

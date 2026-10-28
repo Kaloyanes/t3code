@@ -635,7 +635,7 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
       startedAt: props.activeWorkStartedAt,
       title: progress.title,
       count: progress.count,
-      waitingNote: blocked ? "Waiting" : null,
+      waitingNote: blocked ? "Waiting" : threadProgress.state === "stopped" ? "Stopped" : null,
       fraction: progress.fraction,
       tone: progress.tone,
       accessibilityLabel: `${progress.title}, ${progress.description}. Shows every step`,
@@ -683,7 +683,7 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
     if (props.isCompacting && contentPresentationKind === "ready") {
       return { kind: "compacting" };
     }
-    if (progressStatus !== null) return progressStatus;
+    if (progressStatus !== null && threadProgress?.state !== "stopped") return progressStatus;
     if (props.activeWorkStartedAt !== null && contentPresentationKind === "ready") {
       return { kind: "working", startedAt: props.activeWorkStartedAt };
     }
@@ -745,7 +745,7 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
         accessibilityLabel: `${goal.title}: ${goal.objective}`,
       };
     }
-    return null;
+    return progressStatus;
   })();
   const showWorkingControl = floatingStatus !== null;
   const showFloatingStatus =
