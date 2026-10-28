@@ -1,9 +1,10 @@
-import type { DevicePlatform, EnvironmentId } from "@t3tools/contracts";
+import type { DevicePlatform, DeviceView, EnvironmentId } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { T, useGT } from "gt-react";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 
+import { updateClientSettings, useClientSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
 import { renewDeviceHubAccess, useDeviceHubAccess } from "~/state/device";
@@ -100,7 +101,8 @@ export function DeviceStreamView(props: {
   const model = deviceModel(props.platform, props.deviceName ?? "");
   const isDuo = model?.id === "iphone-duo";
   const gt = useGT();
-  const [presentation, setPresentation] = useState<"phone" | "flat">("phone");
+  const presentation = useClientSettings((settings) => settings.deviceView);
+  const setPresentation = (view: DeviceView) => void updateClientSettings({ deviceView: view });
   const [keyboardAttached, setKeyboardAttached] = useState(false);
   const cancelPhoneInputRef = useRef<(() => void) | null>(null);
   const cancelPhoneInput = () => cancelPhoneInputRef.current?.();
@@ -155,7 +157,7 @@ export function DeviceStreamView(props: {
     props.allowPhoneView &&
     (status === "streaming" || retainingFrame) &&
     props.visible &&
-    presentation === "phone" &&
+    presentation === "3d" &&
     !phoneUnavailable &&
     !mjpegUrl &&
     !props.axOverlay &&
@@ -301,7 +303,7 @@ export function DeviceStreamView(props: {
                     },
                   }
                 : null,
-            showPhone: () => setPresentation("phone"),
+            showPhone: () => setPresentation("3d"),
             showFlat: () => setPresentation("flat"),
             handle: client
               ? {
@@ -448,7 +450,7 @@ export function DeviceStreamView(props: {
               aria-pressed={!!showPhone}
               disabled={!!phoneUnavailableReason}
               title={phoneUnavailableReason ?? gt("Show 3D phone")}
-              onClick={() => setPresentation("phone")}
+              onClick={() => setPresentation("3d")}
             >
               3D
             </Button>
