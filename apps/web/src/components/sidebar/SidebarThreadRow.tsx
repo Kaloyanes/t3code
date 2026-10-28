@@ -1161,61 +1161,55 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     diff === null &&
     !isRemote &&
     runningTerminalIds.length === 0;
-  const metaLine = metaLineEmpty
-    ? null
-    : (currentStepLine ?? (
-        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
-          {thread.branch ? (
-            <>
-              <ThreadWorktreeIndicator thread={thread} />
-              <span className="flex min-w-0 flex-1">
-                <MiddleTruncate value={thread.branch} showTitle={false} />
-              </span>
-            </>
-          ) : showsScratchMachine ? (
-            <>
-              <EnvironmentMachineIcon
-                aria-hidden
-                kind={props.environmentMachine}
-                className="size-3 shrink-0"
-              />
-              <span className="min-w-0 flex-1 truncate">{props.scratchMachineLabel}</span>
-            </>
-          ) : (
-            <span className="flex-1" />
-          )}
-          {terminalStatusIcon}
-          {prBadge}
-          {diff ? (
-            <span className="shrink-0 font-mono">
-              <span className="text-diff-addition-foreground">
-                +{formatDiffCount(diff.insertions)}
-              </span>{" "}
-              <span className="text-diff-deletion-foreground">
-                −{formatDiffCount(diff.deletions)}
-              </span>
-            </span>
-          ) : null}
-          <span
+  const metaLine = metaLineEmpty ? null : (
+    <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+      {thread.branch ? (
+        <>
+          <ThreadWorktreeIndicator thread={thread} />
+          <span className="flex min-w-0 flex-1">
+            <MiddleTruncate value={thread.branch} showTitle={false} />
+          </span>
+        </>
+      ) : showsScratchMachine ? (
+        <>
+          <EnvironmentMachineIcon
             aria-hidden
-            className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
-          >
-            {isRemote && !showsScratchMachine ? (
-              <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
-                <EnvironmentMachineIcon
-                  aria-hidden
-                  kind={props.environmentMachine}
-                  className="size-3.5"
-                />
-              </span>
-            ) : null}
-            <SidebarProviderStack
-              thread={thread}
-              providerEntryByInstanceId={props.providerEntryByInstanceId}
+            kind={props.environmentMachine}
+            className="size-3 shrink-0"
+          />
+          <span className="min-w-0 flex-1 truncate">{props.scratchMachineLabel}</span>
+        </>
+      ) : (
+        <span className="flex-1" />
+      )}
+      {terminalStatusIcon}
+      {prBadge}
+      {diff ? (
+        <span className="shrink-0 font-mono">
+          <span className="text-diff-addition-foreground">+{formatDiffCount(diff.insertions)}</span>{" "}
+          <span className="text-diff-deletion-foreground">−{formatDiffCount(diff.deletions)}</span>
+        </span>
+      ) : null}
+      <span
+        aria-hidden
+        className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
+      >
+        {isRemote && !showsScratchMachine ? (
+          <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
+            <EnvironmentMachineIcon
+              aria-hidden
+              kind={props.environmentMachine}
+              className="size-3.5"
             />
           </span>
-        </div>
-      ));
+        ) : null}
+        <SidebarProviderStack
+          thread={thread}
+          providerEntryByInstanceId={props.providerEntryByInstanceId}
+        />
+      </span>
+    </div>
+  );
   const titleLineProviderStack = metaLineEmpty ? (
     <span aria-hidden className="inline-flex shrink-0">
       <SidebarProviderStack
@@ -1411,7 +1405,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               )}
               {props.sweepAction !== null ? dragDestination : null}
             </div>
-            {multiline ? metaLine : null}
+            {multiline && !metaLineEmpty ? (currentStepLine ?? metaLine) : null}
             {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
           </TooltipTrigger>
           {detailsTooltip}
@@ -1615,7 +1609,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               ) : null}
               {titleLineProviderStack}
             </div>
-            {metaLine}
+            {metaLineEmpty ? null : (currentStepLine ?? metaLine)}
           </div>
           {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
         </TooltipTrigger>
