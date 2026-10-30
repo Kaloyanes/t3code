@@ -1,5 +1,11 @@
 import { workspaceAreaProps } from "../../lib/workspaceFocus";
-import { useLayoutEffect, useState, type ReactNode, type RefObject } from "react";
+import {
+  useLayoutEffect,
+  useState,
+  type MouseEventHandler,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { ScrollArea } from "../ui/scroll-area";
 import { cn } from "../../lib/utils";
@@ -18,6 +24,8 @@ export function ThreadDetailsCard({
   anchor,
   handle,
   footer,
+  contentKey,
+  onContextMenu,
   children,
 }: {
   threadRef: ScopedThreadRef;
@@ -25,6 +33,9 @@ export function ThreadDetailsCard({
   handle: ReturnType<typeof PopoverCreateHandle>;
   /** A card under the details card, only while the card sits inline. */
   footer?: ReactNode;
+  /** Changes when the set of rendered items changes, so cached heights are measured again. */
+  contentKey: string;
+  onContextMenu?: MouseEventHandler<HTMLDivElement>;
   children: (density: "full" | "compact" | "essential") => ReactNode;
 }) {
   const detailsArea = workspaceAreaProps("details", 3, "Thread details");
@@ -39,7 +50,7 @@ export function ThreadDetailsCard({
   const popoverOpen = useRightPanelStore((state) =>
     selectThreadPanelOpen(state.threadPanelVisibilityByThreadKey, threadRef, "popover"),
   );
-  const measurementKey = `${threadRef.environmentId}:${threadRef.threadId}:${preferredPlacement?.width ?? "popup"}`;
+  const measurementKey = `${threadRef.environmentId}:${threadRef.threadId}:${preferredPlacement?.width ?? "popup"}:${contentKey}`;
   const [measurements, setMeasurements] = useState({
     key: measurementKey,
     heights: { full: 0, compact: 0 },
@@ -112,6 +123,7 @@ export function ThreadDetailsCard({
           "max-h-[min(calc(100dvh-6.5rem),calc(var(--available-height,100dvh)-1rem))]",
       )}
       style={placement ? { maxHeight: height } : undefined}
+      onContextMenu={onContextMenu}
       data-thread-details-card
     >
       <ScrollArea scrollFade className="min-h-0">
