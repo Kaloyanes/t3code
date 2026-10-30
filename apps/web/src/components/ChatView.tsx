@@ -1357,7 +1357,10 @@ export default function ChatView(props: ChatViewProps) {
     }
     return findLatestProposedPlan(serverProjection, activeLatestRun?.runId ?? null);
   })();
-  const todoSteps = findLatestTodoSteps(serverProjection, activeLatestRun?.runId ?? null);
+  const taskProgressEnabled = useClientSettings((settings) => settings.taskProgressEnabled);
+  const todoSteps = taskProgressEnabled
+    ? findLatestTodoSteps(serverProjection, activeLatestRun?.runId ?? null)
+    : null;
   const todoState = resolveTodoRunState({
     ...(todoSteps ? summarizeTodoSteps(todoSteps) : { completed: 0, total: 0 }),
     settled: latestRunSettled,

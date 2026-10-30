@@ -12,6 +12,7 @@ export const THREAD_DETAILS_ITEMS = [
   { id: "automations", label: "Automations", defaultVisible: true },
   { id: "lineage", label: "Lineage", defaultVisible: true },
   { id: "usage", label: "Usage", defaultVisible: false },
+  { id: "taskProgress", label: "Task progress", defaultVisible: true },
 ] as const;
 
 export type ThreadDetailsItemId = (typeof THREAD_DETAILS_ITEMS)[number]["id"];

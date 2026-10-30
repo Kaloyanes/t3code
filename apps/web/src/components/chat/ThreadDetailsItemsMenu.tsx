@@ -15,11 +15,14 @@ import {
 /** Menu body that shows and hides thread details items. The card's context menu and Settings share it. */
 export function ThreadDetailsItemsMenuItems() {
   const visibility = useClientSettings(resolveThreadDetailsVisibility);
+  const taskProgressEnabled = useClientSettings((settings) => settings.taskProgressEnabled);
   return (
     <>
       <MenuGroup>
         <MenuGroupLabel>Show in thread details</MenuGroupLabel>
-        {THREAD_DETAILS_ITEMS.map((item) => (
+        {THREAD_DETAILS_ITEMS.filter(
+          (item) => item.id !== "taskProgress" || taskProgressEnabled,
+        ).map((item) => (
           <MenuCheckboxItem
             key={item.id}
             checked={visibility[item.id]}

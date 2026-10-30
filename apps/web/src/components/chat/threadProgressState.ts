@@ -2,8 +2,18 @@ import type { ScopedThreadRef } from "@t3tools/contracts";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { create } from "zustand";
 
+import {
+  getClientSettings,
+  updateClientSettings,
+  useClientSettings,
+} from "../../hooks/useSettings";
 import { selectThreadPanelOpen, useRightPanelStore } from "../../rightPanelStore";
 import { useChatCanvas } from "./ChatCanvasContext";
+import {
+  resolveThreadDetailsVisibility,
+  setThreadDetailsItem,
+  THREAD_DETAILS_ITEMS,
+} from "./threadDetailsItems";
 
 interface ThreadProgressStore {
   readonly closedByThreadKey: Readonly<Record<string, true>>;
@@ -33,10 +43,19 @@ export function useThreadProgressCardVisible(threadRef: ScopedThreadRef): boolea
   const closed = useThreadProgressStore(
     (state) => state.closedByThreadKey[scopedThreadKey(threadRef)] === true,
   );
-  return detailsOpen && !closed;
+  const shownInDetails = useClientSettings(
+    (settings) => resolveThreadDetailsVisibility(settings).taskProgress,
+  );
+  return detailsOpen && shownInDetails && !closed;
 }
 
 export function showThreadProgressInDetails(threadRef: ScopedThreadRef, inline: boolean) {
+  const settings = getClientSettings();
+  if (!resolveThreadDetailsVisibility(settings).taskProgress) {
+    const item = THREAD_DETAILS_ITEMS.find((candidate) => candidate.id === "taskProgress");
+    if (item)
+      updateClientSettings({ threadDetailsItems: setThreadDetailsItem(settings, item, true) });
+  }
   useThreadProgressStore.getState().setClosed(threadRef, false);
   useRightPanelStore.getState().setThreadPanelOpen(threadRef, inline ? "inline" : "popover", true);
 }

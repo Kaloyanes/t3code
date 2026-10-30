@@ -4,6 +4,7 @@ import { discardComposerDraft } from "../../lib/discardComposerDraft";
 import { requestCustomSnooze } from "../CustomSnoozeDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { useDeadlinePassed } from "~/hooks/useDeadline";
+import { useClientSettings } from "~/hooks/useSettings";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/client-runtime/thread-pull-requests";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -728,11 +729,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     isActive: props.isActive,
     isSelected,
   });
+  const taskProgress = useClientSettings((settings) =>
+    settings.taskProgressEnabled ? (thread.todoProgress ?? null) : null,
+  );
   const todoProgress =
-    status === "working" && thread.goal?.status !== "active" ? (thread.todoProgress ?? null) : null;
+    status === "working" && thread.goal?.status !== "active" ? taskProgress : null;
   const blockedProgress =
-    (status === "input" || status === "approval") && thread.todoProgress
-      ? ` ${thread.todoProgress.completed}/${thread.todoProgress.total}`
+    (status === "input" || status === "approval") && taskProgress
+      ? ` ${taskProgress.completed}/${taskProgress.total}`
       : "";
   const topStatus =
     status === "working"

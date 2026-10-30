@@ -282,6 +282,12 @@ To choose what the thread details card shows, right-click the card or open
 shortcuts, such as Open in editor and project scripts. **Reset to default** brings
 back the standard rows.
 
+To follow the agent's task list while it works, turn on **Settings → Labs → Task
+progress** on web and desktop. The current step shows above the composer, under
+the thread details card when it is open, and as a ring beside working threads in
+the sidebar. Uncheck **Task progress** in the thread details menu to keep it above
+the composer only.
+
 ## Snooze until later
 
 To change the choices in the snooze menu, open **Settings → Threads → Snooze options**.

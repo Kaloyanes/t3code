@@ -18,6 +18,7 @@ export function LabsSettingsPanel() {
       <SettingsSection id="beta" title="Beta">
         <BoringSidebarRow />
         <BoringSidebarMultilineRow />
+        <TaskProgressRow />
         {/* Clerk is only mounted when this build has T3 Connect. */}
         {hasCloudPublicConfig() ? <GuestLinksRowWithSignIn /> : <GuestLinksRow />}
         <LinkedEnvironmentsRow />
@@ -63,6 +64,24 @@ function BoringSidebarMultilineRow() {
             updateSettings({ boringSidebarMultilineRows: Boolean(checked) })
           }
           aria-label="Two-line folder rows"
+        />
+      }
+    />
+  );
+}
+
+function TaskProgressRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("task-progress")}
+      description="Show the agent's task list as it works: a progress strip above the composer, a card under thread details, and a ring in the sidebar. Hide the card from the thread details menu."
+      control={
+        <Switch
+          checked={settings.taskProgressEnabled}
+          onCheckedChange={(checked) => updateSettings({ taskProgressEnabled: Boolean(checked) })}
+          aria-label="Task progress"
         />
       }
     />

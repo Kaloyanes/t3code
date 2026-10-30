@@ -456,6 +456,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["beta boring sidebar folder rows multiline branch pull request details"],
   },
   {
+    id: "task-progress",
+    title: "Task progress",
+    to: "/settings/labs",
+    searchTerms: ["beta todo plan steps checklist agent progress ring"],
+  },
+  {
     id: "guest-links",
     title: "Guest links",
     to: "/settings/labs",
