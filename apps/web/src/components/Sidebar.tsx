@@ -87,7 +87,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
-import { type AnyRouter, useRouter } from "@tanstack/react-router";
+import { type AnyRouter, useNavigate, useRouter } from "@tanstack/react-router";
 
 import {
   isAtomCommandInterrupted,
@@ -136,6 +136,11 @@ import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
+import {
+  issueSearchInProjectScope,
+  pullRequestSearchInProjectScope,
+  sidebarScopeProjectRefs,
+} from "../lib/sidebarProjectScope";
 import { useClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
@@ -922,6 +927,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   } = useSidebarLookups();
   const delegatedUnderParent = useDelegatedUnderParent();
   const router = useRouter();
+  const navigateFromIssues = useNavigate({ from: "/issues" });
+  const navigateFromPullRequests = useNavigate({ from: "/pull-requests" });
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
@@ -1081,6 +1088,23 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     clearSelection();
     setPersistedProjectScopeKeys(keys);
     scrollSidebarToTop(sidebarContentRef.current);
+    // The issues and pull request lists follow the filter while they show; it is not remembered.
+    const pathname = router.state.location.pathname;
+    const groups = scopeGroups.filter((project) => keys.includes(project.projectKey));
+    if (pathname === "/issues") {
+      void navigateFromIssues({
+        to: "/issues",
+        search: (previous) =>
+          issueSearchInProjectScope(previous, sidebarScopeProjectRefs(groups), projects),
+        replace: true,
+      });
+    } else if (pathname === "/pull-requests") {
+      void navigateFromPullRequests({
+        to: "/pull-requests",
+        search: (previous) => pullRequestSearchInProjectScope(previous, groups),
+        replace: true,
+      });
+    }
   };
   // A scope whose project is gone reads as all projects once every snapshot has
   // loaded. The stored keys are left alone, so the scope returns with its project.
@@ -1193,6 +1217,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const scopedProjectGroups = revealWidensScope ? [] : chosenProjectGroups;
   const scopedProjectRefs = scopedProjectGroups.flatMap((project) => project.memberProjectRefs);
   const scopedProjectKeys = revealWidensScope ? null : chosenScopeProjectKeys;
+  const newThreadProjectCount = scopedProjectGroups.length || scopeGroups.length;
   const threadSearch = useThreadSearch(
     connectedEnvironmentIds,
     threadSearchQuery,
@@ -2967,7 +2992,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (
       shouldCreateNewThreadInCurrentProject(
         event?.shiftKey ?? false,
-        scopeGroups.length,
+        newThreadProjectCount,
         projectGroups.length,
       )
     ) {
@@ -2977,6 +3002,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         activeDraftThread: newThreadContext.activeDraftThread,
         activeThread: newThreadContext.activeThread ?? undefined,
         defaultProjectRef: newThreadContext.defaultProjectRef,
+        projectScope: newThreadContext.projectScope,
         handleNewThread,
       }).then((started) => {
         if (!started) openCommandPalette({ open: "new-thread-in" });
@@ -2989,7 +3015,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
 
   const newThreadShortcutLabel =
     shortcutLabelForCommand(keybindings, "chat.new") ??
-    (shouldCreateNewThreadInCurrentProject(false, scopeGroups.length, projectGroups.length)
+    (shouldCreateNewThreadInCurrentProject(false, newThreadProjectCount, projectGroups.length)
       ? shortcutLabelForCommand(keybindings, "chat.newLocal")
       : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
@@ -3220,7 +3246,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               showNewThreadInProjectHint={
                 !shouldCreateNewThreadInCurrentProject(
                   false,
-                  scopeGroups.length,
+                  newThreadProjectCount,
                   projectGroups.length,
                 )
               }

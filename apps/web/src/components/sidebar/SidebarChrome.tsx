@@ -33,8 +33,7 @@ import {
   useSidebar,
 } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
-import { readIssueListPreferences } from "../issue/issueListPreferences";
+import { readIssueListSearch, readPullRequestListSearch } from "../../lib/sidebarProjectScope";
 import { IssueGlyph } from "../issue/issuePresentation";
 import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
 import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
@@ -244,12 +243,12 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     closeMobileSidebar();
     void navigate({
       to: "/pull-requests",
-      search: readPullRequestListPreferences(),
+      search: readPullRequestListSearch(),
     });
   };
   const handleIssuesClick = () => {
     closeMobileSidebar();
-    void navigate({ to: "/issues", search: readIssueListPreferences() });
+    void navigate({ to: "/issues", search: readIssueListSearch() });
   };
   const handleSettingsClick = () => {
     closeMobileSidebar();

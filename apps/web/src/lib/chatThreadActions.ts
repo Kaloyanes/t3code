@@ -34,7 +34,23 @@ export interface ChatThreadActionContext {
   readonly activeDraftThread: ThreadContextLike | null;
   readonly activeThread: ThreadContextLike | undefined;
   readonly defaultProjectRef: ScopedProjectRef | null;
+  /** The sidebar filter's projects; empty when it shows every project. */
+  readonly projectScope: ReadonlyArray<ScopedProjectRef>;
   readonly handleNewThread: NewThreadHandler;
+}
+
+export function isInProjectScope(
+  scope: ReadonlyArray<ScopedProjectRef>,
+  projectRef: ScopedProjectRef,
+): boolean {
+  return (
+    scope.length === 0 ||
+    scope.some(
+      (candidate) =>
+        candidate.environmentId === projectRef.environmentId &&
+        candidate.projectId === projectRef.projectId,
+    )
+  );
 }
 
 export function resolveNewDraftStartFromOrigin(input: {
@@ -86,19 +102,15 @@ export function draftModelSelectionApplies(
   return !threadStarted || draft?.modelSelectionExplicit === true;
 }
 
+/** The open thread's project, unless the sidebar filter has moved to other projects. */
 export function resolveThreadActionProjectRef(
   context: ChatThreadActionContext,
 ): ScopedProjectRef | null {
-  if (context.activeThread) {
-    return scopeProjectRef(context.activeThread.environmentId, context.activeThread.projectId);
-  }
-  if (context.activeDraftThread) {
-    return scopeProjectRef(
-      context.activeDraftThread.environmentId,
-      context.activeDraftThread.projectId,
-    );
-  }
-  return context.defaultProjectRef;
+  const open = context.activeThread ?? context.activeDraftThread;
+  const openProjectRef = open ? scopeProjectRef(open.environmentId, open.projectId) : null;
+  return openProjectRef && isInProjectScope(context.projectScope, openProjectRef)
+    ? openProjectRef
+    : context.defaultProjectRef;
 }
 
 export async function startNewThreadFromContext(

@@ -46,7 +46,7 @@ import {
   resolveThreadRouteTarget,
 } from "../threadRoutes";
 import { toastManager } from "./ui/toast";
-import { readIssueListPreferences } from "./issue/issueListPreferences";
+import { readIssueListSearch } from "../lib/sidebarProjectScope";
 
 const PREVIEW_FORWARDED_COMMANDS = [
   "workspace.focusNext",
@@ -147,7 +147,7 @@ export function ReopenClosedViewShortcut() {
         search: (previous) => pullRequestsSearchForRestore(previous, selected),
       });
     } else if (globalIssues) {
-      await navigate({ to: "/issues", search: readIssueListPreferences() });
+      await navigate({ to: "/issues", search: readIssueListSearch() });
     } else {
       const draftId = thread === null ? drafts.getDraftIdByRef(ref) : null;
       if (draftId !== null)

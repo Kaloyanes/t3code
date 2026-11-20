@@ -32,6 +32,7 @@ import {
 import {
   draftModelSelectionApplies,
   hasExplicitComposerModelSelection,
+  isInProjectScope,
   resolveNewDraftStartFromOrigin,
   resolveNewThreadModelSelectionOverride,
   threadHasStarted,
@@ -43,7 +44,9 @@ import { environmentSummaries } from "../state/presentation";
 import { environmentServerConfigsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
-import { getClientSettings } from "./useSettings";
+import { getClientSettings, useClientSettings } from "./useSettings";
+import { resolveSidebarScopeGroups, sidebarScopeProjectRefs } from "../lib/sidebarProjectScope";
+import { usePrimaryEnvironmentId } from "../state/environments";
 import { getLocalStorageItem, useLocalStorage } from "./useLocalStorage";
 import * as Schema from "effect/Schema";
 import { useAtomValue } from "@effect/atom-react";
@@ -465,16 +468,21 @@ export function resolveDefaultProjectRef(
   projectOrder: readonly string[],
   lastUsedProjectKey: string | null,
   fallbackReady = true,
+  projectScope: ReadonlyArray<ScopedProjectRef> = [],
 ): ScopedProjectRef | null {
-  const lastUsed = projects.find(
+  const candidates = projects.filter(
     (project) =>
       project.archivedAt == null &&
+      isInProjectScope(projectScope, scopeProjectRef(project.environmentId, project.id)),
+  );
+  const lastUsed = candidates.find(
+    (project) =>
       scopedProjectKey(scopeProjectRef(project.environmentId, project.id)) === lastUsedProjectKey,
   );
   if (lastUsed) return scopeProjectRef(lastUsed.environmentId, lastUsed.id);
   if (!fallbackReady) return null;
   const [defaultProject] = orderItemsByPreferredIds({
-    items: projects.filter((project) => project.archivedAt == null),
+    items: candidates,
     preferredIds: projectOrder,
     getId: getProjectOrderKey,
     getPreferenceIds: (project) => [
@@ -509,17 +517,30 @@ export function useHandleNewThread() {
   );
   const projects = useProjects();
   const handleNewThread = useNewThreadHandler();
+  const groupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const scopeKeys = useUiStateStore((store) => store.sidebarProjectScopeKeys);
+  const projectScope = sidebarScopeProjectRefs(
+    resolveSidebarScopeGroups({
+      projects,
+      settings: groupingSettings,
+      primaryEnvironmentId,
+      keys: scopeKeys,
+    }),
+  );
   const defaultProjectRef = resolveDefaultProjectRef(
     projects,
     projectOrder,
     lastUsedProjectKey,
     defaultProjectFallbackReady,
+    projectScope,
   );
 
   return {
     activeDraftThread,
     activeThread,
     defaultProjectRef,
+    projectScope,
     defaultProjectFallbackReady,
     handleNewThread,
     routeDraftId,

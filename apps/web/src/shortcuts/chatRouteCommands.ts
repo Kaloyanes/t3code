@@ -19,6 +19,7 @@ import {
 import { createScratchProjectActions } from "../hooks/useScratchProject";
 import { getClientSettings } from "../hooks/useSettings";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
+import { readSidebarScopeGroups, sidebarScopeProjectRefs } from "../lib/sidebarProjectScope";
 import { selectProjectGroupingSettings } from "@t3tools/client-runtime/state/project-grouping";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -83,6 +84,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         ? drafts.getDraftThread(target.threadRef)
         : drafts.getDraftSession(target.draftId)
       : null;
+    const projectScope = sidebarScopeProjectRefs(readSidebarScopeGroups());
     return {
       activeDraftThread,
       activeThread: activeThread ?? undefined,
@@ -91,7 +93,9 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         useUiStateStore.getState().projectOrder,
         lastUsedProjectKey,
         appAtomRegistry.get(defaultProjectFallbackReadyAtom(lastUsedProjectKey)),
+        projectScope,
       ),
+      projectScope,
       handleNewThread,
     };
   };
@@ -149,10 +153,11 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       },
       "chat.new": (event) => {
         const groups = readProjectGroups();
+        const scopedGroupCount = readSidebarScopeGroups().length;
         if (
           !shouldCreateNewThreadInCurrentProject(
             false,
-            groups.filter((group) => !group.archived).length,
+            scopedGroupCount || groups.filter((group) => !group.archived).length,
             groups.length,
           )
         ) {

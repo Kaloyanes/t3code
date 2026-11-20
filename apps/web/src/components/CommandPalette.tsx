@@ -287,8 +287,7 @@ import {
 } from "@t3tools/client-runtime/state/project-grouping";
 import { buildSidebarProjectPickerEntries } from "../sidebarProjectGrouping";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
-import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
-import { readIssueListPreferences } from "~/components/issue/issueListPreferences";
+import { readIssueListSearch, readPullRequestListSearch } from "~/lib/sidebarProjectScope";
 import { IssueGlyph } from "~/components/issue/issuePresentation";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import { threadRecentUse } from "@t3tools/shared/paletteSearch";
@@ -500,7 +499,7 @@ function OpenCommandPaletteDialog(props: {
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
+  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, projectScope } =
     useHandleNewThread();
   const paletteRouteTarget = useThreadRouteTarget();
   const projects = useProjects();
@@ -584,6 +583,7 @@ function OpenCommandPaletteDialog(props: {
     activeDraftThread,
     activeThread: activeThread ?? undefined,
     defaultProjectRef,
+    projectScope,
     handleNewThread,
   });
   const projectPickerEntries = buildSidebarProjectPickerEntries({
@@ -1364,6 +1364,7 @@ function OpenCommandPaletteDialog(props: {
             activeDraftThread,
             activeThread: activeThread ?? undefined,
             defaultProjectRef,
+            projectScope,
             handleNewThread,
           });
         },
@@ -1699,7 +1700,7 @@ function OpenCommandPaletteDialog(props: {
       title: gt("Open pull requests"),
       icon: <PullRequestGlyph.pullRequest className={ITEM_ICON_CLASS} />,
       run: async () => {
-        await navigate({ to: "/pull-requests", search: readPullRequestListPreferences() });
+        await navigate({ to: "/pull-requests", search: readPullRequestListSearch() });
       },
     });
   }
@@ -1716,7 +1717,7 @@ function OpenCommandPaletteDialog(props: {
       title: gt("Open issues"),
       icon: <IssueGlyph.issue className={ITEM_ICON_CLASS} />,
       run: async () => {
-        await navigate({ to: "/issues", search: readIssueListPreferences() });
+        await navigate({ to: "/issues", search: readIssueListSearch() });
       },
     });
   }
