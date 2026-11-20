@@ -68,6 +68,17 @@ const errorHead = (error: string) => {
     .join(" ");
 };
 
+const SimctlList = Schema.fromJsonString(
+  Schema.Struct({
+    devicetypes: Schema.Array(Schema.Struct({ identifier: Schema.String, name: Schema.String })),
+    devices: Schema.Record(
+      Schema.String,
+      Schema.Array(Schema.Struct({ udid: Schema.String, deviceTypeIdentifier: Schema.String })),
+    ),
+  }),
+);
+const decodeSimctlList = Schema.decodeUnknownEffect(SimctlList);
+
 const vendorPrefix = (platform: DevicePlatform) =>
   platform === "ios" ? "/vendor/serve-sim" : "/vendor/serve-emu";
 
@@ -169,6 +180,23 @@ export const makeDeviceHubOperations = (options: {
     );
   });
 
+  // The hub reports only the user's simulator name; the device type survives renames.
+  const listSimulatorModels = Effect.fn("DeviceHubOperations.listSimulatorModels")(
+    function* () {
+      const models = new Map<string, string>();
+      const result = yield* run("xcrun", ["simctl", "list", "-j", "devicetypes", "devices"]);
+      if (result.code !== 0) return models;
+      const { devicetypes, devices } = yield* decodeSimctlList(result.stdout);
+      const names = new Map(devicetypes.map((type) => [type.identifier, type.name]));
+      for (const device of Object.values(devices).flat()) {
+        const name = names.get(device.deviceTypeIdentifier);
+        if (name) models.set(device.udid, name);
+      }
+      return models;
+    },
+    Effect.orElseSucceed(() => new Map<string, string>()),
+  );
+
   const list: DeviceOperations["list"] = Effect.gen(function* () {
     const listed = yield* fetchJson(
       HttpClientRequest.get(`${origin}/api/devices`),
@@ -189,7 +217,15 @@ export const makeDeviceHubOperations = (options: {
       };
     }
     const hubList = listed.value;
-    const devices: Array<HostDevice> = [...hubList.simulators, ...hubList.emulators];
+    const simulatorModels =
+      hubList.simulators.length > 0 ? yield* listSimulatorModels() : new Map<string, string>();
+    const devices: Array<HostDevice> = [
+      ...hubList.simulators.map((device) => {
+        const model = simulatorModels.get(device.id);
+        return model ? { ...device, model } : device;
+      }),
+      ...hubList.emulators,
+    ];
     const androidAvailable = yield* options.platformAvailable("android");
     const warnings = hubList.errors?.filter(
       (error) =>
